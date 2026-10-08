@@ -2,6 +2,12 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.8.0 (7 October 2026)
+
+- Deleting is harder to do by accident. An empty track goes to the Trash straight away. A track with anything in it asks you to type **I UNDERSTAND** first. An event can only be deleted once its tracks are.
+- Right-click a marker, in the laps list or on the timeline, to delete it or to delete all markers.
+- Premiere's marker keys work in the editor: M adds a marker, ⇧M and ⇧⌘M go to the next and the previous, ⌥M clears the one you are on, and ⌥⌘M clears them all. They are in a new Markers menu too.
+
 ## v0.7.0 (7 October 2026)
 
 - **Add clips** on a track's page copies your recordings into the track. Choose them, or drop them onto the page. The originals stay where they are.

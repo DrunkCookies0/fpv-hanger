@@ -739,14 +739,17 @@ final class Model: ObservableObject {
         var id: String { folder }
     }
 
-    /// A track or an event waiting for a yes before it goes to the Trash.
-    struct PendingRemoval: Equatable {
+    /// A track or an event with something in it, waiting for its phrase to be typed before it goes to the Trash.
+    struct PendingRemoval: Equatable, Identifiable {
         let title: String
         let detail: String
         let tracks: [String]
-        /// The event's folder, when the whole event is going.
+        /// The event's folder, when it is the event that is going.
         var event: String?
+        var id: String { title }
     }
+    /// What has to be typed before something with anything in it is deleted.
+    static let removalPhrase = "I UNDERSTAND"
     @Published var pendingRemoval: PendingRemoval?
     /// Where the tracks and events sent to the Trash this session ended up.
     private(set) var trashed: [URL] = []
@@ -1346,35 +1349,69 @@ final class Model: ObservableObject {
         }
         func some(_ number: Int, _ one: String, _ many: String) -> String? { number == 0 ? nil : "\(number) \(number == 1 ? one : many)" }
         let parts = [some(clips, "clip", "clips"), some(runs, "marked run", "marked runs"), some(videos, "finished video", "finished videos")].compactMap { $0 }
-        guard !parts.isEmpty else { return "There is nothing in it yet." }
+        guard !parts.isEmpty else { return bytes > 0 ? "It has \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) of files in it." : "It has files in it." }
         let list = parts.count > 1 ? parts.dropLast().joined(separator: ", ") + " and " + parts.last! : parts[0]
         return "\(tracks.count == 1 ? "It holds" : "They hold") \(list), \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) in all."
     }
 
+    /// Whether a folder has anything in it worth losing: any file at all, however deep, that isn't hidden.
+    private func holdsAnything(_ folder: URL) -> Bool {
+        let files = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles])
+        while let file = files?.nextObject() as? URL {
+            let values = try? file.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            if values?.isDirectory != true || values?.isSymbolicLink == true { return true }
+        }
+        return false
+    }
+
+    /// Deletes a track. An empty one goes to the Trash straight away. One with anything in it waits
+    /// for its phrase to be typed.
     func askToDelete(track: String) {
         guard job == nil, editor == nil else { return }
-        pendingRemoval = PendingRemoval(
+        let pending = PendingRemoval(
             title: "Move \(Self.trackName(track)) to the Trash?",
             detail: summary(of: [track]) + " Everything in it goes too, your recordings included. You can put it back from the Trash.",
             tracks: [track], event: nil)
+        if holdsAnything(root.appendingPathComponent(track)) {
+            pendingRemoval = pending
+        } else {
+            remove(pending)
+        }
     }
 
+    /// Deletes an event, which has to be empty of tracks first. Like a track, it goes straight away
+    /// unless something else is in its folder.
     func askToDelete(event folder: String) {
-        guard job == nil, editor == nil, let event = events.first(where: { $0.folder == folder }) else { return }
+        guard job == nil, editor == nil, !folder.isEmpty, let event = events.first(where: { $0.folder == folder }) else { return }
         let name = details(ofEvent: folder).name
-        let title = name.isEmpty ? "these tracks" : name
-        let tracks = event.tracks.isEmpty ? "It has no tracks yet." : "That is \(event.tracks.map(Self.trackName).joined(separator: ", ")). " + summary(of: event.tracks)
-        pendingRemoval = PendingRemoval(
-            title: "Move \(title) to the Trash?",
-            detail: tracks + (event.tracks.isEmpty ? "" : " Everything in them goes too, your recordings included. You can put it back from the Trash."),
-            tracks: event.tracks, event: folder.isEmpty ? nil : folder)
+        guard event.tracks.isEmpty else {
+            notice = "\(name) still has \(event.tracks.count == 1 ? "a track" : "\(event.tracks.count) tracks") in it. Delete \(event.tracks.count == 1 ? "that" : "those") first, then the event."
+            return
+        }
+        let pending = PendingRemoval(
+            title: "Move \(name) to the Trash?",
+            detail: "It has no tracks, but there are other files in its folder, and they go too. You can put it back from the Trash.",
+            tracks: [], event: folder)
+        if holdsAnything(root.appendingPathComponent(folder)) {
+            pendingRemoval = pending
+        } else {
+            remove(pending)
+        }
+    }
+
+    /// Deletes what is waiting, if the phrase has been typed. Returns whether it went ahead.
+    @discardableResult
+    func confirmRemoval(typed: String) -> Bool {
+        guard let pending = pendingRemoval,
+              typed.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(Self.removalPhrase) == .orderedSame else { return false }
+        pendingRemoval = nil
+        remove(pending)
+        return true
     }
 
     /// Moves the track or event that was asked about to the Trash, with what the app remembers about
     /// it tucked inside in case it is ever put back.
-    func confirmRemoval() {
-        guard let pending = pendingRemoval else { return }
-        pendingRemoval = nil
+    private func remove(_ pending: PendingRemoval) {
         guard job == nil, editor == nil else { return }
         let manager = FileManager.default
         var remembered = store
@@ -1687,6 +1724,9 @@ struct RootView: View {
         ZStack {
             HStack(spacing: 0) {
                 Sidebar()
+                    .sheet(item: $model.pendingRemoval) { pending in
+                        RemovalSheet(pending: pending).environmentObject(model)
+                    }
                 ZStack(alignment: .bottom) {
                     Group {
                         switch model.page {
@@ -1721,12 +1761,46 @@ struct RootView: View {
             Text(pending.paths.map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: ", ")
                 + (pending.warning.map { "\n\n" + $0 } ?? ""))
         }
-        .alert(model.pendingRemoval?.title ?? "", isPresented: Binding(get: { model.pendingRemoval != nil }, set: { if !$0 { model.pendingRemoval = nil } }), presenting: model.pendingRemoval) { _ in
-            Button("Move to Trash", role: .destructive) { model.confirmRemoval() }
-            Button("Cancel", role: .cancel) { model.pendingRemoval = nil }
-        } message: { pending in
-            Text(pending.detail)
+    }
+}
+
+/// The question before a track or event with something in it goes to the Trash. The button only
+/// works once the phrase has been typed, so it can't be done by a stray click.
+struct RemovalSheet: View {
+    @EnvironmentObject var model: Model
+    let pending: Model.PendingRemoval
+    @State private var typed = ""
+    @FocusState private var typing: Bool
+
+    private var ready: Bool {
+        typed.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(Model.removalPhrase) == .orderedSame
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(pending.title, systemImage: "trash.fill").font(.system(size: 19, weight: .black)).foregroundStyle(Theme.warn)
+            Text(pending.detail).font(.system(size: 13)).foregroundStyle(.white.opacity(0.88)).fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 7) {
+                (Text("To go ahead, type ") + Text(Model.removalPhrase).fontWeight(.heavy).foregroundColor(Theme.accent) + Text(" below."))
+                    .font(.system(size: 13)).foregroundStyle(Theme.dim)
+                TextField("", text: $typed)
+                    .textFieldStyle(.plain).font(.system(size: 14, weight: .semibold))
+                    .padding(.horizontal, 12).padding(.vertical, 9)
+                    .background(Theme.raised, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .focused($typing)
+                    .onSubmit { model.confirmRemoval(typed: typed) }
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { model.pendingRemoval = nil }.buttonStyle(SecondaryButton()).keyboardShortcut(.cancelAction)
+                Button("Move to Trash") { model.confirmRemoval(typed: typed) }.buttonStyle(PrimaryButton()).disabled(!ready)
+            }
         }
+        .padding(24)
+        .frame(width: 500)
+        .background(Theme.background)
+        .preferredColorScheme(.dark)
+        .onAppear { typing = true }
     }
 }
 
@@ -1758,14 +1832,20 @@ struct Sidebar: View {
                             .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                             .contextMenu {
                                 Button("New track") { model.newTrack(in: event.folder) }
-                                Button("Move this event to the Trash…") { model.askToDelete(event: event.folder) }
+                                // Only an event with a folder of its own can go, and only once its tracks have.
+                                if !event.folder.isEmpty {
+                                    Button(event.tracks.isEmpty ? "Move this event to the Trash" : "Delete its tracks first to delete this event") {
+                                        model.askToDelete(event: event.folder)
+                                    }
+                                    .disabled(!event.tracks.isEmpty)
+                                }
                             }
                         ForEach(event.tracks, id: \.self) { track in
                             SidebarRow(title: Model.trackName(track), detail: model.summaries[track]?.best?.best?.seconds, selected: model.page == .track(track)) {
                                 model.page = .track(track)
                             }
                             .contextMenu {
-                                Button("Move \(Model.trackName(track)) to the Trash…") { model.askToDelete(track: track) }
+                                Button("Move \(Model.trackName(track)) to the Trash") { model.askToDelete(track: track) }
                             }
                         }
                         Button { model.newTrack(in: event.folder) } label: {
@@ -1966,7 +2046,8 @@ struct TrackView: View {
             Button("Refresh") { model.refresh() }.buttonStyle(SecondaryButton())
             Button("Open folder") { NSWorkspace.shared.open(model.root.appendingPathComponent(track)) }.buttonStyle(SecondaryButton())
             Button { model.askToDelete(track: track) } label: { Image(systemName: "trash") }
-                .buttonStyle(SecondaryButton()).disabled(model.job != nil).help("Move this track to the Trash…").accessibilityLabel("Move this track to the Trash")
+                .buttonStyle(SecondaryButton()).disabled(model.job != nil).accessibilityLabel("Move this track to the Trash")
+                .help("Move this track to the Trash. If there is anything in it, you are asked to type \(Model.removalPhrase) first.")
         }
     }
 
@@ -3090,6 +3171,13 @@ final class Editor: ObservableObject {
         markers.removeAll { $0 == which }
     }
 
+    /// Removes every marker. Undo brings them back.
+    func removeAllMarkers() {
+        guard phase == .ready, !markers.isEmpty else { return }
+        remember()
+        markers = []
+    }
+
     /// Moves the marker under the playhead one frame, taking the playhead with it.
     func nudgeMarker(by step: Int) {
         guard !playing, let index = markers.firstIndex(of: frame) else { return }
@@ -3293,8 +3381,21 @@ final class Editor: ObservableObject {
         case 125: jump(1)
         case 51, 117: removeMarker()
         default:
-            switch ((event.charactersIgnoringModifiers ?? "").lowercased(), command) {
-            case ("m", false): addMarker()
+            let key = (event.charactersIgnoringModifiers ?? "").lowercased()
+            if key == "m" {
+                // The marker keys are Premiere's: M adds, Shift-M and Shift-Command-M go to the next and
+                // the previous, Option-M clears the one here, Option-Command-M clears them all.
+                switch (command, flags.contains(.option), flags.contains(.shift)) {
+                case (false, false, false): addMarker()
+                case (false, false, true): jump(1)
+                case (true, false, true): jump(-1)
+                case (false, true, false): removeMarker()
+                case (true, true, false): removeAllMarkers()
+                default: return false
+                }
+                return true
+            }
+            switch (key, command) {
             case ("i", false): setVideoStart()
             case ("o", false): setVideoEnd()
             case ("z", true): undo()
@@ -3491,7 +3592,15 @@ struct EditorView: View {
             if editor.markers.contains(editor.frame) && !editor.playing {
                 Button("Remove marker") { editor.removeMarker() }.buttonStyle(SecondaryButton()).help("Remove the marker on this frame (⌫)")
             } else {
-                Button("Mark crossing") { editor.addMarker() }.buttonStyle(PrimaryButton()).help("Mark a gate crossing on this frame (M)")
+                Button { editor.addMarker() } label: {
+                    HStack(spacing: 7) {
+                        Text("Mark crossing")
+                        // The key that does the same, as in Premiere.
+                        Text("M").font(.system(size: 11, weight: .black)).padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Theme.onAccent.opacity(0.18), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    }
+                }
+                .buttonStyle(PrimaryButton()).help("Mark a gate crossing on this frame (M)")
             }
         }
     }
@@ -3534,7 +3643,16 @@ struct EditorView: View {
                                 editor.pause()
                                 editor.show(marker)
                             }
-                            .help("Go to this marker")
+                            .help("Go to this marker. Right-click to delete it.")
+                            .contextMenu {
+                                Button("Go to This Marker") {
+                                    editor.pause()
+                                    editor.show(marker)
+                                }
+                                Button("Delete This Marker") { editor.removeMarker(marker) }
+                                Divider()
+                                Button("Delete All Markers") { editor.removeAllMarkers() }
+                            }
                         }
                     }
                 }
@@ -3634,7 +3752,7 @@ struct EditorView: View {
                 EditorTimeline(editor: editor)
             }
             HStack(spacing: 6) {
-                Text("Space play  ·  ← → one frame  ·  ⇧ ten  ·  ⌥ one second  ·  M mark  ·  ⌫ remove  ·  ⌘← ⌘→ move marker  ·  ↑ ↓ markers  ·  I O video start, end  ·  ⌘Z undo")
+                Text("Space play  ·  ← → one frame  ·  ⇧ ten  ·  ⌥ one second  ·  M mark  ·  ⌫ remove  ·  ⌘← ⌘→ move marker  ·  ↑ ↓ markers  ·  I O video start, end  ·  ⌘Z undo  ·  right-click a marker for more")
                     .font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.faint).lineLimit(1).minimumScaleFactor(0.7)
                 Spacer(minLength: 8)
                 Button("Whole clip") { editor.showAll() }.buttonStyle(SecondaryButton())
@@ -3681,6 +3799,8 @@ struct EditorOverview: View {
 struct EditorTimeline: View {
     @ObservedObject var editor: Editor
     @State private var drag: Drag?
+    /// Where the pointer last was along the timeline, to know which marker a right-click is on.
+    @State private var pointer: CGFloat?
 
     enum Drag {
         case scrub, start, end
@@ -3703,8 +3823,32 @@ struct EditorTimeline: View {
                         if case .song = drag { editor.songMoved() }
                         drag = nil
                     })
+                .onContinuousHover { phase in
+                    if case .active(let point) = phase { pointer = point.x }
+                }
+                .contextMenu {
+                    if let marker = marker(under: pointer, width: geometry.size.width) {
+                        Button("Go to This Marker") {
+                            editor.pause()
+                            editor.show(marker)
+                        }
+                        Button("Delete This Marker") { editor.removeMarker(marker) }
+                        Divider()
+                    }
+                    Button("Add a Marker at the Playhead") { editor.addMarker() }
+                    Button("Delete All Markers") { editor.removeAllMarkers() }.disabled(editor.markers.isEmpty)
+                }
         }
         .frame(height: Self.height)
+    }
+
+    /// The marker within a few points of a place along the timeline, if there is one.
+    private func marker(under place: CGFloat?, width: CGFloat) -> Int? {
+        guard let place else { return nil }
+        let from = editor.visible.lowerBound, span = max(editor.visible.upperBound - from, 0.001)
+        func x(_ marker: Int) -> CGFloat { CGFloat((editor.seconds(marker) - from) / span) * width }
+        guard let nearest = editor.markers.min(by: { abs(x($0) - place) < abs(x($1) - place) }), abs(x(nearest) - place) <= 10 else { return nil }
+        return nearest
     }
 
     private func dragged(_ value: DragGesture.Value, width: CGFloat) {
@@ -4259,8 +4403,11 @@ struct EventFields: View {
                     .buttonStyle(SecondaryButton())
                     .help("These tracks sit loose in your library, from before there were events. This moves them into a folder named after the event, like any other. If their clips are in a Premiere project, Premiere will ask where they went.")
                 }
-                Button { model.askToDelete(event: event.folder) } label: { Image(systemName: "trash") }
-                    .buttonStyle(SecondaryButton()).disabled(model.job != nil).help("Move this event and its tracks to the Trash…").accessibilityLabel("Move this event to the Trash")
+                if !event.folder.isEmpty {
+                    Button { model.askToDelete(event: event.folder) } label: { Image(systemName: "trash") }
+                        .buttonStyle(SecondaryButton()).disabled(model.job != nil || !event.tracks.isEmpty).accessibilityLabel("Move this event to the Trash")
+                        .help(event.tracks.isEmpty ? "Move this event to the Trash." : "An event can only be deleted once its tracks are. Delete those first.")
+                }
             }
             HStack(spacing: 14) {
                 AnswerField(title: "Name on the timer", required: false, text: field(\.name)).frame(width: 260)
@@ -4278,7 +4425,7 @@ struct GuideView: View {
         ("Set up the track",
          "Tracks are grouped by event in the sidebar. Press New track under an event, or New event for another race or series. Press Add clips on the track's page and choose your recordings, or drop them onto the page. Then paste the track's Google Form link into Submission form on the track page."),
         ("Mark the laps",
-         "Press Mark laps on a clip. Play or drag to just before a start/finish gate crossing, step to the exact frame with the arrow keys, and press M. The first marker starts lap 1; each later one ends a lap. To fix one, go to it with the up and down arrows and move it a frame at a time with ⌘← and ⌘→. Save, and the run appears on the track page, ranked by its best 3 laps in a row."),
+         "Press Mark laps on a clip. Play or drag to just before a start/finish gate crossing, step to the exact frame with the arrow keys, and press M. The first marker starts lap 1; each later one ends a lap. To fix one, go to it with the up and down arrows and move it a frame at a time with ⌘← and ⌘→. Right-click a marker, in the list or on the timeline, to delete it or all of them. The marker keys are Premiere's: M, ⇧M and ⇧⌘M for the next and previous, ⌥M to clear one and ⌥⌘M to clear all, and they are in the Markers menu too. Save, and the run appears on the track page, ranked by its best 3 laps in a row."),
         ("Choose what the video shows",
          "A finished video runs from 3 seconds before lap 1 to 8 seconds after the finish. To change that, open Markers & music on the run and drag the ends of the Video bar, or press I and O on the frames where it should start and end."),
         ("Add music, if you want it",
@@ -4382,6 +4529,18 @@ struct DashboardApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1280, height: 840)
+        .commands {
+            // The keys are named in the titles and handled by the editor itself, not set as menu
+            // shortcuts: a menu shortcut of a bare letter could get in the way of typing that letter.
+            CommandMenu("Markers") {
+                Button("Add Marker   (M)") { model.editor?.addMarker() }
+                Button("Go to Next Marker   (⇧M or ↓)") { model.editor?.jump(1) }
+                Button("Go to Previous Marker   (⇧⌘M or ↑)") { model.editor?.jump(-1) }
+                Divider()
+                Button("Clear Current Marker   (⌥M or ⌫)") { model.editor?.removeMarker() }
+                Button("Clear All Markers   (⌥⌘M)") { model.editor?.removeAllMarkers() }
+            }
+        }
     }
 }
 
@@ -4512,9 +4671,9 @@ enum Main {
         exit(0)
     }
 
-    /// On the library given with --root, which it changes: sends the last event's first track to the
-    /// Trash and puts it back, then does the same with the whole event, printing what the app
-    /// remembers at each step. Only for a throwaway copy of a library.
+    /// On the library given with --root, which it changes: goes through deleting the last event the
+    /// way the rules allow (not while it has tracks, an empty track at once, a full one only with the
+    /// phrase), then puts everything back from the Trash, printing each step. Only for a throwaway copy.
     @MainActor
     static func checkDelete() {
         guard CommandLine.arguments.contains("--root") else {
@@ -4523,39 +4682,41 @@ enum Main {
         }
         NSApplication.shared.setActivationPolicy(.prohibited)
         let model = Model()
-        guard let event = model.events.last(where: { !$0.folder.isEmpty }), let track = event.tracks.first else {
-            print("That library needs an event with a track in it.")
+        guard let event = model.events.last(where: { !$0.folder.isEmpty }), !event.tracks.isEmpty else {
+            print("That library needs an event with tracks in it.")
             exit(1)
         }
         func show(_ title: String) {
             print("\(title): events \(model.events.map { "\($0.folder) \($0.tracks.map(Model.trackName))" }), remembered tracks \(model.store.tracks.keys.sorted()), remembered events \((model.store.events ?? [:]).keys.sorted())")
         }
-        func putBack(_ name: String) {
-            guard let landed = model.trashed.last else { return print("  nothing went to the Trash") }
-            do {
-                try FileManager.default.moveItem(at: landed, to: model.root.appendingPathComponent(name))
-                model.refresh()
-            } catch {
-                print("  couldn't put it back: \(error.localizedDescription)")
+        show("at the start")
+        model.askToDelete(event: event.folder)
+        print("the event, while it has tracks: \(model.pendingRemoval == nil ? "refused" : "ASKED") — \(model.notice ?? "nothing said")")
+        for track in event.tracks {
+            model.notice = nil
+            model.askToDelete(track: track)
+            if let pending = model.pendingRemoval {
+                print("\(Model.trackName(track)) has things in it, so it asks: \(pending.title) \(pending.detail)")
+                print("  with nothing typed: \(model.confirmRemoval(typed: "") ? "DELETED" : "still there")")
+                print("  with \"yes\" typed: \(model.confirmRemoval(typed: "yes") ? "DELETED" : "still there")")
+                print("  with \"i understand\" typed: \(model.confirmRemoval(typed: " i understand ") ? "deleted" : "STILL THERE") — \(model.notice ?? "")")
+            } else {
+                print("\(Model.trackName(track)) is empty, so it went at once — \(model.notice ?? "nothing said")")
             }
         }
-        show("at the start")
-        model.askToDelete(track: track)
-        print("asks: \(model.pendingRemoval?.title ?? "nothing") \(model.pendingRemoval?.detail ?? "")")
-        model.confirmRemoval()
-        print("says: \(model.notice ?? "nothing")")
-        show("after deleting \(Model.trackName(track))")
-        putBack(track)
-        show("after putting it back")
-        print("its form link: \(model.state(track).formURL)")
+        show("after the tracks")
+        model.notice = nil
         model.askToDelete(event: event.folder)
-        print("asks: \(model.pendingRemoval?.title ?? "nothing") \(model.pendingRemoval?.detail ?? "")")
-        model.confirmRemoval()
-        print("says: \(model.notice ?? "nothing")")
-        show("after deleting the event")
-        putBack(event.folder)
-        show("after putting it back")
-        print("its details: \(model.details(ofEvent: event.folder)); the track's form link: \(model.state(track).formURL)")
+        print("the event, now empty: \(model.pendingRemoval == nil ? "went at once" : "asked") — \(model.notice ?? "nothing said")")
+        show("after the event")
+        // Put it all back: the event's folder first, then each track into it.
+        let manager = FileManager.default
+        var landed = model.trashed
+        if let folder = landed.popLast() { try? manager.moveItem(at: folder, to: model.root.appendingPathComponent(event.folder)) }
+        for (track, place) in zip(event.tracks, landed) { try? manager.moveItem(at: place, to: model.root.appendingPathComponent(track)) }
+        model.refresh()
+        show("after putting everything back")
+        print("the event's details: \(model.details(ofEvent: event.folder)); form links: \(event.tracks.map { model.state($0).formURL })")
         exit(0)
     }
 
@@ -4702,6 +4863,34 @@ enum Main {
         print(wrong == 0 ? "frame seeking: every frame asked for was the frame shown" : "frame seeking: \(wrong) wrong")
         print("laps: \(editor.laps.map(EditorFormat.lap).joined(separator: "  "))   best \(editor.window): \(editor.best.map { EditorFormat.lap($0.total) } ?? "none")")
         print("marker file:\n\(editor.markerFile())", terminator: "")
+        // The marker keys, as the editor receives them.
+        func press(_ modifiers: NSEvent.ModifierFlags = []) {
+            if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0, windowNumber: 0, context: nil,
+                                            characters: "m", charactersIgnoringModifiers: modifiers.contains(.shift) ? "M" : "m", isARepeat: false, keyCode: 46) {
+                _ = editor.handle(event)
+            }
+        }
+        let before = editor.markers
+        _ = shown { editor.show(30) }
+        press()
+        let added = editor.markers.contains(30)
+        press([.shift])
+        let next = editor.frame == (before.first { $0 > 30 } ?? 30)
+        press([.command, .shift])
+        let previous = editor.frame == 30
+        press([.option])
+        let cleared = !editor.markers.contains(30)
+        press([.option, .command])
+        let none = editor.markers.isEmpty
+        editor.undo()
+        let back = editor.markers == before
+        let keys = [("M adds", added), ("⇧M goes to the next", next), ("⇧⌘M goes to the previous", previous), ("⌥M clears the one here", cleared),
+                    ("⌥⌘M clears all", none), ("undo brings them back", back)]
+        for (name, worked) in keys where !worked {
+            wrong += 1
+            print("  marker key: \(name) DIDN'T")
+        }
+        print(keys.allSatisfy(\.1) ? "marker keys: M, ⇧M, ⇧⌘M, ⌥M, ⌥⌘M and undo all did what they should" : "marker keys: some wrong")
         if let name = editor.songs.first {
             editor.choose(song: name)
             let limit = Date().addingTimeInterval(30)
@@ -4737,6 +4926,14 @@ enum Main {
         if page == "whatsnew" {
             size = NSSize(width: 720, height: 560)
             content = AnyView(NoteSheet(note: .whatsNew(since: nil)).environmentObject(model))
+        }
+        if page == "delete", let track = model.tracks.first {
+            // The question a track with something in it gets, without deleting anything.
+            model.askToDelete(track: track)
+            if let pending = model.pendingRemoval {
+                size = NSSize(width: 500, height: 300)
+                content = AnyView(RemovalSheet(pending: pending).environmentObject(model))
+            }
         }
         if page == "submit", let track = model.tracks.first, let run = model.summaries[track]?.best {
             let address = model.state(track).formURL
