@@ -12,7 +12,7 @@ import CoreImage
 import Foundation
 
 /// The same number as the VERSION file and the app. package.sh refuses to package if they differ.
-let toolVersion = "0.3.0"
+let toolVersion = "0.3.1"
 
 // MARK: - Utilities
 

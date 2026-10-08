@@ -325,7 +325,7 @@ enum Library {
     }
 }
 
-/// One packaged version of the app, as latest.json describes it.
+/// One packaged version of the app, as the latest.json attached to its release describes it.
 struct Release: Codable, Equatable {
     let version: String
     /// The archive's name. It sits beside latest.json.
@@ -342,14 +342,15 @@ enum UpdateState: Equatable {
 }
 
 enum Updates {
-    /// The app's repository on GitHub. Packaged versions are published on its "downloads" branch.
-    static let page = URL(string: "https://github.com/DrunkCookies0/fpv-hanger")!
+    /// Where packaged versions are published: the Releases page of the app's repository on GitHub.
+    static let page = URL(string: "https://github.com/DrunkCookies0/fpv-hanger/releases")!
 
     /// The folder latest.json and the archives are read from. `--update-feed <URL>` points it somewhere else, for testing.
     static var feed: URL {
         let arguments = CommandLine.arguments
         if let index = arguments.firstIndex(of: "--update-feed"), index + 1 < arguments.count, let url = URL(string: arguments[index + 1]) { return url }
-        return URL(string: "https://raw.githubusercontent.com/DrunkCookies0/fpv-hanger/downloads/")!
+        // GitHub sends this address on to the files attached to whichever release is the newest.
+        return URL(string: "https://github.com/DrunkCookies0/fpv-hanger/releases/latest/download/")!
     }
 
     /// Reads which packaged version is the newest.

@@ -60,7 +60,7 @@ UPDATES
   settings shows an Update button that downloads it and swaps it in. The previous
   copy goes to the Trash.
 
-  Versions and what changed: {PAGE}
+  Versions and what changed: {PAGE}/releases
 
 
 COMING SOON

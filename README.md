@@ -4,9 +4,9 @@ A Mac app for FPV pilots. It turns a goggle recording into lap times, a timer ov
 
 ## Download
 
-**[Get the latest version](https://github.com/DrunkCookies0/fpv-hanger/tree/downloads)**. It needs macOS 14 or newer.
+**[Get the latest version](https://github.com/DrunkCookies0/fpv-hanger/releases/latest)**. It needs macOS 14 or newer.
 
-The app is not from the App Store, so macOS asks before opening it the first time. The read-me in the download says how to let it through. After that the app updates itself from this repository.
+The app is not from the App Store, so macOS asks before opening it the first time. The read-me in the download says how to let it through. After that the app updates itself from this repository's releases.
 
 ## What it does
 
@@ -41,7 +41,8 @@ That writes `FPV Hangar.app` into this folder, built for the Mac you are on, wit
 | `Lap Timer/laptimer.swift` | The lap timer: a command-line tool that does all the timing and rendering. `./laptimer --help` lists its options |
 | `VERSION` | The version number, used by everything |
 | `CHANGELOG.md` | What changed in each version |
-| `package.sh`, `publish.sh` | Make a release and send it out |
+| `package.sh`, `publish.sh` | Package the app, and start a release |
+| `.github/workflows/release.yml` | Builds and publishes a release when a version tag is pushed |
 
 A copy of the app that sits in a folder with a `dashboard.json` or a `Lap Timer` folder keeps its tracks in that folder. Any other copy keeps them in `~/Movies/FPV Hangar`.
 
@@ -56,5 +57,7 @@ A copy of the app that sits in a folder with a `dashboard.json` or a `Lap Timer`
 Versions are `0.MINOR.PATCH`: the middle number for something new, the last for fixes.
 
 1. Put the new number in `VERSION` and in `toolVersion` at the top of `Lap Timer/laptimer.swift`, and add an entry to `CHANGELOG.md`.
-2. `./package.sh` builds the app for Apple silicon and Intel and writes `Releases/FPV-Hangar-v<version>.zip` and `Releases/latest.json`.
-3. `./publish.sh` pushes `Releases/` to the `downloads` branch. Copies of the app read `latest.json` from that branch and offer the update.
+2. Commit, then `./publish.sh`. It pushes `main` and a `v<version>` tag.
+3. The tag starts the release workflow, which runs `./package.sh` on GitHub (building the app for Apple silicon and Intel) and publishes a release with the zip and `latest.json` attached. Copies of the app read `latest.json` from the newest release and offer the update.
+
+`./package.sh` also works on your own Mac, to try a package before releasing it. It writes into `Releases/`, which is not part of the repository.

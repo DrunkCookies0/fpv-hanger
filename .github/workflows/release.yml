@@ -1,0 +1,37 @@
+# Publishes a release when a version tag (v0.3.1, say) is pushed: packages the app the same way
+# package.sh does on a Mac, and attaches the zip and latest.json, which is what copies of the app read
+# to find a newer version.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package
+        shell: zsh {0}
+        run: |
+          [[ "$GITHUB_REF_NAME" == "v$(< VERSION)" ]] || { echo "::error::The tag is $GITHUB_REF_NAME but VERSION says $(< VERSION)."; exit 1 }
+          swiftc --version
+          ./package.sh > package.log 2>&1 || {
+            # Show the end of the log as the error, so it can be read without opening the run.
+            echo "::error::$(tail -n 40 package.log | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+            exit 1
+          }
+          cat package.log
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(cat VERSION)"
+          gh release create "v$VERSION" "Releases/FPV-Hangar-v$VERSION.zip" Releases/latest.json \
+            --title "FPV Hangar v$VERSION" --notes-file Releases/notes.md
