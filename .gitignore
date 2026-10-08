@@ -1,0 +1,16 @@
+# This folder also holds footage, finished videos and personal settings, so everything is left out
+# unless it is listed here.
+/*
+!/.gitignore
+!/README.md
+!/CHANGELOG.md
+!/VERSION
+!/package.sh
+!/publish.sh
+!/Dashboard/
+!/Lap Timer/
+
+# Built from the source, and one pilot's own details.
+/Lap Timer/laptimer
+/Lap Timer/settings.json
+.DS_Store
