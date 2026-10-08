@@ -33,6 +33,8 @@ for binary in "$APP/Contents/MacOS/FPV Hangar" "$APP/Contents/MacOS/laptimer"; d
 done
 codesign --verify --deep --strict "$APP"
 [[ "$("$APP/Contents/MacOS/laptimer" --version)" == "laptimer $VERSION" ]] || { echo "The lap timer inside the app isn't v$VERSION."; exit 1 }
+# It still hears a song's tempo, beat and drops the way it should.
+"$APP/Contents/MacOS/laptimer" --check-listening || { echo "The lap timer no longer hears its test songs right."; exit 1 }
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" == "$VERSION" ]] || { echo "The app isn't v$VERSION."; exit 1 }
 
 mkdir -p Releases

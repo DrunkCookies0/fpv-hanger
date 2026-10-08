@@ -5,6 +5,11 @@
 #   ARCHS="arm64 x86_64" ./build.sh     for Apple silicon and Intel, which is how package.sh builds it
 #   APP_DIR=<folder> ./build.sh         writes the app into another folder
 #   APP_ID=<identifier> ./build.sh      a copy with its own identifier, to try things without touching the real one
+#   APP_NAME=<name> ./build.sh          what that copy is called
+#
+# A test copy, to try a change before it is released, built beside the real app:
+#   APP_NAME="FPV Hangar Test" APP_ID=local.fpvhangar.test ./build.sh
+# A copy under any identifier but the real one says TEST COPY in its sidebar and leaves updates alone.
 set -e
 cd "${0:A:h}"
 VERSION="$(< ../VERSION)"

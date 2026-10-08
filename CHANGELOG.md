@@ -2,6 +2,21 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.10.0 (8 October 2026)
+
+- A new first screen. FPV Hangar now opens on a hangar of tools, grouped by what they are for. The tool you know is **Video Creator**, under RaceGOW, and **Hangar** at its top left brings you back. Tools that aren't built yet say Coming soon.
+- Set up in two questions. A new copy asks your pilot name and whether you fly RaceGOW6. If you do, it finds your registration number on the series' own pilot list, by your name or your number. **Ask me the setup questions** in Pilot & settings runs it again.
+- RaceGOW6's tracks fill themselves in. If you fly the season, each track appears on the day it opens, with its deadline, sponsor and designer from the series' schedule, and its entry form as soon as racegow.com posts it. The next track to open shows in the list with its date. Every track has a form of its own, so there is nothing to paste.
+- Submitting starts with a smaller window that checks your answers. The app fills in your handle, registration number, lap time and email. The questions it can't know are listed one line each with the answer that will go in, kept from your last entry. Look them over, press **Change** on any that differ for this track, and a question the form has never asked you before opens up by itself.
+- It keeps to the middle of a wide screen. On an ultrawide monitor the app no longer sits on the left with empty space to the right, and the marker editor stays as wide as its picture needs.
+- Fixed: a brand-new library showed no event, so there was nowhere to put a first track. The setup questions now make the RaceGOW6 event if you fly it, and the Video Creator offers **New event** when there is none.
+- The app listens to your song. Pick one in Markers & music and it works out the tempo and finds the drops, the moments the song suddenly gets bigger. Each drop has an **On the start gate** button: press it and the song slides so the drop lands as you cross the gate. Then press Space to hear it.
+- A sound wave window. Double-click the song on the timeline, or press **Sound wave**, to see it big: how loud it is in yellow, its bass in red, the beat as thin lines, and the drops and the gates marked. Play the song by itself with Space, click to move along it, and double-click or press **M** to mark it. Drag a mark to move it. **Put this on the start gate** works on any moment you pick.
+- Marks and the playhead in that window catch on the beat, so a mark lands exactly on a drum. Untick **Catch on the beat** to place them freely. Scroll to move along the song, and pinch, or scroll with Option held, to zoom.
+- The song on the timeline shows its bass in red too, so a drop is something you can see. Its drops are drawn on it and catch on a lap marker when you drag the song, the way your own marks do.
+- Music you set to come in at a point now comes in at once in the finished video, not faded in, so a drop put there lands whole. The video now matches what the editor plays.
+- Clicking the song without moving it no longer counts as a change to undo.
+
 ## v0.9.0 (7 October 2026)
 
 - The music has ends you can drag, like a clip in Premiere. Drag the white ends of the song on the timeline to choose where the music comes in and where it stops. **Music in** and **Music out** do the same from the playhead.

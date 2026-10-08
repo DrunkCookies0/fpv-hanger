@@ -12,7 +12,7 @@ import CoreImage
 import Foundation
 
 /// The same number as the VERSION file and the app. package.sh refuses to package if they differ.
-let toolVersion = "0.9.0"
+let toolVersion = "0.10.0"
 
 // MARK: - Utilities
 
@@ -1329,12 +1329,17 @@ func writeFinishedVideo(shape: VideoShape, clip: ReadableClip, race: Race, from 
     var soundInput: AVAssetWriterInput?
     var soundShift = CMTime.zero
     if let sound {
-        let music = AVURLAsset(url: sound.url)
+        // Exact timing, so the song is cut where the app's marker editor showed it.
+        let music = AVURLAsset(url: sound.url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
         // Music time and this file's time differ by a fixed amount.
         let shift = sound.clipTimeAtStart - clip.offset
         var from = max(0, first.seconds - shift)
         // The music can be told to come in later than the video starts, and to stop before it ends.
-        if let comesIn = options.musicIn { from = max(from, comesIn - sound.clipTimeAtStart) }
+        var comesInWhereSet = false
+        if let comesIn = options.musicIn, comesIn - sound.clipTimeAtStart > from {
+            from = comesIn - sound.clipTimeAtStart
+            comesInWhereSet = true
+        }
         if let loaded = loadSound(of: music), let musicReader = try? AVAssetReader(asset: music) {
             var to = min(loaded.duration, last.seconds - shift)
             if let stops = options.musicOut { to = min(to, stops - sound.clipTimeAtStart) }
@@ -1346,7 +1351,9 @@ func writeFinishedVideo(shape: VideoShape, clip: ReadableClip, race: Race, from 
                     AVLinearPCMIsBigEndianKey: false, AVLinearPCMIsNonInterleaved: false, AVSampleRateKey: 48000, AVNumberOfChannelsKey: 2,
                 ])
                 let levels = AVMutableAudioMixInputParameters(track: loaded.track)
-                if from > 0.05 { levels.setVolumeRamp(fromStartVolume: 0, toEndVolume: 1, timeRange: CMTimeRange(start: at(from), duration: at(0.4))) }
+                // A song joined part-way through is eased in. Where the pilot set it to come in, it comes in
+                // at once, with only enough of a ramp not to click: a drop put there has to land whole.
+                if from > 0.05 { levels.setVolumeRamp(fromStartVolume: 0, toEndVolume: 1, timeRange: CMTimeRange(start: at(from), duration: at(comesInWhereSet ? 0.01 : 0.4))) }
                 let fade = min(1, (to - from) / 2)
                 levels.setVolumeRamp(fromStartVolume: 1, toEndVolume: 0, timeRange: CMTimeRange(start: at(to - fade), duration: at(fade)))
                 let mix = AVMutableAudioMix()
@@ -1499,6 +1506,577 @@ func writeFinishedVideo(shape: VideoShape, clip: ReadableClip, race: Race, from 
     return problem
 }
 
+// MARK: - Listening to a song
+
+/// What a song holds that a video can be cut to.
+struct SongReport {
+    var length = 0.0
+    /// Beats a minute, when the song has a pulse.
+    var tempo: Double?
+    /// Where the beat falls, when it keeps steady time all the way through: the first beat, and the
+    /// gap from each one to the next, in seconds.
+    var firstBeat: Double?
+    var beatLength: Double?
+    /// Where the song suddenly gets bigger, such as a drop: how far in, and how much it stands out from 0 to 1.
+    var spots: [(time: Double, strength: Double)] = []
+}
+
+/// A sound file as one channel of samples, `rate` of them a second, with the loudest at 1.
+func soundSamples(of url: URL, rate: Double) -> [Float]? {
+    // Exact timing, so a moment found here is the same moment when the file is played or cut.
+    let asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+    guard let sound = loadSound(of: asset), let reader = try? AVAssetReader(asset: asset) else { return nil }
+    let output = AVAssetReaderAudioMixOutput(audioTracks: [sound.track], audioSettings: [
+        AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMBitDepthKey: 32, AVLinearPCMIsFloatKey: true,
+        AVLinearPCMIsBigEndianKey: false, AVLinearPCMIsNonInterleaved: false, AVSampleRateKey: rate, AVNumberOfChannelsKey: 1,
+    ])
+    guard reader.canAdd(output) else { return nil }
+    reader.add(output)
+    guard reader.startReading() else { return nil }
+    var samples: [Float] = []
+    // A song is a few minutes long. Of anything much longer, such as a whole mix, the first 20 minutes are heard.
+    let most = Int(1200 * rate)
+    samples.reserveCapacity(min(most, Int(sound.duration * rate)) + 8192)
+    var started = false
+    while samples.count < most, let buffer = output.copyNextSampleBuffer() {
+        guard let block = CMSampleBufferGetDataBuffer(buffer) else { continue }
+        if !started {
+            started = true
+            // Keep to the file's own clock: anything before the first sound it hands over is silence.
+            let lead = CMSampleBufferGetPresentationTimeStamp(buffer).seconds
+            if lead > 0, lead < 10 { samples.append(contentsOf: [Float](repeating: 0, count: Int((lead * rate).rounded()))) }
+        }
+        var chunk = [Float](repeating: 0, count: CMBlockBufferGetDataLength(block) / 4)
+        let copied = chunk.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: $0.count, destination: $0.baseAddress!) }
+        if copied == noErr { samples.append(contentsOf: chunk) }
+    }
+    guard reader.status != .failed, !samples.isEmpty else { return nil }
+    var top: Float = 0
+    vDSP_maxmgv(samples, 1, &top, vDSP_Length(samples.count))
+    if top > 0 {
+        var scale = 1 / top
+        vDSP_vsmul(samples, 1, &scale, &samples, 1, vDSP_Length(samples.count))
+    }
+    return samples
+}
+
+/// The value a list of readings would have at a place between two of them.
+private func reading(_ values: [Float], at place: Double) -> Float {
+    guard place >= 0, place < Double(values.count - 1) else { return 0 }
+    let whole = Int(place), part = Float(place - Double(whole))
+    return values[whole] * (1 - part) + values[whole + 1] * part
+}
+
+/// Each reading less the average of those around it, or nothing where that is below zero: what stands out locally.
+private func standingOut(_ values: [Float], over reach: Int) -> [Float] {
+    var sums = [Double](repeating: 0, count: values.count + 1)
+    for index in values.indices { sums[index + 1] = sums[index] + Double(values[index]) }
+    return values.indices.map { index in
+        let first = max(0, index - reach), last = min(values.count, index + reach + 1)
+        return max(0, values[index] - Float((sums[last] - sums[first]) / Double(last - first)))
+    }
+}
+
+/// The moment between two times at which the sound steps up the most: where a drum or a bass note
+/// really starts. `nil` when nothing in between does.
+func attack(in samples: [Float], rate: Double, from earliest: Double, to latest: Double) -> Double? {
+    // The energy in the 30 thousandths of a second after a moment, less that in the 30 before it. It
+    // is greatest exactly where a sound begins. Shorter than that and a single cycle of a bass note
+    // would pass for a start.
+    let width = Int(0.030 * rate)
+    let first = max(width, Int(earliest * rate)), last = min(samples.count - width, Int(latest * rate))
+    guard last > first else { return nil }
+    var before: Float = 0, after: Float = 0
+    for index in (first - width)..<first { before += samples[index] * samples[index] }
+    for index in first..<(first + width) { after += samples[index] * samples[index] }
+    var best = first, biggest: Float = 0, grew: Float = 1
+    for index in first..<last {
+        if after - before > biggest {
+            biggest = after - before
+            best = index
+            grew = after / max(before, 1e-9)
+        }
+        let leaving = samples[index - width], crossing = samples[index], entering = samples[index + width]
+        before += crossing * crossing - leaving * leaving
+        after += entering * entering - crossing * crossing
+    }
+    // Half as much again, and more than a whisper, or it is not the start of anything.
+    guard grew >= 1.5, biggest > 1e-5 * Float(width) else { return nil }
+    return Double(best) / rate
+}
+
+/// Works out a song's tempo, where its beat falls, and where it suddenly gets bigger.
+func listen(to samples: [Float], rate: Double) -> SongReport {
+    var report = SongReport()
+    report.length = Double(samples.count) / rate
+    let size = 1024, half = size / 2, hop = 256
+    guard samples.count > size * 8 else { return report }
+    let perSecond = rate / Double(hop)
+    let count = samples.count / hop + 1
+
+    // The song's spectrum 86 times a second. Reading number n is centred on sample n × hop.
+    let padded = [Float](repeating: 0, count: half) + samples + [Float](repeating: 0, count: size)
+    var window = [Float](repeating: 0, count: size)
+    vDSP_hann_window(&window, vDSP_Length(size), Int32(vDSP_HANN_DENORM))
+    let log2n = vDSP_Length(10)
+    guard let setup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else { return report }
+    defer { vDSP_destroy_fftsetup(setup) }
+    // Bands a third of an octave or so wide, from 43 Hz to 10 kHz: a drum shows up as a jump in several at once.
+    var edges: [Int] = []
+    for index in 0...40 {
+        let bin = Int((2 * pow(230.0, Double(index) / 40)).rounded())
+        if edges.last != bin { edges.append(bin) }
+    }
+    let bands = edges.count - 1
+    let lowBands = edges.dropLast().filter { $0 < 9 }.count
+    var levels = [Float](repeating: 0, count: count * bands)
+    /// All the sound in each reading, and the bass alone (below 150 Hz).
+    var power = [Float](repeating: 0, count: count), bassPower = [Float](repeating: 0, count: count)
+    var windowed = [Float](repeating: 0, count: size)
+    var real = [Float](repeating: 0, count: half), imaginary = [Float](repeating: 0, count: half)
+    var spectrum = [Float](repeating: 0, count: half)
+    let scale = 1 / Float(half * half)
+    real.withUnsafeMutableBufferPointer { realPart in
+        imaginary.withUnsafeMutableBufferPointer { imaginaryPart in
+            var split = DSPSplitComplex(realp: realPart.baseAddress!, imagp: imaginaryPart.baseAddress!)
+            for index in 0..<count {
+                padded.withUnsafeBufferPointer { vDSP_vmul($0.baseAddress! + index * hop, 1, window, 1, &windowed, 1, vDSP_Length(size)) }
+                windowed.withUnsafeBufferPointer { pointer in
+                    pointer.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: half) { vDSP_ctoz($0, 2, &split, 1, vDSP_Length(half)) }
+                }
+                vDSP_fft_zrip(setup, &split, 1, log2n, FFTDirection(FFT_FORWARD))
+                vDSP_zvmags(&split, 1, &spectrum, 1, vDSP_Length(half))
+                var all: Float = 0, bass: Float = 0
+                for bin in 1..<half { all += spectrum[bin] }
+                for bin in 1...7 { bass += spectrum[bin] }
+                power[index] = all * scale
+                bassPower[index] = bass * scale
+                for band in 0..<bands {
+                    var sum: Float = 0
+                    for bin in edges[band]..<edges[band + 1] { sum += spectrum[bin] }
+                    // Squashed, so a quiet band's jump counts as well as a loud one's.
+                    levels[index * bands + band] = log(1 + 100 * (sum * scale).squareRoot())
+                }
+            }
+        }
+    }
+
+    // How much is starting at each reading: the rise in every band over two readings, added up.
+    var onsets = [Float](repeating: 0, count: count), bassOnsets = [Float](repeating: 0, count: count)
+    for index in 2..<count {
+        var all: Float = 0, low: Float = 0
+        for band in 0..<bands {
+            let rise = levels[index * bands + band] - levels[(index - 2) * bands + band]
+            if rise > 0 {
+                all += rise
+                if band < lowBands { low += rise }
+            }
+        }
+        onsets[index] = all
+        bassOnsets[index] = low
+    }
+    let beatSignal = standingOut(onsets, over: Int(perSecond / 2))
+
+    // Tempo. A beat repeats, so what starts in the song lines up with itself one beat later, two
+    // later, four later. The gap that does that best is the beat, or twice or half it.
+    let longest = min(count - 2, Int(5.4 * perSecond))
+    var echo = [Float](repeating: 0, count: longest + 1)
+    beatSignal.withUnsafeBufferPointer { signal in
+        for lag in 0...longest {
+            vDSP_dotpr(signal.baseAddress!, 1, signal.baseAddress! + lag, 1, &echo[lag], vDSP_Length(count - lag))
+            echo[lag] /= Float(count - lag)
+        }
+    }
+    func fit(_ gap: Double) -> Float { (reading(echo, at: gap) + reading(echo, at: 2 * gap) + reading(echo, at: 4 * gap)) / 3 }
+    var best = (tempo: 0.0, score: Float(0))
+    for step in 0...3900 {
+        let tempo = 45 + Double(step) * 0.05
+        let gap = 60 / tempo * perSecond
+        guard 4 * gap < Double(longest) else { continue }
+        let score = fit(gap)
+        if score > best.score { best = (tempo, score) }
+    }
+    // A pulse has to echo clearly, or it is not one.
+    guard best.score > 0, echo[0] > 0, best.score / echo[0] > 0.1 else {
+        report.spots = spots(power: power, bassPower: bassPower, onsets: onsets, bassOnsets: bassOnsets, perSecond: perSecond, samples: samples, rate: rate, beat: nil)
+        return report
+    }
+    // Which of a beat, half of it and twice it gets called "the beat" is a habit, not something in the
+    // sound: 87 and 174 are the same song. Take the one between 90 and 180, as long as things really do
+    // start that far apart.
+    var chosen = best.tempo
+    while chosen < 90 { chosen *= 2 }
+    while chosen >= 180 { chosen /= 2 }
+    if chosen != best.tempo, reading(echo, at: 60 / chosen * perSecond) < 0.4 * reading(echo, at: 60 / best.tempo * perSecond) { chosen = best.tempo }
+    best.tempo = chosen
+    report.tempo = best.tempo
+
+    // The beat to a hair. A whole song of beats only stays lined up with a grid whose gap is right to a
+    // few millionths, so try gaps closely either side of the first answer and keep the one whose grid
+    // catches the most of what starts in the song. Done in pieces of eight beats: within one the gap
+    // being a touch out hardly shows, and between them it shows as a slide.
+    var smooth = beatSignal
+    for index in 1..<(count - 1) { smooth[index] = 0.25 * beatSignal[index - 1] + 0.5 * beatSignal[index] + 0.25 * beatSignal[index + 1] }
+    var gap = 60 / best.tempo * perSecond
+    var grid: (gap: Double, first: Double, held: Double)?
+    for pass in 0..<2 {
+        let slots = max(8, Int((gap * 4).rounded())), slot = gap / Double(slots)
+        let pieces = Int(Double(count) / (gap * 8))
+        guard pieces >= 4 else { break }
+        var shape = [Float](repeating: 0, count: pieces * slots)
+        for piece in 0..<pieces {
+            for place in 0..<slots {
+                var sum: Float = 0
+                for beat in 0..<8 { sum += reading(smooth, at: Double(piece * 8 + beat) * gap + Double(place) * slot) }
+                shape[piece * slots + place] = sum
+            }
+        }
+        let reach = pass == 0 ? 0.4 : 0.02, fine = pass == 0 ? 0.0005 : 0.00005
+        let tries = Int(reach / fine)
+        var found = (change: 0.0, place: 0, caught: Float(0))
+        var caught = [Float](repeating: 0, count: slots)
+        for attempt in -tries...tries {
+            let change = Double(attempt) * fine
+            for place in 0..<slots { caught[place] = 0 }
+            for piece in 0..<pieces {
+                // A gap this much longer puts this piece's beats this much later.
+                var slide = (Double(piece * 8) + 3.5) * change / slot
+                slide -= (slide / Double(slots)).rounded(.down) * Double(slots)
+                let whole = Int(slide), part = Float(slide - Double(whole))
+                let row = piece * slots
+                for place in 0..<slots {
+                    let a = (place + whole) % slots, b = (a + 1) % slots
+                    caught[place] += shape[row + a] * (1 - part) + shape[row + b] * part
+                }
+            }
+            for place in 0..<slots where caught[place] > found.caught { found = (change, place, caught[place]) }
+        }
+        // How much of each piece's own best the one grid catches: all of it for a song in steady time.
+        var own: Float = 0
+        for piece in 0..<pieces { own += shape[(piece * slots)..<((piece + 1) * slots)].max() ?? 0 }
+        gap += found.change
+        grid = (gap, Double(found.place) * slot, own > 0 ? Double(found.caught / own) : 0)
+    }
+    var beat: (first: Double, length: Double)?
+    if let found = grid, found.held >= 0.8 {
+        var length = found.gap / perSecond
+        var first = found.first / perSecond
+        // The grid is on the readings, which are 12 thousandths of a second apart and see a drum a
+        // little before it lands. Lay it on the drums themselves: find where the sound really starts
+        // at the strongest beats, and move and stretch the grid to run through those.
+        var strongest: [(strength: Float, number: Int)] = []
+        var number = 0
+        while first + Double(number) * length < report.length - 0.1 {
+            strongest.append((reading(smooth, at: (first + Double(number) * length) * perSecond), number))
+            number += 1
+        }
+        strongest.sort { $0.strength > $1.strength }
+        var landed: [(number: Double, late: Double)] = []
+        for one in strongest.prefix(120) {
+            let time = first + Double(one.number) * length
+            if let real = attack(in: samples, rate: rate, from: time - 0.03, to: time + 0.045) { landed.append((Double(one.number), real - time)) }
+        }
+        if landed.count >= 12 {
+            let sorted = landed.map(\.late).sorted()
+            let middle = sorted[sorted.count / 2]
+            // The ones that agree, to within a few thousandths of a second. The rest caught something else.
+            let agreeing = landed.filter { abs($0.late - middle) < 0.006 }
+            if agreeing.count >= 12, agreeing.count * 2 >= landed.count {
+                let n = Double(agreeing.count)
+                let meanNumber = agreeing.reduce(0) { $0 + $1.number } / n, meanLate = agreeing.reduce(0) { $0 + $1.late } / n
+                var spread = 0.0, together = 0.0
+                for one in agreeing {
+                    spread += (one.number - meanNumber) * (one.number - meanNumber)
+                    together += (one.number - meanNumber) * (one.late - meanLate)
+                }
+                // Only stretch it when the beats used reach across the song.
+                let stretch = spread > n * 400 ? together / spread : 0
+                first += meanLate - stretch * meanNumber
+                length += stretch
+            }
+        }
+        first -= (first / length).rounded(.down) * length
+        beat = (first, length)
+        report.tempo = 60 / length
+        report.firstBeat = first
+        report.beatLength = length
+    }
+    report.spots = spots(power: power, bassPower: bassPower, onsets: onsets, bassOnsets: bassOnsets, perSecond: perSecond, samples: samples, rate: rate, beat: beat)
+    return report
+}
+
+/// Where a song suddenly gets bigger: louder, or heavier in the bass, and stays that way.
+private func spots(power: [Float], bassPower: [Float], onsets: [Float], bassOnsets: [Float], perSecond: Double,
+                   samples: [Float], rate: Double, beat: (first: Double, length: Double)?) -> [(time: Double, strength: Double)] {
+    let count = power.count
+    let wide = Int(4 * perSecond), least = Int(3 * perSecond), narrow = Int(perSecond)
+    guard count > 2 * least + 2 else { return [] }
+    // Loudness in decibels against the song's own loud passages, with a floor 20 below them.
+    func decibels(_ values: [Float]) -> (levels: [Float], top: Float) {
+        let sorted = values.sorted()
+        let top = max(sorted[Int(Double(sorted.count - 1) * 0.95)], 1e-12)
+        return (values.map { 10 * log10($0 / top + 0.01) }, top)
+    }
+    let (all, allTop) = decibels(power)
+    let (bass, bassTop) = decibels(bassPower)
+    // A song with next to no bass in it is judged on loudness alone.
+    let bassCounts: Float = bassTop / allTop > 0.003 ? 0.5 : 0
+    func sums(_ values: [Float]) -> [Double] {
+        var result = [Double](repeating: 0, count: values.count + 1)
+        for index in values.indices { result[index + 1] = result[index] + Double(values[index]) }
+        return result
+    }
+    let allSums = sums(all), bassSums = sums(bass)
+    func average(_ sums: [Double], _ first: Int, _ last: Int) -> Float {
+        let first = max(0, first), last = min(count, last)
+        return last > first ? Float((sums[last] - sums[first]) / Double(last - first)) : -20
+    }
+    /// How much bigger the song is in the `reach` readings after a moment than in those before it.
+    func step(at index: Int, over reach: Int) -> Float {
+        let louder = average(allSums, index, index + reach) - average(allSums, index - reach, index)
+        let heavier = average(bassSums, index, index + reach) - average(bassSums, index - reach, index)
+        return (1 - bassCounts) * louder + bassCounts * heavier
+    }
+    // What it arrives at matters too: a step up into one of the song's loud passages counts in full,
+    // one that is still quiet afterwards for less.
+    var sections = (least..<(count - least)).map { average(allSums, $0, $0 + wide) }
+    sections.sort()
+    let loud = sections[Int(Double(sections.count - 1) * 0.9)]
+    var scores = [Float](repeating: 0, count: count)
+    for index in least..<(count - least) {
+        let arriving = min(1, max(0.2, 1 + (average(allSums, index, index + wide) - loud) / 10))
+        scores[index] = step(at: index, over: wide) * arriving
+    }
+    // The biggest steps, no two within five seconds of each other.
+    var found: [(index: Int, score: Float)] = []
+    let apart = Int(5 * perSecond)
+    for index in scores.indices.sorted(by: { scores[$0] > scores[$1] }) {
+        guard scores[index] >= 3, found.count < 8 else { break }
+        if !found.contains(where: { abs($0.index - index) < apart }) { found.append((index, scores[index])) }
+    }
+    guard let biggest = found.map(\.score).max() else { return [] }
+    let starts = zip(onsets, bassOnsets).map { $0 + 2 * $1 }
+    var result: [(time: Double, strength: Double)] = []
+    for one in found where one.score >= 0.3 * biggest {
+        // The step is felt over seconds. The moment itself is the start of a sound close by, the one
+        // the song is most changed across.
+        let near = max(narrow, one.index - Int(0.75 * perSecond))...min(count - narrow - 1, one.index + Int(0.75 * perSecond))
+        let hardest = near.map { starts[$0] }.max() ?? 0
+        var moment = one.index, clearest = -Float.infinity
+        for index in near where starts[index] >= 0.3 * hardest && starts[index] >= starts[index - 1] && starts[index] >= starts[index + 1] {
+            let change = step(at: index, over: narrow)
+            if change > clearest {
+                clearest = change
+                moment = index
+            }
+        }
+        var time = Double(moment) / perSecond
+        if let real = attack(in: samples, rate: rate, from: time - 0.03, to: time + 0.05) { time = real }
+        // On the beat when it is as good as on it: the grid is the steadier of the two.
+        if let beat {
+            let nearest = beat.first + ((time - beat.first) / beat.length).rounded() * beat.length
+            if abs(nearest - time) < 0.03 { time = nearest }
+        }
+        result.append((time, Double(one.score / biggest)))
+    }
+    return result.sorted { $0.time < $1.time }
+}
+
+// MARK: - Checking the listening
+
+/// A made-up song whose tempo, beats and drops are known exactly: drums, a bass line, a tune and a
+/// held chord, laid out as an intro, a build, a drop, a break and a second drop.
+struct MadeUpSong {
+    var samples: [Float] = []
+    /// Every beat, and the stretches of the song that have drums on them.
+    var beats: [Double] = []
+    var drummed: [ClosedRange<Double>] = []
+    var drops: [Double] = []
+}
+
+/// `style` is the drum pattern: four (four to the floor), twostep, half (half-time), boom (with
+/// swing), rock (no bass drop, only a quiet verse into a loud chorus) or flat (no sections at all).
+/// `lead` is the silence before the first beat, and `wander` how far the tempo drifts, as a fraction.
+func madeUpSong(tempo: Double, style: String, lead: Double, wander: Double, rate: Double) -> MadeUpSong {
+    struct Part {
+        let name: String, bars: Int
+        var pad = false, hats = false, kick = false, snare = false, bass = false, riser = false, roll = false, tune = false
+        var level: Float = 1
+    }
+    let plan: [Part]
+    switch style {
+    case "flat":
+        plan = [Part(name: "groove", bars: 48, pad: true, hats: true, kick: true, snare: true, bass: true)]
+    case "rock":
+        plan = [Part(name: "verse", bars: 8, pad: true, hats: true, kick: true, snare: true, bass: true, level: 0.35),
+                Part(name: "drop", bars: 8, pad: true, hats: true, kick: true, snare: true, bass: true, tune: true),
+                Part(name: "verse", bars: 8, pad: true, hats: true, kick: true, snare: true, bass: true, level: 0.35),
+                Part(name: "drop", bars: 12, pad: true, hats: true, kick: true, snare: true, bass: true, tune: true)]
+    default:
+        plan = [Part(name: "intro", bars: 8, pad: true),
+                Part(name: "groove", bars: 8, pad: true, hats: true, kick: true, level: 0.5),
+                Part(name: "build", bars: 4, pad: true, hats: true, snare: true, level: 0.6),
+                Part(name: "build", bars: 4, pad: true, riser: true, roll: true, level: 0.7),
+                Part(name: "drop", bars: 16, pad: true, hats: true, kick: true, snare: true, bass: true, tune: true),
+                Part(name: "break", bars: 8, pad: true, level: 0.8),
+                Part(name: "build", bars: 4, pad: true, riser: true, roll: true, level: 0.7),
+                Part(name: "drop", bars: 16, pad: true, hats: true, kick: true, snare: true, bass: true, tune: true),
+                Part(name: "outro", bars: 4, pad: true, level: 0.6)]
+    }
+    // The sixteenths of a bar each drum lands on.
+    let kicks: [Int], snares: [Int], hats: [Int]
+    var swing = 0.0
+    switch style {
+    case "twostep": (kicks, snares, hats) = ([0, 10], [4, 12], [0, 2, 4, 6, 8, 10, 12, 14])
+    case "half": (kicks, snares, hats) = ([0, 6], [8], [0, 2, 4, 6, 8, 10, 12, 14])
+    case "boom":
+        (kicks, snares, hats) = ([0, 7, 10], [4, 12], [0, 2, 4, 6, 8, 10, 12, 14])
+        swing = 0.16
+    default: (kicks, snares, hats) = ([0, 4, 8, 12], [4, 12], [2, 6, 10, 14])
+    }
+
+    var song = MadeUpSong()
+    let bars = plan.reduce(0) { $0 + $1.bars }
+    var clock = lead
+    for beat in 0...(bars * 4) {
+        song.beats.append(clock)
+        clock += 60 / tempo * (1 + wander * sin(2 * .pi * Double(beat) / 96))
+    }
+    func time(bar: Int, step: Int) -> Double {
+        let beat = bar * 4 + step / 4, within = Double(step % 4) / 4
+        let length = song.beats[min(beat + 1, song.beats.count - 1)] - song.beats[beat]
+        // Swing pushes the off sixteenths late.
+        return song.beats[beat] + (step % 2 == 1 ? within + swing / 4 : within) * length
+    }
+    var samples = [Float](repeating: 0, count: Int((clock + 1.5) * rate))
+    // The same "random" noise every time, so the check gives the same answer every time.
+    var seed: UInt64 = 42
+    func noise() -> Float {
+        seed = seed &* 6364136223846793005 &+ 1442695040888963407
+        return Float(Int32(truncatingIfNeeded: seed >> 32)) / Float(Int32.max)
+    }
+    func add(at start: Double, length: Double, _ voice: (Double) -> Float) {
+        let first = Int((start * rate).rounded())
+        for index in 0..<Int(length * rate) where first + index < samples.count { samples[first + index] += voice(Double(index) / rate) }
+    }
+    func kick(at start: Double, gain: Float) {
+        var phase = 0.0
+        add(at: start, length: 0.35) { t in
+            phase += 2 * .pi * (48 + 120 * exp(-t / 0.028)) / rate
+            return gain * (Float(sin(phase) * exp(-t / 0.16)) + (t < 0.002 ? noise() * 0.5 : 0))
+        }
+    }
+    func snare(at start: Double, gain: Float) {
+        add(at: start, length: 0.22) { t in gain * (noise() * Float(exp(-t / 0.06)) * 0.6 + Float(sin(2 * .pi * 190 * t) * exp(-t / 0.05)) * 0.4) }
+    }
+    func hat(at start: Double, gain: Float) {
+        var last: Float = 0
+        add(at: start, length: 0.06) { t in
+            let now = noise()
+            defer { last = now }
+            return gain * (now - last) * Float(exp(-t / 0.018)) * 0.5
+        }
+    }
+
+    var bar = 0
+    for part in plan {
+        let start = time(bar: bar, step: 0), end = song.beats[(bar + part.bars) * 4]
+        if part.name == "drop" { song.drops.append(start) }
+        if part.kick { song.drummed.append(start...end) }
+        if part.pad {
+            add(at: start, length: end - start) { t in
+                let swell = Float(0.6 + 0.4 * sin(2 * .pi * t / 7)) * Float(min(1, t / 0.5) * min(1, (end - start - t) / 0.5))
+                return 0.05 * part.level * swell * Float(sin(2 * .pi * 220 * t) + sin(2 * .pi * 277.2 * t) + sin(2 * .pi * 329.6 * t))
+            }
+        }
+        if part.riser { add(at: start, length: end - start) { t in noise() * 0.22 * Float(pow(t / (end - start), 2.5)) } }
+        for index in 0..<part.bars {
+            let here = bar + index
+            if part.kick { for step in kicks { kick(at: time(bar: here, step: step), gain: 0.55 * part.level) } }
+            if part.snare { for step in snares { snare(at: time(bar: here, step: step), gain: 0.4 * part.level) } }
+            if part.hats { for step in hats { hat(at: time(bar: here, step: step), gain: 0.5 * part.level) } }
+            if part.roll {
+                // Faster and faster towards the drop, with a beat of nothing right before it.
+                for step in stride(from: 0, to: 16, by: index < part.bars / 2 ? 2 : 1) where !(index == part.bars - 1 && step >= 12) {
+                    snare(at: time(bar: here, step: step), gain: 0.22 + 0.2 * Float(index) / Float(part.bars))
+                }
+            }
+            if part.bass {
+                let pitch = [55.0, 55.0, 65.4, 49.0][here % 4]
+                for step in stride(from: 0, to: 16, by: 2) {
+                    let at = time(bar: here, step: step), length = (time(bar: here, step: min(step + 2, 15)) - at) * 0.9 + 0.01
+                    add(at: at, length: length) { t in
+                        let shape = Float(min(1, t / 0.004) * min(1, (length - t) / 0.02))
+                        return 0.3 * part.level * shape * Float(sin(2 * .pi * pitch * t) + 0.35 * sin(4 * .pi * pitch * t) + 0.15 * sin(6 * .pi * pitch * t))
+                    }
+                }
+            }
+            if part.tune {
+                for step in 0..<16 where (step * 5 + here) % 3 != 0 {
+                    let pitch = [440.0, 523.3, 659.3, 784.0][(step + here) % 4]
+                    add(at: time(bar: here, step: step), length: 0.09) { t in 0.07 * Float(exp(-t / 0.04)) * (sin(2 * .pi * pitch * t) > 0 ? 1 : -1) }
+                }
+            }
+        }
+        bar += part.bars
+    }
+    let top = samples.map(abs).max() ?? 1
+    song.samples = samples.map { $0 / max(top, 1e-9) }
+    song.beats.removeLast()
+    return song
+}
+
+/// Makes a handful of songs whose tempo, beat and drops are known, listens to each, and prints how
+/// close it got. Ends with a failure if any is further out than it should be.
+func checkListening() -> Never {
+    let rate = 22050.0
+    let songs: [(name: String, tempo: Double, style: String, lead: Double, wander: Double)] = [
+        ("four to the floor at 128", 128, "four", 0.35, 0), ("two-step at 174", 174, "twostep", 0, 0), ("half-time at 140", 140, "half", 1.2, 0),
+        ("swing at 92", 92, "boom", 0.5, 0), ("an odd tempo, 127.3", 127.3, "four", 0.21, 0), ("a loud chorus at 150, no bass drop", 150, "rock", 0.3, 0),
+        ("no sections at all, 124", 124, "flat", 0.1, 0), ("a tempo that wanders 3% around 120", 120, "four", 0.4, 0.03),
+    ]
+    var wrong = 0
+    for one in songs {
+        let song = madeUpSong(tempo: one.tempo, style: one.style, lead: one.lead, wander: one.wander, rate: rate)
+        let heard = listen(to: song.samples, rate: rate)
+        var said: [String] = []
+        var good = true
+        let steady = one.wander == 0
+        if let tempo = heard.tempo {
+            said.append(String(format: "%.2f a minute", tempo))
+            if abs(tempo - one.tempo) > (steady ? 0.05 : one.tempo * 0.05) { good = false }
+        } else {
+            said.append("no tempo")
+            good = false
+        }
+        if let first = heard.firstBeat, let length = heard.beatLength {
+            // How far the grid is from each real beat that has a drum on it.
+            var off = 0.0
+            for beat in song.beats where song.drummed.contains(where: { $0.lowerBound <= beat && beat < $0.upperBound }) {
+                let nearest: Double = first + ((beat - first) / length).rounded() * length
+                off = max(off, abs(nearest - beat))
+            }
+            said.append(String(format: "beat grid within %.1f ms of every beat", off * 1000))
+            if !steady || off > 0.006 { good = false }
+        } else {
+            said.append("no beat grid")
+            if steady { good = false }
+        }
+        let offs = song.drops.map { drop in heard.spots.map { abs($0.time - drop) }.min() ?? .infinity }
+        if song.drops.isEmpty {
+            said.append(heard.spots.isEmpty ? "no drops, rightly" : "\(heard.spots.count) drops where there are none")
+            if !heard.spots.isEmpty { good = false }
+        } else {
+            said.append(offs.allSatisfy { $0 < 0.008 } ? String(format: "its %d drops within %.1f ms", offs.count, (offs.max() ?? 0) * 1000) : "a drop missed")
+            if !offs.allSatisfy({ $0 < 0.008 }) || heard.spots.count != song.drops.count { good = false }
+        }
+        if !good { wrong += 1 }
+        print("\(good ? "ok   " : "WRONG") \(one.name): \(said.joined(separator: ", "))")
+    }
+    print(wrong == 0 ? "The listening is as good as it was." : "\(wrong) of \(songs.count) came out wrong.")
+    exit(wrong == 0 ? 0 : 1)
+}
+
 // MARK: - Options
 
 /// A marker export together with what its matching race clip says about the sequence it came from.
@@ -1574,6 +2152,9 @@ struct Options {
     var interactive = false
     /// A race clip to write a playable copy of, for the app's marker editor.
     var previewClip: String?
+    /// A song to listen to, for the same.
+    var songPath: String?
+    var checkListening = false
     /// The stretch of the clip a finished video covers, when it was chosen in the app.
     var videoStart: Double?
     var videoEnd: Double?
@@ -1686,7 +2267,8 @@ Output:
                         starts). Without it the song starts with the video.
   --music-in SECONDS, --music-out SECONDS
                         With --music: the clip times the song comes in at and stops at, when that is
-                        not the whole video. It fades in and out there.
+                        not the whole video. It comes in at once, so a drop put there lands whole,
+                        and fades out.
   --no-music            Make the finished videos silent even if there is a music file.
   --only-best N         In a batch, only make files for the N fastest runs.
   --summary             Print the lap times and ranking without making anything.
@@ -1699,6 +2281,13 @@ Output:
                         the .mov named with -o, without re-encoding it, and print the clip's frame
                         rate and size as JSON. A clip macOS can already play is left as it is. The
                         app's marker editor plays this copy.
+  --song FILE           Nothing to do with laps either: listen to a song and print as JSON how long it
+                        is, its tempo, where its beat falls when it keeps steady time (the first beat
+                        and the gap between beats, in seconds), and the moments it suddenly gets
+                        bigger, such as a drop. The app's marker editor offers those to line up with
+                        a gate.
+  --check-listening     Make a few songs whose tempo, beat and drops are known, listen to them, and
+                        print how close --song gets. package.sh runs this before it packages.
 """
 
 func parseArguments(_ arguments: [String]) -> Options {
@@ -1774,6 +2363,8 @@ func parseArguments(_ arguments: [String]) -> Options {
         case "--music-out": options.musicOut = number(for: flag)
         case "--no-music": options.noMusic = true
         case "--preview": options.previewClip = (value(for: flag) as NSString).expandingTildeInPath
+        case "--song": options.songPath = (value(for: flag) as NSString).expandingTildeInPath
+        case "--check-listening": options.checkListening = true
         case "--compact": options.compact = true
         case "--position": options.position = value(for: flag)
         case "--scale": options.userScale = number(for: flag)
@@ -2243,6 +2834,25 @@ func printJSON(runs: [Run], skipped: [(file: String, reason: String)], undecided
 
 let arguments = Array(CommandLine.arguments.dropFirst())
 var options = arguments.isEmpty ? askOptions() : parseArguments(arguments)
+
+if options.checkListening { checkListening() }
+
+// What is in a song that a video can be cut to, for the app's marker editor.
+if let songPath = options.songPath {
+    let name = (songPath as NSString).lastPathComponent
+    guard let samples = soundSamples(of: URL(fileURLWithPath: songPath), rate: 22050) else { fail("\(name) can't be read as sound.") }
+    let report = listen(to: samples, rate: 22050)
+    var fields = [String(format: "\"length\": %.3f", report.length)]
+    if let tempo = report.tempo { fields.append(String(format: "\"tempo\": %.2f", tempo)) }
+    if let first = report.firstBeat, let length = report.beatLength {
+        fields.append(String(format: "\"firstBeat\": %.4f", first))
+        fields.append(String(format: "\"beatLength\": %.6f", length))
+    }
+    let spots = report.spots.map { String(format: "{\"time\": %.3f, \"strength\": %.2f}", $0.time, $0.strength) }
+    fields.append("\"spots\": [\(spots.joined(separator: ", "))]")
+    print("{\n  " + fields.joined(separator: ",\n  ") + "\n}")
+    exit(0)
+}
 
 // A playable copy of a race clip, for the app's marker editor.
 if let clipPath = options.previewClip {
