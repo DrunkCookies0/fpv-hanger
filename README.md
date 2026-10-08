@@ -13,8 +13,8 @@ The app is not from the App Store, so macOS asks before opening it the first tim
 - **Add clips.** Choose your recordings, or drop them onto a track's page.
 - **Mark laps.** Step through a clip frame by frame and press M each time you cross the start/finish gate.
 - **Rank runs.** Each track's runs are listed fastest first by best three laps in a row.
-- **Make videos.** A 16:9 video for YouTube and a 9:16 one for Shorts, TikTok and Reels, with the timer, your name and the event drawn in. Or a transparent timer overlay to finish the video in Premiere.
-- **Add music.** Place a song against the laps on a timeline and choose where the video starts and ends.
+- **Make videos.** A 16:9 video for YouTube and a 9:16 one for Shorts, TikTok and Reels, with the timer, your name and the event drawn in.
+- **Add music.** Place a song against the laps on a timeline, mark points in it to line up with a gate, and drag its ends to choose where the music comes in and stops.
 - **Submit.** Paste a track's Google Form link and the app fills the form in. You press Submit yourself.
 - **Keep events apart.** Tracks are grouped by event, a race or a series, each with its own name on the timer and its own ID number.
 

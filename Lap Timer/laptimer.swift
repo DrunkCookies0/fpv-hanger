@@ -12,7 +12,7 @@ import CoreImage
 import Foundation
 
 /// The same number as the VERSION file and the app. package.sh refuses to package if they differ.
-let toolVersion = "0.8.0"
+let toolVersion = "0.9.0"
 
 // MARK: - Utilities
 
@@ -1332,9 +1332,12 @@ func writeFinishedVideo(shape: VideoShape, clip: ReadableClip, race: Race, from 
         let music = AVURLAsset(url: sound.url)
         // Music time and this file's time differ by a fixed amount.
         let shift = sound.clipTimeAtStart - clip.offset
-        let from = max(0, first.seconds - shift)
+        var from = max(0, first.seconds - shift)
+        // The music can be told to come in later than the video starts, and to stop before it ends.
+        if let comesIn = options.musicIn { from = max(from, comesIn - sound.clipTimeAtStart) }
         if let loaded = loadSound(of: music), let musicReader = try? AVAssetReader(asset: music) {
-            let to = min(loaded.duration, last.seconds - shift)
+            var to = min(loaded.duration, last.seconds - shift)
+            if let stops = options.musicOut { to = min(to, stops - sound.clipTimeAtStart) }
             if to > from {
                 func at(_ seconds: Double) -> CMTime { CMTime(seconds: seconds, preferredTimescale: 48000) }
                 musicReader.timeRange = CMTimeRange(start: at(from), end: at(to))
@@ -1577,6 +1580,9 @@ struct Options {
     /// A song chosen in the app, and the clip time its first moment belongs at.
     var musicPath: String?
     var musicStart: Double?
+    /// The clip times between which the song is heard, when they were set in the app.
+    var musicIn: Double?
+    var musicOut: Double?
     var noMusic = false
 
     /// The ID line beside the pilot name, such as "RaceGOW ID 042".
@@ -1678,6 +1684,9 @@ Output:
                         music folder. --music-start SECONDS is the clip time its first moment belongs
                         at (it can be negative: the song is then already under way when the clip
                         starts). Without it the song starts with the video.
+  --music-in SECONDS, --music-out SECONDS
+                        With --music: the clip times the song comes in at and stops at, when that is
+                        not the whole video. It fades in and out there.
   --no-music            Make the finished videos silent even if there is a music file.
   --only-best N         In a batch, only make files for the N fastest runs.
   --summary             Print the lap times and ranking without making anything.
@@ -1761,6 +1770,8 @@ func parseArguments(_ arguments: [String]) -> Options {
         case "--video-end": options.videoEnd = number(for: flag)
         case "--music": options.musicPath = (value(for: flag) as NSString).expandingTildeInPath
         case "--music-start": options.musicStart = number(for: flag)
+        case "--music-in": options.musicIn = number(for: flag)
+        case "--music-out": options.musicOut = number(for: flag)
         case "--no-music": options.noMusic = true
         case "--preview": options.previewClip = (value(for: flag) as NSString).expandingTildeInPath
         case "--compact": options.compact = true

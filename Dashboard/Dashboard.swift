@@ -141,6 +141,11 @@ struct RunEdit: Codable, Equatable {
     var song: String?
     /// The clip time the song's first moment belongs at. Before 0 means the song is already under way when the clip starts.
     var songStart: Double?
+    /// The clip times the music comes in at and stops at. Nil is the whole of the video.
+    var musicIn: Double?
+    var musicOut: Double?
+    /// Marks in the song, such as a drop, as times into the song. They move with it.
+    var songMarks: [Double]?
 }
 
 struct TrackState: Codable, Equatable {
@@ -490,7 +495,7 @@ enum ReadMe {
         var id: String { title }
     }
 
-    static let summary = "Lap times, timer overlays, finished videos and RaceGOW entry forms, straight from your goggle recordings. Right now it is built around the RaceGOW whoop series."
+    static let summary = "Lap times, finished videos with the timer on them, and RaceGOW entry forms, straight from your goggle recordings. Right now it is built around the RaceGOW whoop series."
     static let files = "Where your files are"
     static let comingSoon = "Coming soon"
 
@@ -1156,6 +1161,8 @@ final class Model: ObservableObject {
             } else {
                 arguments += ["--music", folder(track, "music").appendingPathComponent(song).path]
                 if let start = edit.songStart { arguments += ["--music-start", String(start)] }
+                if let comesIn = edit.musicIn { arguments += ["--music-in", String(comesIn)] }
+                if let stops = edit.musicOut { arguments += ["--music-out", String(stops)] }
             }
         }
         return arguments
@@ -2095,8 +2102,6 @@ struct TrackView: View {
                 if (model.clips[track] ?? []).isEmpty {
                     Button("Add clips…") { model.chooseClips(for: track) }.buttonStyle(PrimaryButton()).disabled(model.job != nil)
                 }
-                Text("Markers exported from Premiere still work: File > Export > Markers as CSV into this track's \"csv markers\" folder, named after the race clip (hdz_0008.csv for hdz_0008.ts).")
-                    .font(.system(size: 12)).foregroundStyle(Theme.faint).fixedSize(horizontal: false, vertical: true)
                 if !model.toolFound {
                     Text("The lap timer that belongs inside this app is missing, so nothing can be timed. Download the app again.")
                         .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.warn)
@@ -2320,13 +2325,9 @@ struct RunCard: View {
                     }
                     .disabled(run.clip.isEmpty)
                     .help(run.clip.isEmpty ? "There's no race clip with this run's name to make a video from." : "A finished video with the timer drawn in, ready to upload.")
-                    HStack(spacing: 7) {
-                        FileButton(output: .overlay, files: run.overlays) { model.make(run, track: track, output: .overlay) }
-                            .help("A see-through timer clip to lay over the footage in Premiere. Only needed if you finish the video there.")
-                        Button("Submit this run") { model.submitting = SubmitTarget(track: track, run: run) }
-                            .buttonStyle(PrimaryButton())
-                            .disabled(run.best == nil)
-                    }
+                    Button("Submit this run") { model.submitting = SubmitTarget(track: track, run: run) }
+                        .buttonStyle(PrimaryButton())
+                        .disabled(run.best == nil)
                 }
                 .disabled(model.job != nil)
             }
@@ -2920,6 +2921,23 @@ final class Editor: ObservableObject {
         return start...(start + songLength)
     }
 
+    /// The part of the clip the music is heard over: where the song lies, cut to the finished video and
+    /// to the start and end set for the music, if any.
+    var musicHeard: ClosedRange<Double>? {
+        guard let span = songSpan else { return nil }
+        var lower = max(span.lowerBound, 0), upper = min(span.upperBound, duration)
+        if let stretch {
+            lower = max(lower, stretch.lowerBound)
+            upper = min(upper, stretch.upperBound)
+        }
+        if let comesIn = edit.musicIn { lower = max(lower, comesIn) }
+        if let stops = edit.musicOut { upper = min(upper, stops) }
+        return upper > lower ? lower...upper : nil
+    }
+
+    /// The marks in the song, as times into it.
+    var songMarks: [Double] { edit.songMarks ?? [] }
+
     // MARK: Opening the clip
 
     private func load() async {
@@ -3011,11 +3029,12 @@ final class Editor: ObservableObject {
         try? picture.insertTimeRange(range, of: source, at: range.start)
         if let song, let start = edit.songStart, let sound = try? await song.loadTracks(withMediaType: .audio).first {
             func clock(_ seconds: Double) -> CMTime { CMTime(seconds: seconds, preferredTimescale: 48000) }
-            // A song that starts before the clip does is already that far in when the clip begins.
-            let skipped = max(0, -start), at = max(0, start)
-            let length = min(songLength - skipped, range.end.seconds - at)
-            if length > 0.05, let music = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
-                try? music.insertTimeRange(CMTimeRange(start: clock(skipped), duration: clock(length)), of: sound, at: clock(at))
+            // A song that starts before the clip does is already that far in when the clip begins, and
+            // one told to come in late or stop early is only heard in between.
+            let from = max(0, start, edit.musicIn ?? -.infinity)
+            let until = min(start + songLength, range.end.seconds, edit.musicOut ?? .infinity)
+            if until - from > 0.05, let music = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
+                try? music.insertTimeRange(CMTimeRange(start: clock(from - start), duration: clock(until - from)), of: sound, at: clock(from))
             }
         }
         guard mine == generation else { return }
@@ -3141,7 +3160,8 @@ final class Editor: ObservableObject {
 
     func undo() {
         guard let last = history.popLast() else { return }
-        let songChanged = last.edit.song != edit.song, songMoved = last.edit.songStart != edit.songStart
+        let songChanged = last.edit.song != edit.song
+        let songMoved = last.edit.songStart != edit.songStart || last.edit.musicIn != edit.musicIn || last.edit.musicOut != edit.musicOut
         markers = last.markers
         edit = last.edit
         if songChanged {
@@ -3244,6 +3264,8 @@ final class Editor: ObservableObject {
         pause()
         remember()
         edit.song = name
+        // Marks belong to the song they were made in.
+        edit.songMarks = nil
         // A song that hasn't been placed yet starts with the video.
         if let name, !name.isEmpty, edit.songStart == nil { edit.songStart = stretch?.lowerBound ?? 0 }
         Task {
@@ -3261,9 +3283,86 @@ final class Editor: ObservableObject {
         Task { await rebuild() }
     }
 
-    /// After the song has been dragged along the timeline.
+    /// After the song, or an end of the music, has been dragged along the timeline.
     func songMoved() {
         Task { await rebuild() }
+    }
+
+    /// Starts the music at a clip time, or at the playhead: before that the video is silent.
+    func setMusicIn(at time: Double? = nil) {
+        guard song != nil else { return }
+        let now = time ?? seconds(frame)
+        if let stops = edit.musicOut, now >= stops {
+            NSSound.beep()
+            return
+        }
+        pause()
+        remember()
+        edit.musicIn = now
+        Task { await rebuild() }
+    }
+
+    /// Stops the music at a clip time, or at the end of the frame that is showing.
+    func setMusicOut(at time: Double? = nil) {
+        guard song != nil else { return }
+        let now = time ?? seconds(frame + 1)
+        if let comesIn = edit.musicIn, now <= comesIn {
+            NSSound.beep()
+            return
+        }
+        pause()
+        remember()
+        edit.musicOut = now
+        Task { await rebuild() }
+    }
+
+    /// Lets the music run for the whole video again.
+    func wholeMusic() {
+        guard edit.musicIn != nil || edit.musicOut != nil else { return }
+        pause()
+        remember()
+        edit.musicIn = nil
+        edit.musicOut = nil
+        Task { await rebuild() }
+    }
+
+    /// While an end of the music is being dragged along the timeline.
+    func dragMusicIn(to time: Double) {
+        edit.musicIn = min(max(0, seconds(frameIndex(at: time))), (edit.musicOut ?? duration) - 0.5)
+    }
+
+    func dragMusicOut(to time: Double) {
+        edit.musicOut = max(min(duration, seconds(frameIndex(at: time))), (edit.musicIn ?? 0) + 0.5)
+    }
+
+    /// Marks a point in the song, such as a drop: the one playing at a clip time, or at the playhead.
+    func addSongMark(at time: Double? = nil) {
+        guard let span = songSpan else { return }
+        let mark = (((time ?? seconds(frame)) - span.lowerBound) * 1000).rounded() / 1000
+        guard mark >= 0, mark <= songLength, !songMarks.contains(where: { abs($0 - mark) < 0.02 }) else {
+            NSSound.beep()
+            return
+        }
+        remember()
+        edit.songMarks = (songMarks + [mark]).sorted()
+    }
+
+    func removeSongMark(_ mark: Double) {
+        guard songMarks.contains(mark) else { return }
+        remember()
+        let left = songMarks.filter { $0 != mark }
+        edit.songMarks = left.isEmpty ? nil : left
+    }
+
+    func removeAllSongMarks() {
+        guard !songMarks.isEmpty else { return }
+        remember()
+        edit.songMarks = nil
+    }
+
+    /// Slides the song so that one of its marks falls on a clip time.
+    func lineUp(songMark mark: Double, with time: Double) {
+        placeSong(at: ((time - mark) * 1000).rounded() / 1000)
     }
 
     /// Asks for an audio file and copies it into the track's music folder.
@@ -3396,6 +3495,7 @@ final class Editor: ObservableObject {
                 return true
             }
             switch (key, command) {
+            case ("b", false): addSongMark()
             case ("i", false): setVideoStart()
             case ("o", false): setVideoEnd()
             case ("z", true): undo()
@@ -3545,10 +3645,12 @@ struct EditorView: View {
                         .overlay(Color.clear.contentShape(Rectangle()).onTapGesture { editor.togglePlay() })
                     transport
                 }
-                VStack(spacing: 12) {
-                    laps
-                    videoCard
-                    musicCard
+                ScrollView {
+                    VStack(spacing: 12) {
+                        laps
+                        videoCard
+                        musicCard
+                    }
                 }
                 .frame(width: 320)
             }
@@ -3620,8 +3722,7 @@ struct EditorView: View {
                 Text("Step to the frame where you cross the start/finish gate and press M. The first marker starts lap 1, and each one after it ends a lap.")
                     .font(.system(size: 12)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true).padding(.top, 4)
             } else {
-                ScrollView {
-                    VStack(spacing: 3) {
+                VStack(spacing: 3) {
                         ForEach(Array(editor.markers.enumerated()), id: \.element) { index, marker in
                             let inBest = best.map { index - 1 >= $0.first && index - 1 < $0.first + editor.window } ?? false
                             HStack(spacing: 8) {
@@ -3654,11 +3755,10 @@ struct EditorView: View {
                                 Button("Delete All Markers") { editor.removeAllMarkers() }
                             }
                         }
-                    }
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .card(padding: 14)
     }
 
@@ -3718,6 +3818,20 @@ struct EditorView: View {
                     Button("Start it with the video") { editor.placeSong(at: editor.stretch?.lowerBound ?? 0) }.buttonStyle(SecondaryButton())
                         .disabled(editor.stretch == nil)
                 }
+                Text(musicHeard).font(.system(size: 11)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 6) {
+                    Button("Music in") { editor.setMusicIn() }.buttonStyle(SecondaryButton()).help("Bring the music in on this frame. Before it, the video is silent.")
+                    Button("Music out") { editor.setMusicOut() }.buttonStyle(SecondaryButton()).help("Stop the music on this frame.")
+                    Button("Whole video") { editor.wholeMusic() }.buttonStyle(SecondaryButton())
+                        .disabled(editor.edit.musicIn == nil && editor.edit.musicOut == nil)
+                }
+                HStack(spacing: 6) {
+                    Button("Mark the music here") { editor.addSongMark() }.buttonStyle(SecondaryButton())
+                        .help("Mark this point in the song, such as a drop (B). Drag the song and the mark catches on a lap marker.")
+                    if !editor.songMarks.isEmpty {
+                        Text("\(editor.songMarks.count) mark\(editor.songMarks.count == 1 ? "" : "s")").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.faint)
+                    }
+                }
             } else if chosen == nil, editor.premiereMusic != nil {
                 Text("Lined up from your saved Premiere project when a video is made. Pick a song instead to place it here.")
                     .font(.system(size: 11)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
@@ -3728,6 +3842,13 @@ struct EditorView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .card(padding: 14)
+    }
+
+    /// Says in words when the music is heard.
+    private var musicHeard: String {
+        guard let heard = editor.musicHeard else { return "The music isn't heard anywhere in the video as it stands." }
+        let whole = editor.edit.musicIn == nil && editor.edit.musicOut == nil
+        return "\(whole ? "The music plays" : "You set the music to play") from \(EditorFormat.clock(heard.lowerBound)) to \(EditorFormat.clock(heard.upperBound)) in the clip, and fades out at the end."
     }
 
     /// Says in words where the song sits against the video.
@@ -3752,7 +3873,7 @@ struct EditorView: View {
                 EditorTimeline(editor: editor)
             }
             HStack(spacing: 6) {
-                Text("Space play  ·  ← → one frame  ·  ⇧ ten  ·  ⌥ one second  ·  M mark  ·  ⌫ remove  ·  ⌘← ⌘→ move marker  ·  ↑ ↓ markers  ·  I O video start, end  ·  ⌘Z undo  ·  right-click a marker for more")
+                Text("Space play  ·  ← → one frame  ·  ⇧ ten  ·  ⌥ one second  ·  M mark  ·  ⌫ remove  ·  ⌘← ⌘→ move marker  ·  ↑ ↓ markers  ·  I O video start, end  ·  B mark the music  ·  ⌘Z undo  ·  right-click for more")
                     .font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.faint).lineLimit(1).minimumScaleFactor(0.7)
                 Spacer(minLength: 8)
                 Button("Whole clip") { editor.showAll() }.buttonStyle(SecondaryButton())
@@ -3799,11 +3920,13 @@ struct EditorOverview: View {
 struct EditorTimeline: View {
     @ObservedObject var editor: Editor
     @State private var drag: Drag?
-    /// Where the pointer last was along the timeline, to know which marker a right-click is on.
-    @State private var pointer: CGFloat?
+    /// Where the pointer last was over the timeline, to know what a right-click is on.
+    @State private var pointer: CGPoint?
 
     enum Drag {
         case scrub, start, end
+        /// An end of the music.
+        case musicIn, musicOut
         /// How far into the song it was picked up.
         case song(Double)
     }
@@ -3820,14 +3943,41 @@ struct EditorTimeline: View {
                 .gesture(DragGesture(minimumDistance: 0)
                     .onChanged { dragged($0, width: geometry.size.width) }
                     .onEnded { _ in
-                        if case .song = drag { editor.songMoved() }
+                        switch drag {
+                        case .song, .musicIn, .musicOut: editor.songMoved()
+                        default: break
+                        }
                         drag = nil
                     })
                 .onContinuousHover { phase in
-                    if case .active(let point) = phase { pointer = point.x }
+                    // Over an end that can be dragged, the pointer says so, the way it does in Premiere.
+                    switch phase {
+                    case .active(let point):
+                        pointer = point
+                        (end(under: point, width: geometry.size.width) == nil ? NSCursor.arrow : NSCursor.resizeLeftRight).set()
+                    case .ended:
+                        NSCursor.arrow.set()
+                    }
                 }
                 .contextMenu {
-                    if let marker = marker(under: pointer, width: geometry.size.width) {
+                    if let pointer, pointer.y >= Self.musicTop, let song = editor.songSpan {
+                        // Over the music: marks in the song, and where the music comes in and stops.
+                        let width = geometry.size.width
+                        let time = editor.visible.lowerBound + Double(pointer.x / max(width, 1)) * (editor.visible.upperBound - editor.visible.lowerBound)
+                        if let mark = songMark(under: pointer.x, width: width) {
+                            Button("Line This Mark Up with the Playhead") { editor.lineUp(songMark: mark, with: editor.seconds(editor.frame)) }
+                            Button("Delete This Music Mark") { editor.removeSongMark(mark) }
+                            Divider()
+                        }
+                        Button("Mark the Music Here") { editor.addSongMark(at: time) }.disabled(!song.contains(time))
+                        Button("Delete All Music Marks") { editor.removeAllSongMarks() }.disabled(editor.songMarks.isEmpty)
+                        Divider()
+                        Button("Bring the Music In Here") { editor.setMusicIn(at: time) }
+                        Button("Stop the Music Here") { editor.setMusicOut(at: time) }
+                        Button("Play the Music for the Whole Video") { editor.wholeMusic() }
+                            .disabled(editor.edit.musicIn == nil && editor.edit.musicOut == nil)
+                    } else {
+                    if let marker = marker(under: pointer?.x, width: geometry.size.width) {
                         Button("Go to This Marker") {
                             editor.pause()
                             editor.show(marker)
@@ -3837,6 +3987,7 @@ struct EditorTimeline: View {
                     }
                     Button("Add a Marker at the Playhead") { editor.addMarker() }
                     Button("Delete All Markers") { editor.removeAllMarkers() }.disabled(editor.markers.isEmpty)
+                    }
                 }
         }
         .frame(height: Self.height)
@@ -3851,6 +4002,29 @@ struct EditorTimeline: View {
         return nearest
     }
 
+    /// The end that can be dragged at a point: of the stretch the video covers, or of the music.
+    private func end(under point: CGPoint, width: CGFloat) -> Drag? {
+        let from = editor.visible.lowerBound, span = max(editor.visible.upperBound - from, 0.001)
+        func x(_ seconds: Double) -> CGFloat { CGFloat((seconds - from) / span) * width }
+        if point.y >= Self.musicTop, let heard = editor.musicHeard {
+            let toStart = abs(point.x - x(heard.lowerBound)), toEnd = abs(point.x - x(heard.upperBound))
+            if min(toStart, toEnd) <= 7 { return toStart <= toEnd ? .musicIn : .musicOut }
+        } else if point.y >= Self.videoTop, point.y < Self.musicTop, let stretch = editor.stretch {
+            if abs(point.x - x(stretch.lowerBound)) <= 8 { return .start }
+            if abs(point.x - x(stretch.upperBound)) <= 8 { return .end }
+        }
+        return nil
+    }
+
+    /// The mark in the song within a few points of a place along the timeline, if there is one.
+    private func songMark(under place: CGFloat, width: CGFloat) -> Double? {
+        guard let song = editor.songSpan else { return nil }
+        let from = editor.visible.lowerBound, span = max(editor.visible.upperBound - from, 0.001)
+        func x(_ mark: Double) -> CGFloat { CGFloat((song.lowerBound + mark - from) / span) * width }
+        guard let nearest = editor.songMarks.min(by: { abs(x($0) - place) < abs(x($1) - place) }), abs(x(nearest) - place) <= 8 else { return nil }
+        return nearest
+    }
+
     private func dragged(_ value: DragGesture.Value, width: CGFloat) {
         let from = editor.visible.lowerBound, span = editor.visible.upperBound - from
         func seconds(_ x: CGFloat) -> Double { from + Double(x / max(width, 1)) * span }
@@ -3858,18 +4032,16 @@ struct EditorTimeline: View {
         if drag == nil {
             let start = value.startLocation
             drag = .scrub
-            if start.y >= Self.musicTop, let song = editor.songSpan, song.contains(seconds(start.x)) {
+            if let grabbed = end(under: start, width: width) {
+                // An end of the video's stretch or of the music: this trims it.
+                editor.pause()
+                editor.remember()
+                drag = grabbed
+            } else if start.y >= Self.musicTop, let song = editor.songSpan, song.contains(seconds(start.x)) {
+                // The body of the song: this slides it.
                 editor.pause()
                 editor.remember()
                 drag = .song(seconds(start.x) - song.lowerBound)
-            } else if start.y >= Self.videoTop, start.y < Self.musicTop, let stretch = editor.stretch {
-                if abs(start.x - x(stretch.lowerBound)) <= 8 {
-                    editor.remember()
-                    drag = .start
-                } else if abs(start.x - x(stretch.upperBound)) <= 8 {
-                    editor.remember()
-                    drag = .end
-                }
             }
             if case .scrub = drag { editor.pause() }
         }
@@ -3878,7 +4050,20 @@ struct EditorTimeline: View {
         case .scrub: editor.show(editor.frameIndex(at: min(max(now, from), editor.visible.upperBound)), follow: false)
         case .start: editor.dragVideoStart(to: now)
         case .end: editor.dragVideoEnd(to: now)
-        case .song(let grabbed): editor.edit.songStart = ((now - grabbed) * 1000).rounded() / 1000
+        case .musicIn: editor.dragMusicIn(to: now)
+        case .musicOut: editor.dragMusicOut(to: now)
+        case .song(let grabbed):
+            var place = ((now - grabbed) * 1000).rounded() / 1000
+            // A mark in the song catches on a lap marker, or on the start of the video, as it passes.
+            var reach = 7 / Double(max(width, 1)) * span
+            let targets = editor.markers.map(editor.seconds) + (editor.stretch.map { [$0.lowerBound] } ?? [])
+            for mark in editor.songMarks {
+                for target in targets where abs(target - (now - grabbed + mark)) < reach {
+                    reach = abs(target - (now - grabbed + mark))
+                    place = ((target - mark) * 1000).rounded() / 1000
+                }
+            }
+            editor.edit.songStart = place
         case nil: break
         }
     }
@@ -3967,6 +4152,29 @@ struct EditorTimeline: View {
                     column += 1
                 }
                 context.fill(wave, with: .color(Theme.accent.opacity(0.85)))
+            }
+            // Where the music is heard: dimmed outside, with an end to drag on each side.
+            if let heard = editor.musicHeard {
+                for silent in [CGRect(x: rect.minX, y: Self.musicTop, width: max(0, x(heard.lowerBound) - rect.minX), height: Self.musicHeight),
+                               CGRect(x: x(heard.upperBound), y: Self.musicTop, width: max(0, rect.maxX - x(heard.upperBound)), height: Self.musicHeight)]
+                where editor.edit.musicIn != nil || editor.edit.musicOut != nil {
+                    context.fill(Path(silent), with: .color(Theme.card.opacity(0.6)))
+                }
+                for edge in [x(heard.lowerBound), x(heard.upperBound) - 3] {
+                    context.fill(Path(roundedRect: CGRect(x: edge, y: Self.musicTop + 2, width: 3, height: Self.musicHeight - 4), cornerRadius: 1.5), with: .color(.white.opacity(0.85)))
+                }
+            }
+            // Marks in the song.
+            for mark in editor.songMarks {
+                let place = x(song.lowerBound + mark)
+                context.fill(Path(CGRect(x: place - 0.75, y: Self.musicTop, width: 1.5, height: Self.musicHeight)), with: .color(.white))
+                var diamond = Path()
+                diamond.move(to: CGPoint(x: place, y: Self.musicTop - 1))
+                diamond.addLine(to: CGPoint(x: place + 5, y: Self.musicTop + 4))
+                diamond.addLine(to: CGPoint(x: place, y: Self.musicTop + 9))
+                diamond.addLine(to: CGPoint(x: place - 5, y: Self.musicTop + 4))
+                diamond.closeSubpath()
+                context.fill(diamond, with: .color(.white))
             }
         } else {
             let note = editor.edit.song == nil && editor.premiereMusic != nil ? "\(editor.premiereMusic ?? ""): lined up from Premiere when a video is made" : "No music"
@@ -4128,7 +4336,7 @@ struct SettingsView: View {
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.stroke))
             .help("Click a corner to put the timer there.")
-            Text("How the timer sits on a 16:9 video and on the Premiere overlay, " + (source.run.isEmpty ? "with made-up laps" : "with the laps from \(source.run)")
+            Text("How the timer sits on a 16:9 video, " + (source.run.isEmpty ? "with made-up laps" : "with the laps from \(source.run)")
                  + ". On a 9:16 video it goes under the picture instead, so the corner doesn't apply there.")
                 .font(.system(size: 12)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
         }
@@ -4429,9 +4637,9 @@ struct GuideView: View {
         ("Choose what the video shows",
          "A finished video runs from 3 seconds before lap 1 to 8 seconds after the finish. To change that, open Markers & music on the run and drag the ends of the Video bar, or press I and O on the frames where it should start and end."),
         ("Add music, if you want it",
-         "In Markers & music, pick a song from the track's music folder or choose a file. It appears under the laps with its loudness drawn in: drag it until the part you want sits against the laps, and press Space to hear it with the picture."),
+         "In Markers & music, pick a song from the track's music folder or choose a file. It appears under the laps with its loudness drawn in: drag it until the part you want sits against the laps, and press Space to hear it with the picture. Press B to mark a point in the song, such as a drop; when you drag the song, the mark catches on a lap marker. Drag the white ends of the song, or use Music in and Music out, to choose where the music starts and stops."),
         ("Make the videos",
-         "Make 16:9 video is for YouTube. Make 9:16 video is for Shorts, TikTok and Reels. Both carry the timer, your name and ID, the event and track, and the music. Premiere overlay is only for finishing a video in Premiere yourself."),
+         "Make 16:9 video is for YouTube. Make 9:16 video is for Shorts, TikTok and Reels. Both carry the timer, your name and ID, the event and track, and the music."),
         ("Check them",
          "Click a run to see its files and open any of them in VLC. If there are two versions of something, press Keep only this one on the right one and the other goes to the Trash."),
         ("Submit",
@@ -4443,7 +4651,7 @@ struct GuideView: View {
         "Saving markers here for a run that had a Premiere export moves that export to the Trash, so the run isn't timed twice.",
         "Some clips say 50 frames a second in their header but record 60. That only matters for markers from Premiere, and the track page asks which one the sequence uses. Markers placed here are always in the clip's real time.",
         "Add clips copies your recordings into the track's Raw files folder and leaves the originals where they were. Putting files in that folder yourself works too.",
-        "Everything lives in the track's folder: Raw files, csv markers and music go in; overlays, landscape and vertical are what gets made. The tracks sit in your library folder, which Pilot & settings shows and can change.",
+        "Everything lives in the track's folder: Raw files, csv markers and music go in; landscape and vertical are what gets made. The tracks sit in your library folder, which Pilot & settings shows and can change.",
         "New versions are picked up from Pilot & settings, where Check for updates downloads and installs one in place.",
     ]
 
@@ -4897,6 +5105,17 @@ enum Main {
             while editor.songSpan == nil || editor.peaks.isEmpty, Date() < limit { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
             if let span = editor.songSpan, !editor.peaks.isEmpty {
                 print("song: \(name), \(EditorFormat.clock(editor.songLength)) long, placed to start at \(EditorFormat.clock(span.lowerBound)) in the clip, \(editor.peaks.count) loudness readings")
+                // A mark 10 seconds into the song, lined up with lap 1; then music from lap 1 to the finish.
+                if let first = editor.markers.first, let finish = editor.markers.last, finish > first {
+                    editor.addSongMark(at: span.lowerBound + 10)
+                    editor.lineUp(songMark: 10, with: editor.seconds(first))
+                    let lined = abs((editor.edit.songStart ?? 0) - (editor.seconds(first) - 10)) < 0.002
+                    editor.setMusicIn(at: editor.seconds(first))
+                    editor.setMusicOut(at: editor.seconds(finish))
+                    let heard = editor.musicHeard.map { abs($0.lowerBound - editor.seconds(first)) < 0.001 && abs($0.upperBound - editor.seconds(finish)) < 0.001 } ?? false
+                    if !lined || !heard { wrong += 1 }
+                    print("music: a mark 10 s into the song \(lined ? "lined up with lap 1" : "DIDN'T line up"), and music in and out \(heard ? "are where they were set" : "are WRONG")")
+                }
             } else {
                 wrong += 1
                 print("song: \(name) couldn't be loaded")

@@ -2,6 +2,14 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.9.0 (7 October 2026)
+
+- The music has ends you can drag, like a clip in Premiere. Drag the white ends of the song on the timeline to choose where the music comes in and where it stops. **Music in** and **Music out** do the same from the playhead.
+- Marks in the music: press **B**, or **Mark the music here**, on a point in the song such as a drop. When you drag the song, the mark catches on a lap marker so the two line up exactly. Right-click the music for more.
+- The pointer turns into a resize arrow over any end that can be dragged, on the Video bar and on the music.
+- The Premiere overlay button is gone. The timer is drawn into every finished video, so there is nothing extra to make.
+- The side of the editor scrolls, so the laps list always has room.
+
 ## v0.8.0 (7 October 2026)
 
 - Deleting is harder to do by accident. An empty track goes to the Trash straight away. A track with anything in it asks you to type **I UNDERSTAND** first. An event can only be deleted once its tracks are.
