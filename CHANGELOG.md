@@ -2,6 +2,12 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.6.0 (7 October 2026)
+
+- Tracks are now grouped into **events**. An event is a race or a series, with its own tracks, its own name on the timer and its own ID number. **New event** in the sidebar makes one.
+- Pilot & settings has an Events section, where each event's name on the timer and your ID for it are set.
+- Tracks you already had show under their event as before. In Pilot & settings, **Give it its own folder** moves them into a folder like any other event's. That part is up to you.
+
 ## v0.5.0 (7 October 2026)
 
 - Pilot & settings shows a preview of the timer in the corner you pick, with your name, ID and event on it, over a frame of your own footage when there is one. Click a corner of the preview to move the timer there.

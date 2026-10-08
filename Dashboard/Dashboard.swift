@@ -153,12 +153,25 @@ struct TrackState: Codable, Equatable {
     var edits: [String: RunEdit]?
 }
 
+/// What an event keeps for itself, beyond its folder: the name its tracks' timers show, and the
+/// pilot's ID in that race or series.
+struct EventState: Codable, Equatable {
+    /// Shown on the timer in place of the event's folder name.
+    var name: String?
+    var id: String?
+    var idLabel: String?
+}
+
 /// Everything the app remembers, kept as dashboard.json in the project folder.
 struct Store: Codable, Equatable {
     var email = ""
     /// Form answers by question title, reused for the next track's form.
     var answers: [String: [String]] = [:]
+    /// By track: its path inside the library, such as "RaceGOW6/Track 1", or just "Track 1" for a
+    /// track that sits in the library itself.
     var tracks: [String: TrackState] = [:]
+    /// By event folder. Optional so a dashboard.json from before there were events still loads.
+    var events: [String: EventState]?
 }
 
 // MARK: - Submission form
@@ -421,13 +434,12 @@ enum Updates {
 /// Planned, not built yet. Each one is marked "Coming soon" where it will live, and all of them are
 /// listed on the How it works page.
 enum ComingSoon: CaseIterable {
-    case upload, leaderboards, events
+    case upload, leaderboards
 
     var title: String {
         switch self {
         case .upload: return "Upload to YouTube, TikTok and Instagram"
         case .leaderboards: return "Season leaderboards"
-        case .events: return "More than RaceGOW"
         }
     }
 
@@ -435,7 +447,6 @@ enum ComingSoon: CaseIterable {
         switch self {
         case .upload: return "Send a finished video straight to your channels from here, with the YouTube link filled into the submission form for you. For now, upload it yourself and paste the link."
         case .leaderboards: return "The whole season's standings, next to your own times."
-        case .events: return "Other race series, and other FPV jobs, alongside RaceGOW."
         }
     }
 
@@ -443,7 +454,6 @@ enum ComingSoon: CaseIterable {
         switch self {
         case .upload: return "square.and.arrow.up"
         case .leaderboards: return "list.number"
-        case .events: return "square.grid.2x2"
         }
     }
 }
@@ -504,8 +514,8 @@ enum ReadMe {
                 ]),
             ], fileOnly: true),
             Section(title: "Getting started", items: [
-                .step("In Pilot & settings, type your pilot name and ID. They go on every timer and video, and into the entry form."),
-                .step("Press New track in the sidebar, then Open folder, and put your recordings in that track's \"Raw files\" folder."),
+                .step("In Pilot & settings, type your pilot name, and under Events your ID for the race or series. They go on every timer and video, and into the entry form."),
+                .step("Press New track under the event in the sidebar, then Open folder, and put your recordings in that track's \"Raw files\" folder."),
                 .step("Press Mark laps on a clip. Step to the frame where you cross the start/finish gate and press M. Do that for every crossing, then Save."),
                 .step("Press Make 16:9 video for YouTube, or Make 9:16 video for Shorts, TikTok and Reels. Markers & music lets you add a song and choose where the video starts and ends."),
                 .step("Paste the track's Google Form link on the track page, upload your video to YouTube, and press Submit this run. The app fills the form in. You press Submit on the form yourself."),
@@ -521,6 +531,7 @@ enum ReadMe {
             ]),
             Section(title: comingSoon, items: [.paragraph("These are marked \"Coming soon\" in the app and do nothing yet:")] + ComingSoon.allCases.map { .point($0.title) }),
             Section(title: "Good to know", items: [
+                .point("Flying another race or series? Press New event in the sidebar. Each event has its own tracks, its own name on the timer and its own ID."),
                 .point("Lap times are as exact as your markers: one video frame, which is about 0.017 seconds at 60 frames a second."),
                 .point("It has been used most with HDZero recordings (.ts). An .mp4 recording has been tested once. Other formats have not been tried."),
                 .point("The app goes online for two things only: to read your Google Form, and to check for a newer version."),
@@ -710,7 +721,55 @@ final class Model: ObservableObject {
     @Published var automaticUpdates = !UserDefaults.standard.bool(forKey: "noAutomaticUpdates") {
         didSet { UserDefaults.standard.set(!automaticUpdates, forKey: "noAutomaticUpdates") }
     }
+    /// Every track, as its path inside the library: "RaceGOW6/Track 1", or just "Track 1" for one that
+    /// sits in the library itself.
     @Published var tracks: [String] = []
+    /// The tracks grouped by event, in the order the sidebar lists them.
+    @Published var events: [Event] = []
+
+    /// A race or a series: a folder in the library with its tracks inside.
+    struct Event: Identifiable, Equatable {
+        /// The event's folder. Empty for the tracks that sit loose in the library itself, which is how
+        /// every library was laid out before there were events.
+        let folder: String
+        var tracks: [String]
+        var id: String { folder }
+    }
+
+    /// What an event puts on its tracks' timers and into their forms.
+    struct EventDetails: Equatable {
+        var name: String
+        var id: String
+        var idLabel: String
+    }
+
+    static func trackName(_ track: String) -> String { (track as NSString).lastPathComponent }
+    static func eventFolder(of track: String) -> String { track.contains("/") ? String(track.prefix { $0 != "/" }) : "" }
+
+    /// An event's details. The loose tracks keep theirs where they always were, in the pilot settings.
+    func details(ofEvent folder: String) -> EventDetails {
+        if folder.isEmpty { return EventDetails(name: settings.event ?? "", id: settings.id, idLabel: settings.idLabel) }
+        let own = store.events?[folder]
+        return EventDetails(name: own?.name ?? folder, id: own?.id ?? "", idLabel: own?.idLabel ?? "ID")
+    }
+
+    func setDetails(_ details: EventDetails, ofEvent folder: String) {
+        if folder.isEmpty {
+            settings.event = details.name.isEmpty ? nil : details.name
+            settings.id = details.id
+            settings.idLabel = details.idLabel
+        } else {
+            var all = store.events ?? [:]
+            all[folder] = EventState(name: details.name.isEmpty || details.name == folder ? nil : details.name, id: details.id, idLabel: details.idLabel)
+            store.events = all
+        }
+    }
+
+    /// The event of the track that is showing, or the first event when another page is.
+    var currentEvent: String {
+        if case .track(let track) = page { return Self.eventFolder(of: track) }
+        return events.first?.folder ?? ""
+    }
     @Published var page: Page = .settings
     @Published var summaries: [String: TrackSummary] = [:]
     @Published var settings = TimerSettings() { didSet { if settings != oldValue { saveSettings() } } }
@@ -793,6 +852,14 @@ final class Model: ObservableObject {
         clips = [:]
         expanded = []
         findTracks()
+        // A library with nothing in it starts with one event, for the series the app is built around.
+        if events.isEmpty {
+            let name = settings.event.flatMap { $0.isEmpty ? nil : $0 } ?? "RaceGOW6"
+            var all = store.events ?? [:]
+            all[name] = EventState(id: settings.id.isEmpty ? nil : settings.id, idLabel: settings.idLabel)
+            store.events = all
+            findTracks()
+        }
         page = tracks.first.map { .track($0) } ?? .settings
     }
 
@@ -881,13 +948,36 @@ final class Model: ObservableObject {
 
     func folder(_ track: String, _ name: String) -> URL { root.appendingPathComponent(track).appendingPathComponent(name) }
 
-    /// A track is any folder here that holds marker exports or raw clips.
+    /// Finds the tracks and the events they belong to. A track is a folder that holds marker files or
+    /// raw clips. An event is a folder in the library with tracks inside it, or one made here that has
+    /// none yet. Tracks sitting in the library itself, from before there were events, form one of their own.
     func findTracks() {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
-        tracks = names.filter { name in
-            guard !name.hasPrefix("."), !name.hasSuffix(".app") else { return false }
-            return ["csv markers", "Raw files"].contains { FileManager.default.fileExists(atPath: folder(name, $0).path) }
-        }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        let manager = FileManager.default
+        func isTrack(_ folder: URL) -> Bool {
+            ["csv markers", "Raw files"].contains { manager.fileExists(atPath: folder.appendingPathComponent($0).path) }
+        }
+        func folders(in place: URL) -> [String] {
+            ((try? manager.contentsOfDirectory(atPath: place.path)) ?? []).filter { name in
+                guard !name.hasPrefix("."), !name.hasSuffix(".app") else { return false }
+                var isFolder: ObjCBool = false
+                return manager.fileExists(atPath: place.appendingPathComponent(name).path, isDirectory: &isFolder) && isFolder.boolValue
+            }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        }
+        var loose: [String] = []
+        var found: [Event] = []
+        for name in folders(in: root) {
+            let folder = root.appendingPathComponent(name)
+            if isTrack(folder) {
+                loose.append(name)
+                continue
+            }
+            let inside = folders(in: folder).filter { isTrack(folder.appendingPathComponent($0)) }
+            if !inside.isEmpty || store.events?[name] != nil { found.append(Event(folder: name, tracks: inside.map { name + "/" + $0 })) }
+        }
+        if !loose.isEmpty { found.insert(Event(folder: "", tracks: loose), at: 0) }
+        if found != events { events = found }
+        let all = found.flatMap(\.tracks)
+        if all != tracks { tracks = all }
     }
 
     func state(_ track: String) -> TrackState { store.tracks[track] ?? TrackState() }
@@ -905,11 +995,12 @@ final class Model: ObservableObject {
 
     /// The pilot's details and the timer's corner, handed to the lap timer directly: the one inside the
     /// app has no settings file beside it to read them from.
-    private var pilotArguments: [String] {
-        var arguments = ["--position", settings.corner, "--id-label", settings.idLabel]
+    private func pilotArguments(for track: String) -> [String] {
+        let event = details(ofEvent: Self.eventFolder(of: track))
+        var arguments = ["--position", settings.corner, "--id-label", event.idLabel]
         if !settings.pilot.isEmpty { arguments += ["--pilot", settings.pilot] }
-        if !settings.id.isEmpty { arguments += ["--id", settings.id] }
-        if let event = settings.event, !event.isEmpty { arguments += ["--event", event] }
+        if !event.id.isEmpty { arguments += ["--id", event.id] }
+        if !event.name.isEmpty { arguments += ["--event", event.name] }
         if let accent = settings.accent, !accent.isEmpty { arguments += ["--accent", accent] }
         return arguments
     }
@@ -928,8 +1019,8 @@ final class Model: ObservableObject {
         try? FileManager.default.createDirectory(at: Self.caches, withIntermediateDirectories: true)
         let file = Self.caches.appendingPathComponent("Timer preview.png")
         let finish = laps.compactMap { Double($0) }.reduce(0, +)
-        let arguments = ["--laps"] + laps + ["--first-crossing", "0", "--fps", "60", "--size", "1920x1080", "--track", track,
-                                             "--still", String(finish + 1), file.path] + pilotArguments
+        let arguments = ["--laps"] + laps + ["--first-crossing", "0", "--fps", "60", "--size", "1920x1080", "--track", Self.trackName(track),
+                                             "--still", String(finish + 1), file.path] + pilotArguments(for: track)
         let tool = tool
         let result = await Task.detached { runTool(tool, arguments) }.value
         guard result.status == 0, let data = try? Data(contentsOf: file) else { return nil }
@@ -1044,7 +1135,7 @@ final class Model: ObservableObject {
         guard job == nil else { return }
         if output != .overlay, let song = state(track).edits?[run.name]?.song, !song.isEmpty,
            !FileManager.default.fileExists(atPath: folder(track, "music").appendingPathComponent(song).path) {
-            notice = "\(song) isn't in \(track)'s music folder any more. Open Markers & music for \(run.name) and pick the song again."
+            notice = "\(song) isn't in \(Self.trackName(track))'s music folder any more. Open Markers & music for \(run.name) and pick the song again."
             return
         }
         // Without an overlays folder the lap timer writes beside the marker files instead, and the finished videos follow it there.
@@ -1057,7 +1148,7 @@ final class Model: ObservableObject {
         case .overlay: already = run.overlays.count
         }
         let tool = tool
-        let arguments = ["--markers", run.markers] + output.arguments + pilotArguments + toolArguments(track)
+        let arguments = ["--markers", run.markers] + output.arguments + pilotArguments(for: track) + toolArguments(track)
             + (output == .overlay ? [] : editArguments(run, track: track))
         Task.detached {
             let result = runTool(tool, arguments) { fraction in
@@ -1188,16 +1279,76 @@ final class Model: ObservableObject {
         update(track) { $0.submissions.append(Submission(run: run, time: time, link: link, date: Date())) }
     }
 
-    func newTrack() {
-        var number = tracks.count + 1
-        while FileManager.default.fileExists(atPath: root.appendingPathComponent("Track \(number)").path) { number += 1 }
-        let name = "Track \(number)"
+    /// Makes the next track in an event: "Track 3" after two.
+    func newTrack(in event: String) {
+        let place = event.isEmpty ? root : root.appendingPathComponent(event)
+        var number = (events.first { $0.folder == event }?.tracks.count ?? 0) + 1
+        while FileManager.default.fileExists(atPath: place.appendingPathComponent("Track \(number)").path) { number += 1 }
+        let track = (event.isEmpty ? "" : event + "/") + "Track \(number)"
         for part in ["Raw files", "csv markers", "music"] {
-            try? FileManager.default.createDirectory(at: folder(name, part), withIntermediateDirectories: true)
+            try? FileManager.default.createDirectory(at: folder(track, part), withIntermediateDirectories: true)
         }
         findTracks()
-        page = .track(name)
-        loadSummary(name)
+        page = .track(track)
+        loadSummary(track)
+    }
+
+    /// Whether a name will do for an event's folder. Returns what is wrong with it, or nil.
+    private func problem(withEventName name: String) -> String? {
+        if name.isEmpty { return "Give the event a name." }
+        if name.contains("/") || name.contains(":") || name.hasPrefix(".") { return "An event's name can't have / or : in it, or start with a full stop." }
+        return nil
+    }
+
+    /// Makes an event, with a first track in it. Returns what is wrong with the name, or nil.
+    func newEvent(named raw: String) -> String? {
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let problem = problem(withEventName: name) { return problem }
+        guard !FileManager.default.fileExists(atPath: root.appendingPathComponent(name).path) else {
+            return "There is already a folder called \(name) in your library."
+        }
+        var all = store.events ?? [:]
+        all[name] = EventState()
+        store.events = all
+        newTrack(in: name)
+        return nil
+    }
+
+    /// Moves the tracks that sit loose in the library into a folder named after their event, so they
+    /// are laid out like any other event. What the app remembers about them moves with them. Returns
+    /// what went wrong, or nil.
+    func gatherLooseTracks() -> String? {
+        guard job == nil, editor == nil else { return "Let the video finish, or close the marker editor, first." }
+        guard let loose = events.first(where: { $0.folder.isEmpty }), !loose.tracks.isEmpty else { return nil }
+        let name = (settings.event ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if let problem = problem(withEventName: name) { return name.isEmpty ? "Give the event a name first: its folder is named after it." : problem }
+        let manager = FileManager.default
+        let place = root.appendingPathComponent(name, isDirectory: true)
+        var isFolder: ObjCBool = false
+        if manager.fileExists(atPath: place.path, isDirectory: &isFolder),
+           !isFolder.boolValue || loose.tracks.contains(where: { manager.fileExists(atPath: place.appendingPathComponent($0).path) }) {
+            return "Something called \(name) is already in your library and is in the way."
+        }
+        var remembered = store
+        var failure: String?
+        do {
+            try manager.createDirectory(at: place, withIntermediateDirectories: true)
+            for track in loose.tracks {
+                try manager.moveItem(at: root.appendingPathComponent(track), to: place.appendingPathComponent(track))
+                remembered.tracks[name + "/" + track] = remembered.tracks.removeValue(forKey: track)
+                if page == .track(track) { page = .track(name + "/" + track) }
+            }
+        } catch {
+            failure = "Not every track could be moved: \(error.localizedDescription)"
+        }
+        var all = remembered.events ?? [:]
+        all[name] = EventState(id: settings.id.isEmpty ? nil : settings.id, idLabel: settings.idLabel)
+        remembered.events = all
+        store = remembered
+        summaries = [:]
+        expanded = []
+        refresh()
+        return failure
     }
 
     /// Asks before moving renders to the Trash, with a warning for any that Premiere is using.
@@ -1298,6 +1449,9 @@ struct RootView: View {
 
 struct Sidebar: View {
     @EnvironmentObject var model: Model
+    /// Asking for a new event's name.
+    @State private var naming = false
+    @State private var newName = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1307,41 +1461,68 @@ struct Sidebar: View {
                     Text("HANGAR").foregroundStyle(Theme.accent)
                 }
                 .font(.system(size: 26, weight: .black)).tracking(1)
-                // What the hangar is set up for right now: the event on the timer.
-                Text((model.settings.event ?? "").isEmpty ? "DRONE RACING" : (model.settings.event ?? "").uppercased()).label()
+                Text("DRONE RACING").label()
             }
             .padding(.horizontal, 20).padding(.top, 44).padding(.bottom, 26)
 
-            Text("TRACKS").label().padding(.horizontal, 20).padding(.bottom, 8)
-            ForEach(model.tracks, id: \.self) { track in
-                SidebarRow(title: track, detail: model.summaries[track]?.best?.best?.seconds, selected: model.page == .track(track)) {
-                    model.page = .track(track)
-                }
-            }
-            Button { model.newTrack() } label: {
-                Label("New track", systemImage: "plus").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.dim)
-            }
-            .buttonStyle(.plain).padding(.horizontal, 20).padding(.top, 10)
-
-            Text("SEASON").label().padding(.horizontal, 20).padding(.top, 28).padding(.bottom, 8)
-            SidebarRow(title: "Leaderboard", detail: nil, selected: model.page == .leaderboard) { model.page = .leaderboard }
-            SidebarRow(title: "Pilot & settings", detail: nil, selected: model.page == .settings) { model.page = .settings }
-            SidebarRow(title: "How it works", detail: nil, selected: model.page == .guide) { model.page = .guide }
-
-            Text("RACEGOW.COM").label().padding(.horizontal, 20).padding(.top, 28).padding(.bottom, 8)
-            ForEach([("Home", "home"), ("Tracks", "tracks"), ("Submissions", "submissions"), ("Leaderboards", "leaderboards")], id: \.1) { page in
-                Button {
-                    if let url = URL(string: "https://www.racegow.com/\(page.1)") { NSWorkspace.shared.open(url) }
-                } label: {
-                    HStack {
-                        Text(page.0).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.dim)
-                        Spacer()
-                        Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .heavy)).foregroundStyle(Theme.faint)
+            // Events and their tracks can outgrow the window, so this part scrolls.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(model.events) { event in
+                        let title = model.details(ofEvent: event.folder).name
+                        Text((title.isEmpty ? "Tracks" : title).uppercased()).label().lineLimit(1)
+                            .padding(.horizontal, 20).padding(.top, event.id == model.events.first?.id ? 0 : 20).padding(.bottom, 8)
+                        ForEach(event.tracks, id: \.self) { track in
+                            SidebarRow(title: Model.trackName(track), detail: model.summaries[track]?.best?.best?.seconds, selected: model.page == .track(track)) {
+                                model.page = .track(track)
+                            }
+                        }
+                        Button { model.newTrack(in: event.folder) } label: {
+                            Label("New track", systemImage: "plus").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.dim)
+                        }
+                        .buttonStyle(.plain).padding(.horizontal, 20).padding(.top, 10)
                     }
-                    .padding(.leading, 20).padding(.trailing, 16).padding(.vertical, 6)
-                    .contentShape(Rectangle())
+                    Button { naming = true } label: {
+                        Label("New event", systemImage: "folder.badge.plus").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.dim)
+                    }
+                    .buttonStyle(.plain).padding(.horizontal, 20).padding(.top, 20)
+                    .help("Another race or series, with its own tracks, its own name on the timer and its own ID.")
+
+                    Text("SEASON").label().padding(.horizontal, 20).padding(.top, 28).padding(.bottom, 8)
+                    SidebarRow(title: "Leaderboard", detail: nil, selected: model.page == .leaderboard) { model.page = .leaderboard }
+                    SidebarRow(title: "Pilot & settings", detail: nil, selected: model.page == .settings) { model.page = .settings }
+                    SidebarRow(title: "How it works", detail: nil, selected: model.page == .guide) { model.page = .guide }
+
+                    // The series' own site, while any event here is a RaceGOW one.
+                    if model.events.contains(where: { model.details(ofEvent: $0.folder).name.lowercased().contains("racegow") }) {
+                        Text("RACEGOW.COM").label().padding(.horizontal, 20).padding(.top, 28).padding(.bottom, 8)
+                        ForEach([("Home", "home"), ("Tracks", "tracks"), ("Submissions", "submissions"), ("Leaderboards", "leaderboards")], id: \.1) { page in
+                            Button {
+                                if let url = URL(string: "https://www.racegow.com/\(page.1)") { NSWorkspace.shared.open(url) }
+                            } label: {
+                                HStack {
+                                    Text(page.0).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.dim)
+                                    Spacer()
+                                    Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .heavy)).foregroundStyle(Theme.faint)
+                                }
+                                .padding(.leading, 20).padding(.trailing, 16).padding(.vertical, 6)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                 }
-                .buttonStyle(.plain)
+                .padding(.bottom, 12)
+            }
+            .alert("New event", isPresented: $naming) {
+                TextField("Its name, such as RaceGOW7", text: $newName)
+                Button("Create") {
+                    if let problem = model.newEvent(named: newName) { model.notice = problem }
+                    newName = ""
+                }
+                Button("Cancel", role: .cancel) { newName = "" }
+            } message: {
+                Text("An event is a race or a series. It gets its own folder in your library, with its own tracks, its own name on the timer and its own ID.")
             }
 
             Spacer()
@@ -1355,8 +1536,10 @@ struct Sidebar: View {
                 }
                 Text(model.settings.pilot.isEmpty ? "Add your pilot name" : model.settings.pilot)
                     .font(.system(size: 15, weight: .heavy)).foregroundStyle(.white)
-                if !model.settings.id.isEmpty {
-                    Text("\(model.settings.idLabel) \(model.settings.id)".uppercased())
+                // The ID is the event's: the one for the track that is showing.
+                let event = model.details(ofEvent: model.currentEvent)
+                if !event.id.isEmpty {
+                    Text("\(event.idLabel) \(event.id)".uppercased())
                         .font(.system(size: 10, weight: .heavy)).tracking(1.3).foregroundStyle(Theme.accent)
                 }
                 Text("FPV Hangar v\(AppVersion.current)").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.faint).padding(.top, 4)
@@ -1462,8 +1645,12 @@ struct TrackView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 14) {
-            Text(track.uppercased()).font(.system(size: 40, weight: .black)).tracking(0.5)
+        HStack(alignment: .lastTextBaseline, spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                let event = model.details(ofEvent: Model.eventFolder(of: track)).name
+                if !event.isEmpty { Text(event.uppercased()).label() }
+                Text(Model.trackName(track).uppercased()).font(.system(size: 40, weight: .black)).tracking(0.5)
+            }
             if let deadline = form?.deadline { DeadlinePill(deadline: deadline) }
             Spacer()
             Button("Refresh") { model.refresh() }.buttonStyle(SecondaryButton())
@@ -1899,7 +2086,7 @@ struct SubmitSheet: View {
         VStack(spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("SUBMIT \(target.track.uppercased())").label()
+                    Text("SUBMIT \(Model.trackName(target.track).uppercased())").label()
                     Text(sent ? "Sent" : showingForm ? "Check it and press Submit" : "Your answers").font(.system(size: 24, weight: .black))
                 }
                 Spacer()
@@ -1915,7 +2102,7 @@ struct SubmitSheet: View {
                 if sent {
                     VStack(spacing: 14) {
                         Image(systemName: "checkmark.seal.fill").font(.system(size: 60)).foregroundStyle(Theme.good)
-                        Text("Google has your \(time) for \(target.track).").font(.system(size: 17, weight: .heavy))
+                        Text("Google has your \(time) for \(Model.trackName(target.track)).").font(.system(size: 17, weight: .heavy))
                         Text("It's logged on the track page too.").font(.system(size: 13)).foregroundStyle(Theme.dim)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1991,7 +2178,7 @@ struct SubmitSheet: View {
         for question in form.questions {
             switch question.role {
             case .handle: answers[question.id] = [model.settings.pilot]
-            case .number: answers[question.id] = [model.settings.id]
+            case .number: answers[question.id] = [model.details(ofEvent: Model.eventFolder(of: target.track)).id]
             case .time: answers[question.id] = [time]
             case .link: answers[question.id] = [model.state(target.track).links[target.run.name] ?? ""]
             case nil: answers[question.id] = model.store.answers[question.title] ?? []
@@ -2856,7 +3043,7 @@ struct EditorView: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: 14) {
-            Button(action: done) { Label(editor.target.track, systemImage: "chevron.left") }.buttonStyle(SecondaryButton())
+            Button(action: done) { Label(Model.trackName(editor.target.track), systemImage: "chevron.left") }.buttonStyle(SecondaryButton())
             VStack(alignment: .leading, spacing: 1) {
                 Text(editor.target.name).font(.system(size: 24, weight: .black))
                 Text("MARKERS & MUSIC").label()
@@ -3313,8 +3500,14 @@ struct LeaderboardView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("YOUR TIMES").label()
                 ForEach(model.tracks, id: \.self) { track in
+                    // Each event's name, above the first of its tracks.
+                    if let event = model.events.first(where: { $0.tracks.first == track }) {
+                        let title = model.details(ofEvent: event.folder).name
+                        Text(title.isEmpty ? "Tracks" : title).font(.system(size: 12, weight: .heavy)).foregroundStyle(Theme.accent)
+                            .padding(.top, event.id == model.events.first?.id ? 0 : 8)
+                    }
                     HStack {
-                        Text(track).font(.system(size: 15, weight: .heavy))
+                        Text(Model.trackName(track)).font(.system(size: 15, weight: .heavy))
                         Spacer()
                         if let sent = model.state(track).submissions.last {
                             Text("submitted \(sent.time)").font(.system(size: 13, weight: .bold).monospacedDigit()).foregroundStyle(Theme.good)
@@ -3370,6 +3563,7 @@ struct SettingsView: View {
     /// What the timer preview is drawn from. When any of it changes, the preview is drawn again.
     private struct PreviewSource: Equatable {
         var settings: TimerSettings
+        var event: Model.EventDetails
         var track: String
         var laps: [String]
         var clip = ""
@@ -3384,10 +3578,14 @@ struct SettingsView: View {
         for track in model.tracks {
             guard let run = model.summaries[track]?.runs.first else { continue }
             let crossings = run.crossings ?? []
-            return PreviewSource(settings: model.settings, track: track, laps: Array(run.laps.prefix(8)), clip: run.clip,
+            return PreviewSource(settings: model.settings, event: model.details(ofEvent: Model.eventFolder(of: track)), track: track,
+                                 laps: Array(run.laps.prefix(8)), clip: run.clip,
                                  moment: crossings.count > 1 ? (crossings[0] + crossings[1]) / 2 : 1, run: run.name)
         }
-        return PreviewSource(settings: model.settings, track: model.tracks.first ?? "Track 1", laps: ["12.345", "11.876", "12.012"])
+        // With no run to borrow from, the first track there is, or the one the first event will get.
+        let track = model.tracks.first ?? (model.events.first.map { $0.folder.isEmpty ? "" : $0.folder + "/" } ?? "") + "Track 1"
+        return PreviewSource(settings: model.settings, event: model.details(ofEvent: Model.eventFolder(of: track)), track: track,
+                             laps: ["12.345", "11.876", "12.012"])
     }
 
     private var timerPreview: some View {
@@ -3449,16 +3647,16 @@ struct SettingsView: View {
                 Text("PILOT").label()
                 HStack(spacing: 14) {
                     AnswerField(title: "Pilot name", required: false, text: $model.settings.pilot)
-                    AnswerField(title: "ID number", required: false, text: $model.settings.id).frame(width: 120)
-                    AnswerField(title: "Shown before the ID", required: false, text: $model.settings.idLabel).frame(width: 190)
-                }
-                HStack(spacing: 14) {
-                    AnswerField(title: "Event shown on the timer", required: false,
-                                text: Binding(get: { model.settings.event ?? "" }, set: { model.settings.event = $0.isEmpty ? nil : $0 }))
-                        .frame(width: 260)
                     AnswerField(title: "Email for submission forms", required: false, text: $model.store.email)
                 }
-                Text("The name, ID and event go on every timer and finished video, next to the track's name, which is its folder name. The name and ID also go into the form.")
+                Text("Your name goes on every timer and finished video, and into the entry forms.")
+                    .font(.system(size: 12)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+            }
+            .card()
+            VStack(alignment: .leading, spacing: 18) {
+                Text("EVENTS").label()
+                ForEach(model.events) { event in EventFields(event: event) }
+                Text("An event is a race or a series: a folder in your library with its tracks inside. Its name goes on the timer of every track in it, next to the track's name, and your ID for it goes beside your name and into its entry forms. New event in the sidebar makes another.")
                     .font(.system(size: 12)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
             }
             .card()
@@ -3665,12 +3863,50 @@ struct NoteSheet: View {
     }
 }
 
+/// One event's details in Pilot & settings: the name its timers show and the pilot's ID for it.
+struct EventFields: View {
+    @EnvironmentObject var model: Model
+    let event: Model.Event
+
+    private func field(_ part: WritableKeyPath<Model.EventDetails, String>) -> Binding<String> {
+        Binding(get: { model.details(ofEvent: event.folder)[keyPath: part] }, set: { value in
+            var details = model.details(ofEvent: event.folder)
+            details[keyPath: part] = value
+            model.setDetails(details, ofEvent: event.folder)
+        })
+    }
+
+    var body: some View {
+        let name = model.details(ofEvent: event.folder).name
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(event.folder.isEmpty ? (name.isEmpty ? "Tracks" : name) : event.folder).font(.system(size: 15, weight: .heavy))
+                Text(event.tracks.isEmpty ? "no tracks yet" : "\(event.tracks.count) track\(event.tracks.count == 1 ? "" : "s")")
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.faint)
+                Spacer()
+                if event.folder.isEmpty {
+                    Button("Give it its own folder") {
+                        if let problem = model.gatherLooseTracks() { model.notice = problem }
+                    }
+                    .buttonStyle(SecondaryButton())
+                    .help("These tracks sit loose in your library, from before there were events. This moves them into a folder named after the event, like any other. If their clips are in a Premiere project, Premiere will ask where they went.")
+                }
+            }
+            HStack(spacing: 14) {
+                AnswerField(title: "Name on the timer", required: false, text: field(\.name)).frame(width: 260)
+                AnswerField(title: "Your ID number", required: false, text: field(\.id)).frame(width: 150)
+                AnswerField(title: "Shown before the ID", required: false, text: field(\.idLabel)).frame(width: 200)
+            }
+        }
+    }
+}
+
 /// A short walk through the whole job, from a raw clip to a submitted time.
 struct GuideView: View {
     @EnvironmentObject var model: Model
     private let steps: [(String, String)] = [
         ("Set up the track",
-         "Press New track in the sidebar, or use one you already have. Put the raw clips in its Raw files folder and paste the track's Google Form link into Submission form on the track page."),
+         "Tracks are grouped by event in the sidebar. Press New track under an event, or New event for another race or series. Put the raw clips in the track's Raw files folder and paste the track's Google Form link into Submission form on the track page."),
         ("Mark the laps",
          "Press Mark laps on a clip. Play or drag to just before a start/finish gate crossing, step to the exact frame with the arrow keys, and press M. The first marker starts lap 1; each later one ends a lap. To fix one, go to it with the up and down arrows and move it a frame at a time with ⌘← and ⌘→. Save, and the run appears on the track page, ranked by its best 3 laps in a row."),
         ("Choose what the video shows",
@@ -3791,6 +4027,8 @@ enum Main {
             MainActor.assumeIsolated { checkForm() }
         } else if arguments.contains("--check-editor") {
             MainActor.assumeIsolated { checkEditor() }
+        } else if arguments.contains("--check-events") {
+            MainActor.assumeIsolated { checkEvents() }
         } else if arguments.contains("--check-update") {
             MainActor.assumeIsolated { checkUpdate(install: arguments.contains("--install")) }
         } else {
@@ -3843,6 +4081,37 @@ enum Main {
         withExtendedLifetime(checker) { RunLoop.main.run(until: Date().addingTimeInterval(30)) }
         print("The form never finished loading.")
         exit(1)
+    }
+
+    /// Tries what can be done to events on the library given with --root, which it changes: makes an
+    /// event, gives it details and a second track, and gathers any loose tracks into a folder. Prints
+    /// what the library holds at each step. Only for a throwaway copy of a library.
+    @MainActor
+    static func checkEvents() {
+        guard CommandLine.arguments.contains("--root") else {
+            print("This changes the library it is run on. Point it at a copy with --root.")
+            exit(1)
+        }
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let model = Model()
+        func show(_ title: String) {
+            print(title)
+            for event in model.events {
+                let details = model.details(ofEvent: event.folder)
+                print("  \(event.folder.isEmpty ? "(loose in the library)" : event.folder): on the timer \"\(details.name)\", \(details.idLabel) \"\(details.id)\", tracks \(event.tracks)")
+            }
+        }
+        show("at the start")
+        print("a name with a slash in it: \(model.newEvent(named: "a/b") ?? "accepted")")
+        print("making Spring Cup: \(model.newEvent(named: " Spring Cup ") ?? "made")")
+        print("the same name again: \(model.newEvent(named: "Spring Cup") ?? "made")")
+        model.setDetails(Model.EventDetails(name: "Spring Cup 2026", id: "42", idLabel: "Pilot"), ofEvent: "Spring Cup")
+        model.newTrack(in: "Spring Cup")
+        show("after making Spring Cup and a second track in it")
+        print("gathering the loose tracks: \(model.gatherLooseTracks() ?? "moved")")
+        show("after gathering")
+        print("remembered for: \(model.store.tracks.keys.sorted())")
+        exit(0)
     }
 
     /// Prints what the update feed offers. With --install, puts a newer version in place of this copy

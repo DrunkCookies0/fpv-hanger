@@ -15,6 +15,7 @@ The app is not from the App Store, so macOS asks before opening it the first tim
 - **Make videos.** A 16:9 video for YouTube and a 9:16 one for Shorts, TikTok and Reels, with the timer, your name and the event drawn in. Or a transparent timer overlay to finish the video in Premiere.
 - **Add music.** Place a song against the laps on a timeline and choose where the video starts and ends.
 - **Submit.** Paste a track's Google Form link and the app fills the form in. You press Submit yourself.
+- **Keep events apart.** Tracks are grouped by event, a race or a series, each with its own name on the timer and its own ID number.
 
 ## Coming soon
 
@@ -22,7 +23,6 @@ These are marked "Coming soon" in the app and do nothing yet:
 
 - Upload to YouTube, TikTok and Instagram
 - Season leaderboards
-- Events other than RaceGOW
 
 ## Building it
 
@@ -44,7 +44,7 @@ That writes `FPV Hangar.app` into this folder, built for the Mac you are on, wit
 | `package.sh`, `publish.sh` | Package the app, and start a release |
 | `.github/workflows/release.yml` | Builds and publishes a release when a version tag is pushed |
 
-A copy of the app that sits in a folder with a `dashboard.json` or a `Lap Timer` folder keeps its tracks in that folder. Any other copy keeps them in `~/Movies/FPV Hangar`.
+A copy of the app that sits in a folder with a `dashboard.json` or a `Lap Timer` folder keeps its tracks in that folder. Any other copy keeps them in `~/Movies/FPV Hangar`. Inside that library, each event is a folder with its tracks inside, and a track is known by its path there, such as `RaceGOW6/Track 1`.
 
 ### Things to keep
 
