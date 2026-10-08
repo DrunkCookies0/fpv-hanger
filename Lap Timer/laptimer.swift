@@ -1,7 +1,7 @@
 // laptimer — builds a transparent lap-timer overlay (ProRes 4444 with alpha) for Premiere Pro
 // from the timeline markers you drop at each start/finish gate crossing.
 //
-// Build:  swiftc -O laptimer.swift -o laptimer
+// Build:  swiftc -O -parse-as-library laptimer.swift -o laptimer
 // Run:    ./laptimer            (asks a few questions)
 //         ./laptimer --help     (all options)
 
@@ -12,7 +12,7 @@ import CoreImage
 import Foundation
 
 /// The same number as the VERSION file and the app. package.sh refuses to package if they differ.
-let toolVersion = "0.10.0"
+let toolVersion = "0.11.0"
 
 // MARK: - Utilities
 
@@ -231,7 +231,7 @@ struct Race {
 
 final class Panel {
     enum Align { case left, right }
-    /// `stack` is the corner box for a landscape frame. `wide` is the low strip that sits under the
+    /// `stack` is the corner box for a landscape frame. `wide` is the box that sits under the
     /// picture in an upright video.
     enum Layout { case stack, wide }
 
@@ -261,8 +261,6 @@ final class Panel {
     private let headerHeight: CGFloat
     private let rowHeight: CGFloat = 38
     private let footerHeight: CGFloat = 66
-    /// Wide layout: where the lap list starts.
-    private let listX: CGFloat = 330
 
     private let titleFont = NSFont.systemFont(ofSize: 16, weight: .bold) as CTFont
     private let badgeFont = NSFont.systemFont(ofSize: 13, weight: .heavy) as CTFont
@@ -274,9 +272,37 @@ final class Panel {
     private let footLabelFont = NSFont.systemFont(ofSize: 16, weight: .heavy) as CTFont
     private let footValueFont = NSFont.monospacedDigitSystemFont(ofSize: 32, weight: .heavy) as CTFont
 
+    // The wide box. It is built around the laps that are judged: the fastest run of consecutive
+    // laps, known from the start because the run is over by the time its video is made.
+    /// The judged laps. All of them, when the run has no more laps than are judged.
+    private let judged: Range<Int>
+    /// The rest, shown small underneath, how many of them go across, and how many there is room for.
+    /// When there are more than that, the ones shown follow the lap being flown, as the corner box's list does.
+    private let others: [Int]
+    private let otherColumns: Int
+    private let otherPlaces: Int
+    /// How far the wide box is squeezed or stretched from its natural height to suit the room it has.
+    private let fit: CGFloat
+    private let wideLabelFont: CTFont
+    private let wideBigFont: CTFont
+    private let judgedLabelFont: CTFont
+    private let judgedValueFont: CTFont
+    private let otherLabelFont: CTFont
+    private let otherValueFont: CTFont
+    /// The wide box's parts at their natural height: the judged laps' time, those laps, and a row of the others.
+    private static let wideHead: CGFloat = 132, wideJudged: CGFloat = 96, wideOtherRow: CGFloat = 42, wideOtherPad: CGFloat = 8
+    /// How wide the wide box is, in reference points, and how far in from each side of an upright
+    /// video's frame it sits, in pixels: the same as the heading above the picture. Its scale is the
+    /// width that leaves over this.
+    static let wideWidth: CGFloat = 688
+    static let wideMargin: CGFloat = 40
+
     /// `title` (pilot name) and `badge` (such as an ID) share a heading row, under the event and track strip.
+    /// `room` is for the wide box: the height there is for it, in reference points. It grows a little
+    /// to use room it is given, shrinks to fit less, and leaves out rows of the smaller laps before
+    /// it shrinks further than reads well.
     init(race: Race, scale: CGFloat, accent rgb: [CGFloat], title: String?, badge: String? = nil,
-         event: String? = nil, track: String? = nil, maxRows: Int, layout: Layout = .stack) {
+         event: String? = nil, track: String? = nil, maxRows: Int, layout: Layout = .stack, room: CGFloat? = nil) {
         self.race = race
         self.scale = scale
         self.title = title
@@ -290,20 +316,54 @@ final class Panel {
         onAccent = luminance > 0.55
             ? CGColor(srgbRed: 0.05, green: 0.05, blue: 0.06, alpha: 1)
             : CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
-        stripHeight = event == nil && track == nil ? 0 : 36
-        titleHeight = title == nil && badge == nil ? 0 : 44
+        var squeeze: CGFloat = 1
+        var across = 3
+        var places = 0
         switch layout {
         case .stack:
+            stripHeight = event == nil && track == nil ? 0 : 36
+            titleHeight = title == nil && badge == nil ? 0 : 44
             rows = min(race.lapCount, max(0, maxRows))
             width = 400
             headerHeight = 118
             height = stripHeight + titleHeight + headerHeight + (rows > 0 ? CGFloat(rows) * 38 + 16 : 0) + 66
+            judged = 0..<0
+            others = []
         case .wide:
-            rows = min(race.lapCount, 3)
-            width = 560
-            headerHeight = 124
-            height = stripHeight + titleHeight + headerHeight + 66
+            // The pilot and the event are in the heading above the picture, not in this box.
+            stripHeight = 0
+            titleHeight = 0
+            headerHeight = 0
+            width = Panel.wideWidth
+            let laps = race.lapCount
+            let first = laps > race.window ? race.best(afterLaps: laps)?.start ?? 0 : 0
+            let window = first..<(first + min(race.window, laps))
+            judged = window
+            let rest = (0..<laps).filter { !window.contains($0) }
+            across = rest.count > 6 ? 4 : 3
+            var otherRows = (rest.count + across - 1) / across
+            func natural(_ rows: Int) -> CGFloat {
+                Panel.wideHead + Panel.wideJudged + (rows > 0 ? CGFloat(rows) * Panel.wideOtherRow + 2 * Panel.wideOtherPad : 0)
+            }
+            if let room {
+                while otherRows > 0, natural(otherRows) * 0.8 > room { otherRows -= 1 }
+                squeeze = min(1.1, max(0.8, room / natural(otherRows)))
+            }
+            others = rest
+            places = min(rest.count, otherRows * across)
+            rows = window.count
+            height = natural(otherRows) * squeeze
         }
+        fit = squeeze
+        otherColumns = across
+        otherPlaces = places
+        wideLabelFont = NSFont.systemFont(ofSize: 17 * squeeze, weight: .heavy) as CTFont
+        wideBigFont = NSFont.monospacedDigitSystemFont(ofSize: 88 * squeeze, weight: .heavy) as CTFont
+        judgedLabelFont = NSFont.systemFont(ofSize: 15 * squeeze, weight: .bold) as CTFont
+        // Three times side by side are as big as they get. More than three share the same width.
+        judgedValueFont = NSFont.monospacedDigitSystemFont(ofSize: 40 * squeeze * min(1, 3 / CGFloat(max(judged.count, 1))), weight: .bold) as CTFont
+        otherLabelFont = NSFont.systemFont(ofSize: 13 * squeeze, weight: .bold) as CTFont
+        otherValueFont = NSFont.monospacedDigitSystemFont(ofSize: 22 * squeeze * (across > 3 ? 0.85 : 1), weight: .bold) as CTFont
         pixelWidth = Int((width * scale).rounded(.up))
         pixelHeight = Int((height * scale).rounded(.up))
         guard let context = CGContext(
@@ -334,6 +394,15 @@ final class Panel {
         return lineWidth
     }
 
+    /// A line of text no wider than `room`: in a smaller size of the same font when it has to be.
+    private func fitted(_ string: String, _ font: CTFont, _ color: CGColor, room: CGFloat) -> (line: CTLine, font: CTFont) {
+        let whole = line(string, font, color)
+        let width = CGFloat(CTLineGetTypographicBounds(whole, nil, nil, nil))
+        guard room > 0, width > room else { return (whole, font) }
+        let smaller = CTFontCreateCopyWithAttributes(font, CTFontGetSize(font) * room / width, nil, nil)
+        return (line(string, smaller, color), smaller)
+    }
+
     private func hairline(at y: CGFloat) {
         context.setFillColor(white(0.14))
         context.fill(CGRect(x: 0, y: y, width: width, height: 1))
@@ -350,6 +419,21 @@ final class Panel {
         c.scaleBy(x: scale, y: -scale)
         c.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
 
+        let frame = CGRect(x: 0, y: 0, width: width, height: height)
+        c.addPath(CGPath(roundedRect: frame, cornerWidth: 16, cornerHeight: 16, transform: nil))
+        c.clip()
+        c.setFillColor(CGColor(srgbRed: 0.03, green: 0.04, blue: 0.05, alpha: 0.8))
+        c.fill(frame)
+
+        switch layout {
+        case .stack: drawStack(at: seconds)
+        case .wide: drawWide(at: seconds)
+        }
+    }
+
+    /// The corner box: the lap being flown, every lap in a list under it, and the best run of laps so far at the foot.
+    private func drawStack(at seconds: Double) {
+        let c = context
         let unitsPerSecond = Double(race.unitsPerSecond)
         let now = Int((seconds * unitsPerSecond).rounded())
         let laps = race.lapCount
@@ -358,12 +442,6 @@ final class Panel {
         let finished = done == laps
         let best = race.best(afterLaps: done)
         func age(ofBound index: Int) -> Double { seconds - Double(race.bounds[index]) / unitsPerSecond }
-
-        let frame = CGRect(x: 0, y: 0, width: width, height: height)
-        c.addPath(CGPath(roundedRect: frame, cornerWidth: 16, cornerHeight: 16, transform: nil))
-        c.clip()
-        c.setFillColor(CGColor(srgbRed: 0.03, green: 0.04, blue: 0.05, alpha: 0.8))
-        c.fill(frame)
 
         var y: CGFloat = 0
 
@@ -392,30 +470,18 @@ final class Panel {
         }
 
         // Current lap
-        let labelY = y + (layout == .wide ? 35 : 31)
+        let labelY = y + 31
         let headLabel = finished ? "FINISHED" : "LAP \(done + 1)"
         let headWidth = put(line(headLabel, headLabelFont, accent, kern: 1.6), x: pad, centerY: labelY, font: headLabelFont)
         if !finished {
             put(line("/ \(laps)", headLabelFont, white(0.45), kern: 1.6), x: pad + headWidth + 7, centerY: labelY, font: headLabelFont)
         }
         let running = finished ? race.lap(laps - 1) : started ? now - race.bounds[done] : 0
-        put(line(race.time(running, minutes: true), bigFont, white(started ? 1 : 0.5)),
-            x: pad - 3, centerY: y + (layout == .wide ? 83 : 77), font: bigFont)
+        put(line(race.time(running, minutes: true), bigFont, white(started ? 1 : 0.5)), x: pad - 3, centerY: y + 77, font: bigFont)
 
-        // Lap list: under the current lap in the stack, beside it in the wide strip.
-        let listLeft: CGFloat
-        var rowY: CGFloat
-        switch layout {
-        case .stack:
-            if rows > 0 { hairline(at: y + headerHeight) }
-            listLeft = 0
-            rowY = y + headerHeight + 8
-        case .wide:
-            c.setFillColor(white(0.14))
-            c.fill(CGRect(x: listX, y: y, width: 1, height: headerHeight))
-            listLeft = listX
-            rowY = y + (headerHeight - CGFloat(rows) * rowHeight) / 2
-        }
+        // Lap list, under the current lap.
+        if rows > 0 { hairline(at: y + headerHeight) }
+        var rowY = y + headerHeight + 8
         let first = laps <= rows ? 0 : min(max(done - rows + 1, 0), laps - rows)
         for row in 0..<rows {
             let lap = first + row
@@ -426,16 +492,15 @@ final class Panel {
                 let flash = 1 - age(ofBound: lap + 1)
                 if flash > 0 {
                     c.setFillColor(accent.copy(alpha: 0.5 * flash)!)
-                    c.fill(CGRect(x: listLeft, y: rowY, width: width - listLeft, height: rowHeight))
+                    c.fill(CGRect(x: 0, y: rowY, width: width, height: rowHeight))
                 }
             }
             if inBest {
                 c.setFillColor(accent)
-                c.fill(CGRect(x: listLeft, y: rowY + 5, width: 5, height: rowHeight - 10))
+                c.fill(CGRect(x: 0, y: rowY + 5, width: 5, height: rowHeight - 10))
             }
             let labelColor = inBest ? accent : white(complete ? 0.62 : current ? 0.9 : 0.3)
-            put(line("LAP \(lap + 1)", rowLabelFont, labelColor, kern: 1.2),
-                x: listLeft + (layout == .wide ? 20 : pad), centerY: rowY + rowHeight / 2, font: rowLabelFont)
+            put(line("LAP \(lap + 1)", rowLabelFont, labelColor, kern: 1.2), x: pad, centerY: rowY + rowHeight / 2, font: rowLabelFont)
             let value = complete ? race.time(race.lap(lap)) : "–"
             put(line(value, rowValueFont, white(complete ? 1 : 0.3)), x: width - pad, centerY: rowY + rowHeight / 2, font: rowValueFont, align: .right)
             rowY += rowHeight
@@ -470,6 +535,96 @@ final class Panel {
             x: width - pad, centerY: footer.midY, font: footValueFont, align: .right)
     }
 
+    /// The box under an upright video's picture. The judged laps are the point of it: one big time
+    /// for them together, which waits at nothing until the first of them starts, runs through them,
+    /// and stops on what they came to. Under it those laps, each with its own time, and under them
+    /// the other laps, smaller, for anyone curious. A lap being flown shows its time as it runs.
+    private func drawWide(at seconds: Double) {
+        let c = context
+        let unitsPerSecond = Double(race.unitsPerSecond)
+        let now = Int((seconds * unitsPerSecond).rounded())
+        let laps = race.lapCount
+        let done = race.completed(at: now)
+        let started = now >= race.bounds[0]
+        func age(ofBound index: Int) -> Double { seconds - Double(race.bounds[index]) / unitsPerSecond }
+        /// A lap's time: what it came to, what it has run to so far, or nothing yet.
+        func time(ofLap lap: Int) -> String {
+            lap < done ? race.time(race.lap(lap)) : lap == done && started ? race.time(now - race.bounds[lap]) : "–"
+        }
+
+        // The judged laps as one time.
+        let opens = race.bounds[judged.lowerBound], closes = race.bounds[judged.upperBound]
+        let running = now >= opens, isSet = now >= closes
+        let total = isSet ? closes - opens : running ? now - opens : 0
+        let headHeight = Panel.wideHead * fit
+        if isSet {
+            // It flashes as it lands, then stays lit.
+            let flash = CGFloat(max(0, 1 - age(ofBound: judged.upperBound) / 0.8)) * 0.75
+            let mixed = accentRGB.map { $0 + (1 - $0) * flash }
+            c.setFillColor(CGColor(srgbRed: mixed[0], green: mixed[1], blue: mixed[2], alpha: 1))
+            c.fill(CGRect(x: 0, y: 0, width: width, height: headHeight))
+        }
+        let quiet = isSet ? onAccent.copy(alpha: 0.62)! : white(0.45)
+        let labelY = 31 * fit
+        let label = laps > race.window ? "BEST \(race.window) LAPS" : laps == race.window ? "\(laps) LAPS" : "TOTAL"
+        let labelWidth = put(line(label, wideLabelFont, isSet ? onAccent : accent, kern: 1.6), x: pad, centerY: labelY, font: wideLabelFont)
+        if laps > race.window {
+            put(line("LAPS \(judged.lowerBound + 1)–\(judged.upperBound)", wideLabelFont, quiet, kern: 1.6),
+                x: pad + labelWidth + 12, centerY: labelY, font: wideLabelFont)
+        }
+        // Where the run has got to, at the right.
+        let place = done == laps ? "FINISHED" : "LAP \(done + 1) / \(laps)"
+        put(line(place, wideLabelFont, quiet, kern: 1.6), x: width - pad, centerY: labelY, font: wideLabelFont, align: .right)
+        put(line(race.time(total, minutes: true), wideBigFont, isSet ? onAccent : white(running ? 1 : 0.5)),
+            x: pad - 3, centerY: 88 * fit, font: wideBigFont)
+
+        // The judged laps, side by side.
+        var y = headHeight
+        let judgedHeight = Panel.wideJudged * fit
+        let cell = width / CGFloat(max(judged.count, 1))
+        if !isSet { hairline(at: y) }
+        for (column, lap) in judged.enumerated() {
+            let x = CGFloat(column) * cell
+            let flash = lap < done ? 1 - age(ofBound: lap + 1) : 0
+            if flash > 0 {
+                c.setFillColor(accent.copy(alpha: 0.5 * flash)!)
+                c.fill(CGRect(x: x, y: y, width: cell, height: judgedHeight))
+            }
+            if column > 0 {
+                c.setFillColor(white(0.14))
+                c.fill(CGRect(x: x, y: y, width: 1, height: judgedHeight))
+            }
+            c.setFillColor(accent)
+            c.fill(CGRect(x: x + (column > 0 ? 1 : 0), y: y + 16 * fit, width: 5, height: judgedHeight - 32 * fit))
+            put(line("LAP \(lap + 1)", judgedLabelFont, accent, kern: 1.2), x: x + 22, centerY: y + 30 * fit, font: judgedLabelFont)
+            let value = fitted(time(ofLap: lap), judgedValueFont, white(lap <= done && started ? 1 : 0.3), room: cell - 40)
+            put(value.line, x: x + 21, centerY: y + 66 * fit, font: value.font)
+        }
+        y += judgedHeight
+
+        // The other laps, smaller. With more of them than places, the places follow the lap being flown.
+        guard otherPlaces > 0 else { return }
+        hairline(at: y)
+        let otherCell = width / CGFloat(otherColumns)
+        let rowHeight = Panel.wideOtherRow * fit
+        y += Panel.wideOtherPad * fit
+        let reached = others.filter { $0 <= done }.count
+        let from = min(max(reached - otherPlaces, 0), others.count - otherPlaces)
+        for (index, lap) in others[from..<(from + otherPlaces)].enumerated() {
+            let x = CGFloat(index % otherColumns) * otherCell, top = y + CGFloat(index / otherColumns) * rowHeight
+            let complete = lap < done, current = lap == done && started
+            let flash = complete ? 1 - age(ofBound: lap + 1) : 0
+            if flash > 0 {
+                c.setFillColor(accent.copy(alpha: 0.35 * flash)!)
+                c.fill(CGRect(x: x, y: top, width: otherCell, height: rowHeight))
+            }
+            let named = put(line("LAP \(lap + 1)", otherLabelFont, white(complete ? 0.55 : current ? 0.9 : 0.3), kern: 1.1),
+                            x: x + 22, centerY: top + rowHeight / 2, font: otherLabelFont)
+            let value = fitted(time(ofLap: lap), otherValueFont, white(complete ? 0.78 : current ? 1 : 0.3), room: otherCell - 44 - named - 8)
+            put(value.line, x: x + otherCell - 22, centerY: top + rowHeight / 2, font: value.font, align: .right)
+        }
+    }
+
     /// Copies the panel into a BGRA frame at pixel (x, y) from the top-left, converting to straight alpha.
     func blit(into base: UnsafeMutableRawPointer, bytesPerRow: Int, x: Int, y: Int) {
         var source = vImage_Buffer(data: context.data, height: vImagePixelCount(pixelHeight),
@@ -484,11 +639,13 @@ final class Panel {
 }
 
 /// Pilot name and ID as a banner for the top of an upright video, `width` pixels wide, with an
-/// optional line above them for the event and track.
-func uprightHeading(title: String?, badge: String?, eyebrow: String?, accent: [CGFloat], width: Int) -> CGImage? {
-    guard title != nil || badge != nil || eyebrow != nil else { return nil }
+/// optional line above them for the event and track. A logo, when there is one, sits at the right
+/// of it, as big as the banner's height and the room beside the words allow.
+func uprightHeading(title: String?, badge: String?, eyebrow: String?, accent: [CGFloat], width: Int, logo: CGImage? = nil) -> CGImage? {
+    guard title != nil || badge != nil || eyebrow != nil || logo != nil else { return nil }
     let lift = eyebrow == nil ? 0 : 50
-    let height = (title == nil && badge == nil ? 0 : 150) + lift
+    // With nothing but a logo, the banner is as tall as the logo is let be.
+    let height = max((title == nil && badge == nil ? 0 : 150) + lift, logo == nil ? 0 : 170)
     guard let context = CGContext(
         data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
         space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
@@ -496,14 +653,18 @@ func uprightHeading(title: String?, badge: String?, eyebrow: String?, accent: [C
     context.translateBy(x: 0, y: CGFloat(height))
     context.scaleBy(x: 1, y: -1)
     context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
+    /// How far right the words reach, so the logo can keep clear of them.
+    var wordsEnd: CGFloat = 0
     func put(_ string: String, font: CTFont, color: CGColor, kern: CGFloat, x: CGFloat, centerY: CGFloat) {
         let attributes: [NSAttributedString.Key: Any] = [
             NSAttributedString.Key(kCTFontAttributeName as String): font,
             NSAttributedString.Key(kCTForegroundColorAttributeName as String): color,
             NSAttributedString.Key(kCTKernAttributeName as String): kern,
         ]
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: string, attributes: attributes))
         context.textPosition = CGPoint(x: x, y: centerY + CTFontGetCapHeight(font) / 2)
-        CTLineDraw(CTLineCreateWithAttributedString(NSAttributedString(string: string, attributes: attributes)), context)
+        CTLineDraw(line, context)
+        wordsEnd = max(wordsEnd, x + CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil)))
     }
     context.setShadow(offset: CGSize(width: 0, height: -3), blur: 14, color: CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.6))
     if let eyebrow {
@@ -518,7 +679,30 @@ func uprightHeading(title: String?, badge: String?, eyebrow: String?, accent: [C
         put(badge.uppercased(), font: NSFont.systemFont(ofSize: 30, weight: .heavy) as CTFont,
             color: CGColor(srgbRed: accent[0], green: accent[1], blue: accent[2], alpha: 1), kern: 3, x: 43, centerY: CGFloat(lift) + (title == nil ? 75 : 120))
     }
+    if let logo, logo.width > 0, logo.height > 0 {
+        // At the right, the same distance in from the edge as the words are from theirs. It is left out
+        // when a long name leaves too little room for it to be made out.
+        let margin: CGFloat = 40
+        let room = CGSize(width: min(420, CGFloat(width) - margin - (wordsEnd > 0 ? wordsEnd + 36 : margin)), height: CGFloat(height) - 6)
+        let fit = min(room.width / CGFloat(logo.width), room.height / CGFloat(logo.height))
+        let size = CGSize(width: CGFloat(logo.width) * fit, height: CGFloat(logo.height) * fit)
+        if size.width >= 120 {
+            context.saveGState()
+            // The surface is drawn on top-down, and a picture would come out upside down: turn it back.
+            context.translateBy(x: CGFloat(width) - margin - size.width, y: (CGFloat(height) + size.height) / 2)
+            context.scaleBy(x: 1, y: -1)
+            context.interpolationQuality = .high
+            context.draw(logo, in: CGRect(origin: .zero, size: size))
+            context.restoreGState()
+        }
+    }
     return context.makeImage()
+}
+
+/// A picture file as an image, for the logo. Nil when there is none or it can't be read.
+func loadPicture(_ path: String?) -> CGImage? {
+    guard let path, let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil) else { return nil }
+    return CGImageSourceCreateImageAtIndex(source, 0, nil)
 }
 
 // MARK: - Output
@@ -530,23 +714,31 @@ struct Placement {
     let y: Int
 }
 
+/// Where a box of a given size goes in a frame, for one of the six positions: its top-left corner in
+/// pixels from the frame's top-left. Nil for a position that isn't one of them. The app's marker
+/// editor asks this too, to show the timer where the video will have it.
+func corner(_ position: String, boxWidth: Int, boxHeight: Int, frameWidth: Int, frameHeight: Int, inset: Int) -> (x: Int, y: Int)? {
+    switch position.trimmed.lowercased().replacingOccurrences(of: " ", with: "-") {
+    case "tl", "top-left": return (inset, inset)
+    case "tr", "top-right": return (frameWidth - boxWidth - inset, inset)
+    case "bl", "bottom-left": return (inset, frameHeight - boxHeight - inset)
+    case "br", "bottom-right": return (frameWidth - boxWidth - inset, frameHeight - boxHeight - inset)
+    case "tc", "top-center": return ((frameWidth - boxWidth) / 2, inset)
+    case "bc", "bottom-center": return ((frameWidth - boxWidth) / 2, frameHeight - boxHeight - inset)
+    default: return nil
+    }
+}
+
 func place(panel: Panel, frameWidth: Int, frameHeight: Int, position: String, margin: CGFloat) -> Placement {
     let inset = Int((margin * panel.scale).rounded())
     guard panel.pixelWidth + 2 * inset <= frameWidth, panel.pixelHeight + 2 * inset <= frameHeight else {
         fail("The timer panel (\(panel.pixelWidth)x\(panel.pixelHeight) px) doesn't fit in a \(frameWidth)x\(frameHeight) frame. "
             + "Try a smaller --scale or fewer --max-rows.")
     }
-    let x: Int, y: Int
-    switch position.trimmed.lowercased().replacingOccurrences(of: " ", with: "-") {
-    case "tl", "top-left": (x, y) = (inset, inset)
-    case "tr", "top-right": (x, y) = (frameWidth - panel.pixelWidth - inset, inset)
-    case "bl", "bottom-left": (x, y) = (inset, frameHeight - panel.pixelHeight - inset)
-    case "br", "bottom-right": (x, y) = (frameWidth - panel.pixelWidth - inset, frameHeight - panel.pixelHeight - inset)
-    case "tc", "top-center": (x, y) = ((frameWidth - panel.pixelWidth) / 2, inset)
-    case "bc", "bottom-center": (x, y) = ((frameWidth - panel.pixelWidth) / 2, frameHeight - panel.pixelHeight - inset)
-    default: fail("Unknown position \"\(position)\". Use tl, tr, bl, br, tc or bc.")
+    guard let spot = corner(position, boxWidth: panel.pixelWidth, boxHeight: panel.pixelHeight, frameWidth: frameWidth, frameHeight: frameHeight, inset: inset) else {
+        fail("Unknown position \"\(position)\". Use tl, tr, bl, br, tc or bc.")
     }
-    return Placement(frameWidth: frameWidth, frameHeight: frameHeight, x: x, y: y)
+    return Placement(frameWidth: frameWidth, frameHeight: frameHeight, x: spot.x, y: spot.y)
 }
 
 func writeMovie(to url: URL, panel: Panel, placement: Placement, fps: FrameRate, frameCount: Int, label: String) {
@@ -1400,22 +1592,28 @@ func writeFinishedVideo(shape: VideoShape, clip: ReadableClip, race: Race, from 
     guard let pool = adaptor.pixelBufferPool else { return "could not allocate video frames" }
 
     // Upright, top-down: heading, picture, timer. The bottom fifth is left clear for the apps' own captions.
+    // The timer's box is nearly the width of the frame, so the apps' buttons sit over its right-hand end.
     // Landscape: the whole frame with the timer box in its corner, the way the Premiere overlay sits.
     // The banner grows upwards, so the picture stays put whatever is in it.
     let pictureTop: CGFloat = 409
+    let captionsFrom = canvas.height * 0.8
+    // The box sits in the middle, as far in from each side as the heading's words and logo are.
+    let boxScale = (canvas.width - 2 * Panel.wideMargin) / Panel.wideWidth
     let eyebrow = [event, track].compactMap { $0 }.joined(separator: "  ·  ")
     let banner = shape == .landscape ? nil
-        : uprightHeading(title: title, badge: badge, eyebrow: eyebrow.isEmpty ? nil : eyebrow, accent: accent, width: Int(canvas.width))
+        : uprightHeading(title: title, badge: badge, eyebrow: eyebrow.isEmpty ? nil : eyebrow, accent: accent, width: Int(canvas.width),
+                         logo: loadPicture(options.logoPath))
     let heading = banner.map { image in
         CIImage(cgImage: image).transformed(by: CGAffineTransform(translationX: 0, y: canvas.height - pictureTop + 24))
     }
-    let panel = shape == .upright
-        ? Panel(race: race, scale: 880.0 / 560, accent: accent, title: nil, maxRows: 3, layout: .wide)
+    // The upright video's box is made when the first frame shows how tall the picture is: it takes
+    // the room between the picture and the captions.
+    var panel = shape == .upright ? nil
         : Panel(race: race, scale: CGFloat(options.userScale), accent: accent, title: title, badge: badge,
                 event: event, track: track, maxRows: options.maxRows)
-    let corner = shape == .landscape
-        ? place(panel: panel, frameWidth: Int(canvas.width), frameHeight: Int(canvas.height), position: options.position, margin: CGFloat(options.margin))
-        : nil
+    let corner = panel.map {
+        place(panel: $0, frameWidth: Int(canvas.width), frameHeight: Int(canvas.height), position: options.position, margin: CGFloat(options.margin))
+    }
     let renderer = CIContext(options: [.cacheIntermediates: false])
     let colorSpace = CGColorSpace(name: CGColorSpace.itur_709)!
     let dim = ["inputRVector": CIVector(x: 0.32, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: 0.32, z: 0, w: 0),
@@ -1429,10 +1627,10 @@ func writeFinishedVideo(shape: VideoShape, clip: ReadableClip, race: Race, from 
         autoreleasepool {
             guard let frame = CMSampleBufferGetImageBuffer(sample) else { return }
             let time = CMSampleBufferGetPresentationTimeStamp(sample)
-            panel.draw(at: time.seconds + clip.offset)
-            let timer = CIImage(cgImage: panel.image())
             var image: CIImage
-            if let corner {
+            if let corner, let panel {
+                panel.draw(at: time.seconds + clip.offset)
+                let timer = CIImage(cgImage: panel.image())
                 // The whole frame, scaled to fit, on black.
                 let source = CIImage(cvPixelBuffer: frame)
                 let fit = min(canvas.width / source.extent.width, canvas.height / source.extent.height)
@@ -1463,9 +1661,13 @@ func writeFinishedVideo(shape: VideoShape, clip: ReadableClip, race: Race, from 
                 .applyingFilter("CIColorMatrix", parameters: dim)
 
             let panelTop = pictureTop + pictureHeight + 26
+            let box = panel ?? Panel(race: race, scale: boxScale, accent: accent, title: nil, maxRows: 3, layout: .wide,
+                                     room: (captionsFrom - panelTop) / boxScale)
+            panel = box
+            box.draw(at: time.seconds + clip.offset)
             image = foreground.composited(over: background)
-            image = timer
-                .transformed(by: CGAffineTransform(translationX: 40, y: canvas.height - panelTop - CGFloat(panel.pixelHeight)))
+            image = CIImage(cgImage: box.image())
+                .transformed(by: CGAffineTransform(translationX: Panel.wideMargin, y: canvas.height - panelTop - CGFloat(box.pixelHeight)))
                 .composited(over: image)
             if let heading { image = heading.composited(over: image) }
             }
@@ -2148,6 +2350,10 @@ struct Options {
     var stillTime: String?
     var stillPath: String?
     var stillBackground: String?
+    /// For a still of the upright video's box: the height it has to fit, in reference points.
+    var stillRoom: Double?
+    /// A picture for the heading of an upright video, such as the event's logo.
+    var logoPath: String?
     var compact = false
     var interactive = false
     /// A race clip to write a playable copy of, for the app's marker editor.
@@ -2235,6 +2441,7 @@ Look (pilot, id, idLabel, event, corner and accent can also be set in settings.j
   --scale N             Panel size multiplier (default 1).
   --margin N            Distance from the frame edge, in 1080p pixels (default 54).
   --accent HEX          Highlight colour (default #FFD60A).
+  --logo FILE           A picture, such as the event's logo, for the heading of an upright video.
   --decimals N          Decimal places, 0-3 (default 3).
   --best N              Consecutive laps to combine (default 3).
   --max-rows N          Most lap rows shown at once (default 8).
@@ -2276,6 +2483,8 @@ Output:
   --compact             Write a panel-sized clip instead of a full-frame one: roughly 60% smaller,
                         but you move it into place in Premiere (Effect Controls > Motion).
   --still T FILE.png    Write one frame at sequence time T as a PNG instead of a movie.
+                        With --upright it is the box that goes under an upright video's picture, by
+                        itself. --still-room N gives the height that box has to fit, in points.
   --version             Print this tool's version.
   --preview CLIP        Nothing to do with laps: write a copy of a race clip that macOS can play, to
                         the .mov named with -o, without re-encoding it, and print the clip's frame
@@ -2384,6 +2593,8 @@ func parseArguments(_ arguments: [String]) -> Options {
             options.stillTime = value(for: flag)
             options.stillPath = value(for: flag)
         case "--still-background": options.stillBackground = value(for: flag)
+        case "--still-room": options.stillRoom = number(for: flag)
+        case "--logo": options.logoPath = (value(for: flag) as NSString).expandingTildeInPath
         default: fail("Unknown option \(flag). Run with --help to see the options.")
         }
         index += 1
@@ -2832,383 +3043,403 @@ func printJSON(runs: [Run], skipped: [(file: String, reason: String)], undecided
 
 // MARK: - Main
 
-let arguments = Array(CommandLine.arguments.dropFirst())
-var options = arguments.isEmpty ? askOptions() : parseArguments(arguments)
+/// Everything the command line does, from its options to the files it writes.
+func commandLine() {
+    let arguments = Array(CommandLine.arguments.dropFirst())
+    var options = arguments.isEmpty ? askOptions() : parseArguments(arguments)
 
-if options.checkListening { checkListening() }
+    if options.checkListening { checkListening() }
 
-// What is in a song that a video can be cut to, for the app's marker editor.
-if let songPath = options.songPath {
-    let name = (songPath as NSString).lastPathComponent
-    guard let samples = soundSamples(of: URL(fileURLWithPath: songPath), rate: 22050) else { fail("\(name) can't be read as sound.") }
-    let report = listen(to: samples, rate: 22050)
-    var fields = [String(format: "\"length\": %.3f", report.length)]
-    if let tempo = report.tempo { fields.append(String(format: "\"tempo\": %.2f", tempo)) }
-    if let first = report.firstBeat, let length = report.beatLength {
-        fields.append(String(format: "\"firstBeat\": %.4f", first))
-        fields.append(String(format: "\"beatLength\": %.6f", length))
-    }
-    let spots = report.spots.map { String(format: "{\"time\": %.3f, \"strength\": %.2f}", $0.time, $0.strength) }
-    fields.append("\"spots\": [\(spots.joined(separator: ", "))]")
-    print("{\n  " + fields.joined(separator: ",\n  ") + "\n}")
-    exit(0)
-}
-
-// A playable copy of a race clip, for the app's marker editor.
-if let clipPath = options.previewClip {
-    let name = (clipPath as NSString).lastPathComponent
-    guard let info = videoInfo(path: clipPath) else { fail("\(name) can't be read as a video.") }
-    var playable = URL(fileURLWithPath: clipPath)
-    if loadTracks(of: AVURLAsset(url: playable)) == nil {
-        guard let output = options.output else { fail("--preview needs -o with where to write the playable copy.") }
-        guard let wrapped = rewrapTransportStream(path: clipPath, from: 0, to: .infinity) else { fail("\(name) can't be read as a video.") }
-        let destination = URL(fileURLWithPath: (output as NSString).expandingTildeInPath)
-        do {
-            try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? FileManager.default.removeItem(at: destination)
-            try FileManager.default.moveItem(at: wrapped.url, to: destination)
-        } catch {
-            try? FileManager.default.removeItem(at: wrapped.url)
-            fail("Can't write \(destination.path): \(error.localizedDescription)")
+    // What is in a song that a video can be cut to, for the app's marker editor.
+    if let songPath = options.songPath {
+        let name = (songPath as NSString).lastPathComponent
+        guard let samples = soundSamples(of: URL(fileURLWithPath: songPath), rate: 22050) else { fail("\(name) can't be read as sound.") }
+        let report = listen(to: samples, rate: 22050)
+        var fields = [String(format: "\"length\": %.3f", report.length)]
+        if let tempo = report.tempo { fields.append(String(format: "\"tempo\": %.2f", tempo)) }
+        if let first = report.firstBeat, let length = report.beatLength {
+            fields.append(String(format: "\"firstBeat\": %.4f", first))
+            fields.append(String(format: "\"beatLength\": %.6f", length))
         }
-        playable = destination
+        let spots = report.spots.map { String(format: "{\"time\": %.3f, \"strength\": %.2f}", $0.time, $0.strength) }
+        fields.append("\"spots\": [\(spots.joined(separator: ", "))]")
+        print("{\n  " + fields.joined(separator: ",\n  ") + "\n}")
+        exit(0)
     }
-    let payload: [String: Any] = ["file": playable.path, "fps": info.fps.label, "num": info.fps.num, "den": info.fps.den,
-                                  "width": info.width, "height": info.height]
-    let data = (try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])) ?? Data("{}".utf8)
-    print(String(decoding: data, as: UTF8.self))
-    exit(0)
-}
 
-guard (0...3).contains(options.decimals) else { fail("--decimals must be between 0 and 3.") }
-guard options.window >= 1 else { fail("--best must be at least 1.") }
-guard options.userScale > 0, options.hold >= 0, options.leadIn >= 0 else { fail("--scale, --hold and --lead-in must be positive.") }
-guard let accentRGB = parseHexColor(options.accent) else { fail("--accent needs a colour such as #FFD60A.") }
-let unitsPerSecond = Double(pow10(options.decimals))
-
-var runs: [Run] = []
-var skipped: [(file: String, reason: String)] = []
-var undecidedSources: [Source] = []
-if !options.lapTokens.isEmpty || !options.timeTokens.isEmpty {
-    // Gate crossings typed in, as seconds from the start of the sequence.
-    guard let fps = options.fps else {
-        fail("The sequence frame rate is needed: add --fps 59.94 (or whatever your sequence uses) or --match yourclip.mp4.")
+    // A playable copy of a race clip, for the app's marker editor.
+    if let clipPath = options.previewClip {
+        let name = (clipPath as NSString).lastPathComponent
+        guard let info = videoInfo(path: clipPath) else { fail("\(name) can't be read as a video.") }
+        var playable = URL(fileURLWithPath: clipPath)
+        if loadTracks(of: AVURLAsset(url: playable)) == nil {
+            guard let output = options.output else { fail("--preview needs -o with where to write the playable copy.") }
+            guard let wrapped = rewrapTransportStream(path: clipPath, from: 0, to: .infinity) else { fail("\(name) can't be read as a video.") }
+            let destination = URL(fileURLWithPath: (output as NSString).expandingTildeInPath)
+            do {
+                try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? FileManager.default.removeItem(at: destination)
+                try FileManager.default.moveItem(at: wrapped.url, to: destination)
+            } catch {
+                try? FileManager.default.removeItem(at: wrapped.url)
+                fail("Can't write \(destination.path): \(error.localizedDescription)")
+            }
+            playable = destination
+        }
+        let payload: [String: Any] = ["file": playable.path, "fps": info.fps.label, "num": info.fps.num, "den": info.fps.den,
+                                      "width": info.width, "height": info.height]
+        let data = (try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])) ?? Data("{}".utf8)
+        print(String(decoding: data, as: UTF8.self))
+        exit(0)
     }
-    var seconds: [Double] = []
-    if !options.lapTokens.isEmpty {
-        guard let first = markerSeconds(options.firstCrossing ?? "0", fps: fps) else { fail("--first-crossing isn't a time.") }
-        seconds = [first]
-        for token in options.lapTokens {
-            guard let lap = parseSeconds(token), lap > 0 else { fail("\"\(token)\" isn't a lap time.") }
-            seconds.append(seconds.last! + lap)
+
+    guard (0...3).contains(options.decimals) else { fail("--decimals must be between 0 and 3.") }
+    guard options.window >= 1 else { fail("--best must be at least 1.") }
+    guard options.userScale > 0, options.hold >= 0, options.leadIn >= 0 else { fail("--scale, --hold and --lead-in must be positive.") }
+    guard let accentRGB = parseHexColor(options.accent) else { fail("--accent needs a colour such as #FFD60A.") }
+    let unitsPerSecond = Double(pow10(options.decimals))
+
+    var runs: [Run] = []
+    var skipped: [(file: String, reason: String)] = []
+    var undecidedSources: [Source] = []
+    if !options.lapTokens.isEmpty || !options.timeTokens.isEmpty {
+        // Gate crossings typed in, as seconds from the start of the sequence.
+        guard let fps = options.fps else {
+            fail("The sequence frame rate is needed: add --fps 59.94 (or whatever your sequence uses) or --match yourclip.mp4.")
+        }
+        var seconds: [Double] = []
+        if !options.lapTokens.isEmpty {
+            guard let first = markerSeconds(options.firstCrossing ?? "0", fps: fps) else { fail("--first-crossing isn't a time.") }
+            seconds = [first]
+            for token in options.lapTokens {
+                guard let lap = parseSeconds(token), lap > 0 else { fail("\"\(token)\" isn't a lap time.") }
+                seconds.append(seconds.last! + lap)
+            }
+        } else {
+            for token in options.timeTokens {
+                guard let time = markerSeconds(token, fps: fps) else { fail("\"\(token)\" isn't a timecode or a time.") }
+                seconds.append(time)
+            }
+            if let start = options.sequenceStart {
+                guard let offset = markerSeconds(start, fps: fps) else { fail("--sequence-start isn't a timecode.") }
+                seconds = seconds.map { $0 - offset }
+            }
+        }
+        do {
+            let race = try makeRace(crossings: seconds, options: options)
+            var output = URL(fileURLWithPath: ((options.output ?? "Lap Overlay.mov") as NSString).expandingTildeInPath)
+            if options.output == nil, let clip = options.clipPath {
+                let here = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                let base = URL(fileURLWithPath: clip).deletingPathExtension().lastPathComponent
+                output = nextNumbered(in: here, base: base, ext: "mov")
+            }
+            let step = options.lapTokens.isEmpty ? coarseStep(crossings: seconds, fps: fps) : nil
+            runs = [Run(name: "", race: race, coarseStep: step, outputURL: output, fps: fps,
+                        width: options.width ?? 1920, height: options.height ?? 1080, markersPath: nil, clipPath: options.clipPath,
+                        track: options.trackName)]
+        } catch {
+            let reason = (error as? Unusable)?.reason ?? error.localizedDescription
+            fail(reason.prefix(1).uppercased() + reason.dropFirst() + ".")
         }
     } else {
-        for token in options.timeTokens {
-            guard let time = markerSeconds(token, fps: fps) else { fail("\"\(token)\" isn't a timecode or a time.") }
-            seconds.append(time)
+        if options.sources.isEmpty { options.sources = expandMarkerPaths(options.markersPaths).map(scanSource(markersPath:)) }
+        let sources = options.sources
+        if sources.isEmpty { fail("Nothing to time. Give --markers, --times or --laps, or run with --help.") }
+        // With several marker files, -o names the folder the overlays go in.
+        var outputFolder: URL?
+        if sources.count > 1, let output = options.output {
+            let folder = URL(fileURLWithPath: (output as NSString).expandingTildeInPath, isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            } catch {
+                fail("Can't use \(folder.path) as the output folder: \(error.localizedDescription)")
+            }
+            outputFolder = folder
         }
-        if let start = options.sequenceStart {
-            guard let offset = markerSeconds(start, fps: fps) else { fail("--sequence-start isn't a timecode.") }
-            seconds = seconds.map { $0 - offset }
+        for source in sources {
+            let fileName = (source.markersPath as NSString).lastPathComponent
+            do {
+                if options.json, source.undecided != nil, options.mismatchFPS == nil, !options.fpsExplicit {
+                    undecidedSources.append(source)
+                    continue
+                }
+                let settings = try sequenceSettings(for: source, options: options)
+                let seconds = try crossings(inMarkerFile: source.markersPath, fps: settings.fps, sequenceStart: options.sequenceStart)
+                let race = try makeRace(crossings: seconds, options: options)
+                // Named after the marker file, which is the clip's name when the two match. A lone marker
+                // file with some other name takes the name of the clip that was given with it.
+                var base = source.name
+                if sources.count == 1, source.clipPath == nil, let clip = options.clipPath {
+                    base = URL(fileURLWithPath: clip).deletingPathExtension().lastPathComponent
+                }
+                var output = nextNumbered(in: outputFolder ?? overlayFolder(forMarkers: source.markersPath), base: base, ext: "mov")
+                if sources.count == 1, let chosen = options.output {
+                    output = URL(fileURLWithPath: (chosen as NSString).expandingTildeInPath)
+                }
+                let clip = source.clipPath ?? (sources.count == 1 ? options.clipPath : nil)
+                runs.append(Run(name: base, race: race, coarseStep: coarseStep(crossings: seconds, fps: settings.fps),
+                                outputURL: output, fps: settings.fps, width: settings.width, height: settings.height,
+                                markersPath: source.markersPath, clipPath: clip,
+                                track: options.trackName ?? trackName(forMarkers: source.markersPath)))
+            } catch let problem as Unusable {
+                if sources.count == 1 && !options.json { fail("\(fileName): \(problem.reason).") }
+                skipped.append((fileName, problem.reason))
+                if !options.json { print("Skipped \(fileName): \(problem.reason).") }
+            } catch {
+                fail("\(fileName): \(error.localizedDescription)")
+            }
+        }
+        if runs.isEmpty && !options.json { fail("None of those files had usable markers.") }
+    }
+
+    // Fastest first; runs too short to have a combined time keep their order at the bottom.
+    runs = runs.enumerated().sorted { a, b in
+        switch (a.element.bestTotal, b.element.bestTotal) {
+        case let (x?, y?) where x != y: return x < y
+        case (_?, nil): return true
+        case (nil, _?): return false
+        default: return a.offset < b.offset
+        }
+    }.map(\.element)
+
+    if options.json {
+        printJSON(runs: runs, skipped: skipped, undecided: undecidedSources)
+        exit(0)
+    }
+
+    // Sequence settings: one line when every run shares them, otherwise who has what.
+    var sequenceGroups: [(settings: String, names: [String])] = []
+    for run in runs {
+        if let index = sequenceGroups.firstIndex(where: { $0.settings == run.sequence }) {
+            sequenceGroups[index].names.append(run.name)
+        } else {
+            sequenceGroups.append((run.sequence, [run.name]))
         }
     }
-    do {
-        let race = try makeRace(crossings: seconds, options: options)
-        var output = URL(fileURLWithPath: ((options.output ?? "Lap Overlay.mov") as NSString).expandingTildeInPath)
-        if options.output == nil, let clip = options.clipPath {
-            let here = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            let base = URL(fileURLWithPath: clip).deletingPathExtension().lastPathComponent
-            output = nextNumbered(in: here, base: base, ext: "mov")
-        }
-        let step = options.lapTokens.isEmpty ? coarseStep(crossings: seconds, fps: fps) : nil
-        runs = [Run(name: "", race: race, coarseStep: step, outputURL: output, fps: fps,
-                    width: options.width ?? 1920, height: options.height ?? 1080, markersPath: nil, clipPath: options.clipPath,
-                    track: options.trackName)]
-    } catch {
-        let reason = (error as? Unusable)?.reason ?? error.localizedDescription
-        fail(reason.prefix(1).uppercased() + reason.dropFirst() + ".")
+    if sequenceGroups.count == 1 {
+        print("Sequence\(runs.count == 1 ? "" : "s"): \(sequenceGroups[0].settings)")
+    } else {
+        print("Sequences:")
+        for group in sequenceGroups { print("  \(group.settings): \(group.names.joined(separator: ", "))") }
     }
-} else {
-    if options.sources.isEmpty { options.sources = expandMarkerPaths(options.markersPaths).map(scanSource(markersPath:)) }
-    let sources = options.sources
-    if sources.isEmpty { fail("Nothing to time. Give --markers, --times or --laps, or run with --help.") }
-    // With several marker files, -o names the folder the overlays go in.
-    var outputFolder: URL?
-    if sources.count > 1, let output = options.output {
-        let folder = URL(fileURLWithPath: (output as NSString).expandingTildeInPath, isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        } catch {
-            fail("Can't use \(folder.path) as the output folder: \(error.localizedDescription)")
-        }
-        outputFolder = folder
+
+    if runs.count == 1 {
+        printLaps(runs[0])
+    } else {
+        print("\(runs.count) runs, fastest first:\n")
+        printRanking(runs)
     }
-    for source in sources {
-        let fileName = (source.markersPath as NSString).lastPathComponent
-        do {
-            if options.json, source.undecided != nil, options.mismatchFPS == nil, !options.fpsExplicit {
-                undecidedSources.append(source)
+    if options.summaryOnly { exit(0) }
+
+    // Which runs get files made.
+    var selected = runs
+    if runs.count > 1 {
+        var limit = options.onlyBest
+        if options.interactive {
+            let answer = ask("\nHow many timers should I make, starting from the fastest? Type a number or \"all\"", default: "\(min(3, runs.count))")
+            if !answer.lowercased().hasPrefix("a") {
+                guard let number = Int(answer) else { fail("That isn't a number.") }
+                limit = number
+            }
+        }
+        if let limit {
+            guard limit >= 1 else { fail("The number of runs to make must be at least 1.") }
+            selected = Array(runs.prefix(limit))
+        }
+    }
+    if options.interactive {
+        let answer = ask("Finished videos to make as well: none, 16:9 (YouTube), 9:16 (Shorts, TikTok, Reels) or both", default: "none").lowercased()
+        options.makeLandscape = answer.contains("16:9") || answer.contains("16x9") || answer.hasPrefix("b")
+        options.makeUpright = answer.contains("9:16") || answer.contains("9x16") || answer.hasPrefix("b")
+    }
+
+    struct Job {
+        let run: Run
+        let panel: Panel
+        var placement: Placement
+        let frameCount: Int
+    }
+
+    var jobs = selected.map { run -> Job in
+        let title = options.titleFromFile && !run.name.isEmpty ? run.name : options.title
+        let scale = CGFloat(min(run.width, run.height)) / 1080 * CGFloat(options.userScale)
+        let panel = Panel(race: run.race, scale: scale, accent: accentRGB, title: title, badge: options.badge,
+                          event: options.event, track: run.track, maxRows: options.maxRows)
+        let placement = place(panel: panel, frameWidth: run.width, frameHeight: run.height, position: options.position, margin: CGFloat(options.margin))
+        let endSeconds = Double(run.race.bounds.last!) / unitsPerSecond + options.hold
+        return Job(run: run, panel: panel, placement: placement, frameCount: Int((endSeconds * run.fps.value).rounded(.up)) + 1)
+    }
+
+    if let stillPath = options.stillPath, let stillTime = options.stillTime {
+        guard jobs.count == 1 else { fail("--still works on one run at a time. Add --only-best 1 or give a single marker file.") }
+        guard let seconds = markerSeconds(stillTime, fps: jobs[0].run.fps) else { fail("--still needs a time.") }
+        let background = options.stillBackground.flatMap(parseHexColor)
+        if options.makeUpright {
+            let box = Panel(race: jobs[0].run.race, scale: (1080 - 2 * Panel.wideMargin) / Panel.wideWidth, accent: accentRGB, title: nil, maxRows: 3, layout: .wide,
+                            room: options.stillRoom.map { CGFloat($0) })
+            writeStill(to: URL(fileURLWithPath: stillPath), panel: box,
+                       placement: Placement(frameWidth: box.pixelWidth, frameHeight: box.pixelHeight, x: 0, y: 0), seconds: seconds, background: background)
+        } else {
+            writeStill(to: URL(fileURLWithPath: stillPath), panel: jobs[0].panel, placement: jobs[0].placement, seconds: seconds, background: background)
+        }
+        print("Wrote \(stillPath)")
+        exit(0)
+    }
+
+    var compact = options.compact
+    if options.makeOverlay {
+        // ProRes 4444 costs roughly 0.34 bytes per pixel of panel and 0.045 per pixel of empty frame.
+        func gigabytes(_ job: Job, compact: Bool) -> Double {
+            let panelPixels = Double(job.panel.pixelWidth * job.panel.pixelHeight)
+            let emptyPixels = compact ? 0 : Double(job.run.width * job.run.height) - panelPixels
+            return (0.34 * panelPixels + 0.045 * emptyPixels) * Double(job.frameCount) / 1e9
+        }
+        let fullFrameGigabytes = jobs.map { gigabytes($0, compact: false) }.reduce(0, +)
+        let compactGigabytes = jobs.map { gigabytes($0, compact: true) }.reduce(0, +)
+        if options.interactive && !compact && fullFrameGigabytes > 2 {
+            let subject = jobs.count == 1 ? "A full-frame overlay for this sequence" : "Full-frame overlays for these \(jobs.count) runs"
+            print(String(format: "\n\(subject) will come to about %.1f GB. Panel-sized clips would be about\n%.1f GB, but you'd move them into the corner yourself in Premiere.", fullFrameGigabytes, compactGigabytes))
+            compact = ask("Make the smaller kind? (y/n)", default: "n").lowercased().hasPrefix("y")
+        }
+        if compact {
+            for index in jobs.indices {
+                let panel = jobs[index].panel
+                jobs[index].placement = Placement(frameWidth: panel.pixelWidth + panel.pixelWidth % 2, frameHeight: panel.pixelHeight + panel.pixelHeight % 2, x: 0, y: 0)
+            }
+        }
+
+        // Stop before filling the disk rather than part-way through a batch.
+        let neededGigabytes = compact ? compactGigabytes : fullFrameGigabytes
+        let volume = jobs[0].run.outputURL.deletingLastPathComponent()
+        if let free = try? volume.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage,
+           Double(free) / 1e9 < neededGigabytes * 1.1 {
+            fail(String(format: "Not enough disk space: this needs about %.1f GB and %.1f GB is free. Free some space, make fewer runs (--only-best), or use --compact.", neededGigabytes, Double(free) / 1e9))
+        }
+
+        for (index, job) in jobs.enumerated() {
+            let label = jobs.count == 1 ? "Rendering overlay" : "Rendering overlay \(index + 1) of \(jobs.count), \(job.run.name)"
+            writeMovie(to: job.run.outputURL, panel: job.panel, placement: job.placement, fps: job.run.fps, frameCount: job.frameCount, label: label)
+        }
+
+        let sequenceStart = options.sequenceStart ?? "00:00:00:00"
+        let destination = jobs[0].run.outputURL.deletingLastPathComponent()
+        if jobs.count == 1 {
+            print("""
+            Wrote \(jobs[0].run.outputURL.path)
+
+            In Premiere: import that file and put it on a track above your footage, starting at the very
+            beginning of the sequence (\(sequenceStart)). It lines up with your markers from there.
+            """)
+        } else {
+            let oneFolder = jobs.allSatisfy { $0.run.outputURL.deletingLastPathComponent() == destination }
+            print("Wrote \(jobs.count) overlays" + (oneFolder ? " in \(destination.path):" : ":"))
+            for job in jobs { print("  " + (oneFolder ? job.run.outputURL.lastPathComponent : job.run.outputURL.path)) }
+            print("""
+
+            In Premiere: import them and put each one on a track above the footage in its own sequence,
+            starting at the very beginning of that sequence (\(sequenceStart)). Each lines up with its markers from there.
+            """)
+        }
+        if compact {
+            print("These are panel-sized clips, so they land in the middle of the frame: select one and change\nEffect Controls > Motion > Position to move it where you want it.")
+        }
+    }
+
+    // Finished videos, cut from just before lap 1 to just after the last lap.
+    var finishedVideos: [URL] = []
+    let shapes: [VideoShape] = (options.makeLandscape ? [.landscape] : []) + (options.makeUpright ? [.upright] : [])
+    if !shapes.isEmpty {
+        for (index, job) in jobs.enumerated() {
+            let run = job.run
+            guard let clipPath = run.clipPath else {
+                print("No finished video for \(run.name.isEmpty ? "this run" : run.name): there's no race clip with that name to make it from.")
                 continue
             }
-            let settings = try sequenceSettings(for: source, options: options)
-            let seconds = try crossings(inMarkerFile: source.markersPath, fps: settings.fps, sequenceStart: options.sequenceStart)
-            let race = try makeRace(crossings: seconds, options: options)
-            // Named after the marker file, which is the clip's name when the two match. A lone marker
-            // file with some other name takes the name of the clip that was given with it.
-            var base = source.name
-            if sources.count == 1, source.clipPath == nil, let clip = options.clipPath {
-                base = URL(fileURLWithPath: clip).deletingPathExtension().lastPathComponent
-            }
-            var output = nextNumbered(in: outputFolder ?? overlayFolder(forMarkers: source.markersPath), base: base, ext: "mov")
-            if sources.count == 1, let chosen = options.output {
-                output = URL(fileURLWithPath: (chosen as NSString).expandingTildeInPath)
-            }
-            let clip = source.clipPath ?? (sources.count == 1 ? options.clipPath : nil)
-            runs.append(Run(name: base, race: race, coarseStep: coarseStep(crossings: seconds, fps: settings.fps),
-                            outputURL: output, fps: settings.fps, width: settings.width, height: settings.height,
-                            markersPath: source.markersPath, clipPath: clip,
-                            track: options.trackName ?? trackName(forMarkers: source.markersPath)))
-        } catch let problem as Unusable {
-            if sources.count == 1 && !options.json { fail("\(fileName): \(problem.reason).") }
-            skipped.append((fileName, problem.reason))
-            if !options.json { print("Skipped \(fileName): \(problem.reason).") }
-        } catch {
-            fail("\(fileName): \(error.localizedDescription)")
-        }
-    }
-    if runs.isEmpty && !options.json { fail("None of those files had usable markers.") }
-}
-
-// Fastest first; runs too short to have a combined time keep their order at the bottom.
-runs = runs.enumerated().sorted { a, b in
-    switch (a.element.bestTotal, b.element.bestTotal) {
-    case let (x?, y?) where x != y: return x < y
-    case (_?, nil): return true
-    case (nil, _?): return false
-    default: return a.offset < b.offset
-    }
-}.map(\.element)
-
-if options.json {
-    printJSON(runs: runs, skipped: skipped, undecided: undecidedSources)
-    exit(0)
-}
-
-// Sequence settings: one line when every run shares them, otherwise who has what.
-var sequenceGroups: [(settings: String, names: [String])] = []
-for run in runs {
-    if let index = sequenceGroups.firstIndex(where: { $0.settings == run.sequence }) {
-        sequenceGroups[index].names.append(run.name)
-    } else {
-        sequenceGroups.append((run.sequence, [run.name]))
-    }
-}
-if sequenceGroups.count == 1 {
-    print("Sequence\(runs.count == 1 ? "" : "s"): \(sequenceGroups[0].settings)")
-} else {
-    print("Sequences:")
-    for group in sequenceGroups { print("  \(group.settings): \(group.names.joined(separator: ", "))") }
-}
-
-if runs.count == 1 {
-    printLaps(runs[0])
-} else {
-    print("\(runs.count) runs, fastest first:\n")
-    printRanking(runs)
-}
-if options.summaryOnly { exit(0) }
-
-// Which runs get files made.
-var selected = runs
-if runs.count > 1 {
-    var limit = options.onlyBest
-    if options.interactive {
-        let answer = ask("\nHow many timers should I make, starting from the fastest? Type a number or \"all\"", default: "\(min(3, runs.count))")
-        if !answer.lowercased().hasPrefix("a") {
-            guard let number = Int(answer) else { fail("That isn't a number.") }
-            limit = number
-        }
-    }
-    if let limit {
-        guard limit >= 1 else { fail("The number of runs to make must be at least 1.") }
-        selected = Array(runs.prefix(limit))
-    }
-}
-if options.interactive {
-    let answer = ask("Finished videos to make as well: none, 16:9 (YouTube), 9:16 (Shorts, TikTok, Reels) or both", default: "none").lowercased()
-    options.makeLandscape = answer.contains("16:9") || answer.contains("16x9") || answer.hasPrefix("b")
-    options.makeUpright = answer.contains("9:16") || answer.contains("9x16") || answer.hasPrefix("b")
-}
-
-struct Job {
-    let run: Run
-    let panel: Panel
-    var placement: Placement
-    let frameCount: Int
-}
-
-var jobs = selected.map { run -> Job in
-    let title = options.titleFromFile && !run.name.isEmpty ? run.name : options.title
-    let scale = CGFloat(min(run.width, run.height)) / 1080 * CGFloat(options.userScale)
-    let panel = Panel(race: run.race, scale: scale, accent: accentRGB, title: title, badge: options.badge,
-                      event: options.event, track: run.track, maxRows: options.maxRows)
-    let placement = place(panel: panel, frameWidth: run.width, frameHeight: run.height, position: options.position, margin: CGFloat(options.margin))
-    let endSeconds = Double(run.race.bounds.last!) / unitsPerSecond + options.hold
-    return Job(run: run, panel: panel, placement: placement, frameCount: Int((endSeconds * run.fps.value).rounded(.up)) + 1)
-}
-
-if let stillPath = options.stillPath, let stillTime = options.stillTime {
-    guard jobs.count == 1 else { fail("--still works on one run at a time. Add --only-best 1 or give a single marker file.") }
-    guard let seconds = markerSeconds(stillTime, fps: jobs[0].run.fps) else { fail("--still needs a time.") }
-    let background = options.stillBackground.flatMap(parseHexColor)
-    writeStill(to: URL(fileURLWithPath: stillPath), panel: jobs[0].panel, placement: jobs[0].placement, seconds: seconds, background: background)
-    print("Wrote \(stillPath)")
-    exit(0)
-}
-
-var compact = options.compact
-if options.makeOverlay {
-    // ProRes 4444 costs roughly 0.34 bytes per pixel of panel and 0.045 per pixel of empty frame.
-    func gigabytes(_ job: Job, compact: Bool) -> Double {
-        let panelPixels = Double(job.panel.pixelWidth * job.panel.pixelHeight)
-        let emptyPixels = compact ? 0 : Double(job.run.width * job.run.height) - panelPixels
-        return (0.34 * panelPixels + 0.045 * emptyPixels) * Double(job.frameCount) / 1e9
-    }
-    let fullFrameGigabytes = jobs.map { gigabytes($0, compact: false) }.reduce(0, +)
-    let compactGigabytes = jobs.map { gigabytes($0, compact: true) }.reduce(0, +)
-    if options.interactive && !compact && fullFrameGigabytes > 2 {
-        let subject = jobs.count == 1 ? "A full-frame overlay for this sequence" : "Full-frame overlays for these \(jobs.count) runs"
-        print(String(format: "\n\(subject) will come to about %.1f GB. Panel-sized clips would be about\n%.1f GB, but you'd move them into the corner yourself in Premiere.", fullFrameGigabytes, compactGigabytes))
-        compact = ask("Make the smaller kind? (y/n)", default: "n").lowercased().hasPrefix("y")
-    }
-    if compact {
-        for index in jobs.indices {
-            let panel = jobs[index].panel
-            jobs[index].placement = Placement(frameWidth: panel.pixelWidth + panel.pixelWidth % 2, frameHeight: panel.pixelHeight + panel.pixelHeight % 2, x: 0, y: 0)
-        }
-    }
-
-    // Stop before filling the disk rather than part-way through a batch.
-    let neededGigabytes = compact ? compactGigabytes : fullFrameGigabytes
-    let volume = jobs[0].run.outputURL.deletingLastPathComponent()
-    if let free = try? volume.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage,
-       Double(free) / 1e9 < neededGigabytes * 1.1 {
-        fail(String(format: "Not enough disk space: this needs about %.1f GB and %.1f GB is free. Free some space, make fewer runs (--only-best), or use --compact.", neededGigabytes, Double(free) / 1e9))
-    }
-
-    for (index, job) in jobs.enumerated() {
-        let label = jobs.count == 1 ? "Rendering overlay" : "Rendering overlay \(index + 1) of \(jobs.count), \(job.run.name)"
-        writeMovie(to: job.run.outputURL, panel: job.panel, placement: job.placement, fps: job.run.fps, frameCount: job.frameCount, label: label)
-    }
-
-    let sequenceStart = options.sequenceStart ?? "00:00:00:00"
-    let destination = jobs[0].run.outputURL.deletingLastPathComponent()
-    if jobs.count == 1 {
-        print("""
-        Wrote \(jobs[0].run.outputURL.path)
-
-        In Premiere: import that file and put it on a track above your footage, starting at the very
-        beginning of the sequence (\(sequenceStart)). It lines up with your markers from there.
-        """)
-    } else {
-        let oneFolder = jobs.allSatisfy { $0.run.outputURL.deletingLastPathComponent() == destination }
-        print("Wrote \(jobs.count) overlays" + (oneFolder ? " in \(destination.path):" : ":"))
-        for job in jobs { print("  " + (oneFolder ? job.run.outputURL.lastPathComponent : job.run.outputURL.path)) }
-        print("""
-
-        In Premiere: import them and put each one on a track above the footage in its own sequence,
-        starting at the very beginning of that sequence (\(sequenceStart)). Each lines up with its markers from there.
-        """)
-    }
-    if compact {
-        print("These are panel-sized clips, so they land in the middle of the frame: select one and change\nEffect Controls > Motion > Position to move it where you want it.")
-    }
-}
-
-// Finished videos, cut from just before lap 1 to just after the last lap.
-var finishedVideos: [URL] = []
-let shapes: [VideoShape] = (options.makeLandscape ? [.landscape] : []) + (options.makeUpright ? [.upright] : [])
-if !shapes.isEmpty {
-    for (index, job) in jobs.enumerated() {
-        let run = job.run
-        guard let clipPath = run.clipPath else {
-            print("No finished video for \(run.name.isEmpty ? "this run" : run.name): there's no race clip with that name to make it from.")
-            continue
-        }
-        let gate = Double(run.race.bounds[0]) / unitsPerSecond
-        var start = max(0, gate - options.leadIn)
-        var end = Double(run.race.bounds.last!) / unitsPerSecond + options.hold
-        var sound: (url: URL, clipTimeAtStart: Double)?
-        if options.noMusic {
-            // Silent on request, whatever is in the music folder.
-        } else if let chosen = options.musicPath {
-            // A song placed against the clip in the app.
-            let music = URL(fileURLWithPath: chosen)
-            sound = (music, options.musicStart ?? options.videoStart ?? start)
-            print("Sound: \(music.lastPathComponent), placed where you put it in Markers & music.")
-        } else if let markers = run.markersPath, let music = findMusic(forMarkers: markers, run: run.name),
-           let length = loadSound(of: AVURLAsset(url: music))?.duration {
-            // A music file named after the run is taken to be the sound of the run's Premiere sequence, so it
-            // belongs wherever that sequence starts in the clip. A saved project that matches the file says
-            // exactly where; failing that, the sequence is assumed to end when the timer overlay does.
-            let placement = projectFiles(near: markers).lazy
-                .compactMap { timelinePlacement(ofClip: clipPath, inProject: $0) }
-                .first { abs($0.sequenceDuration - length) < 0.4 }
-            // The timer overlay is the anchor when it's on the timeline: the music keeps its place against the timer.
-            let musicStart = placement.map { $0.timerTimeAtSequenceStart ?? $0.clipTimeAtSequenceStart } ?? end + 1 / run.fps.value - length
-            sound = (music, musicStart)
-            if musicStart <= gate - 0.25 { start = max(0, musicStart) }
-            if let placement {
-                print("Sound: \(music.lastPathComponent), lined up from the \(placement.sequence) sequence in Premiere.")
-                if abs(placement.timerSlip) > 0.05 {
-                    let direction = placement.timerSlip > 0 ? "early" : "late"
-                    print(String(format: "Note: in that Premiere sequence the timer overlay runs %.1f seconds \(direction) against the clip, so it is showing over different laps from the ones it timed. This video uses the laps that were timed.", abs(placement.timerSlip)))
+            let gate = Double(run.race.bounds[0]) / unitsPerSecond
+            var start = max(0, gate - options.leadIn)
+            var end = Double(run.race.bounds.last!) / unitsPerSecond + options.hold
+            var sound: (url: URL, clipTimeAtStart: Double)?
+            if options.noMusic {
+                // Silent on request, whatever is in the music folder.
+            } else if let chosen = options.musicPath {
+                // A song placed against the clip in the app.
+                let music = URL(fileURLWithPath: chosen)
+                sound = (music, options.musicStart ?? options.videoStart ?? start)
+                print("Sound: \(music.lastPathComponent), placed where you put it in Markers & music.")
+            } else if let markers = run.markersPath, let music = findMusic(forMarkers: markers, run: run.name),
+               let length = loadSound(of: AVURLAsset(url: music))?.duration {
+                // A music file named after the run is taken to be the sound of the run's Premiere sequence, so it
+                // belongs wherever that sequence starts in the clip. A saved project that matches the file says
+                // exactly where; failing that, the sequence is assumed to end when the timer overlay does.
+                let placement = projectFiles(near: markers).lazy
+                    .compactMap { timelinePlacement(ofClip: clipPath, inProject: $0) }
+                    .first { abs($0.sequenceDuration - length) < 0.4 }
+                // The timer overlay is the anchor when it's on the timeline: the music keeps its place against the timer.
+                let musicStart = placement.map { $0.timerTimeAtSequenceStart ?? $0.clipTimeAtSequenceStart } ?? end + 1 / run.fps.value - length
+                sound = (music, musicStart)
+                if musicStart <= gate - 0.25 { start = max(0, musicStart) }
+                if let placement {
+                    print("Sound: \(music.lastPathComponent), lined up from the \(placement.sequence) sequence in Premiere.")
+                    if abs(placement.timerSlip) > 0.05 {
+                        let direction = placement.timerSlip > 0 ? "early" : "late"
+                        print(String(format: "Note: in that Premiere sequence the timer overlay runs %.1f seconds \(direction) against the clip, so it is showing over different laps from the ones it timed. This video uses the laps that were timed.", abs(placement.timerSlip)))
+                    }
+                } else {
+                    print("Sound: \(music.lastPathComponent), lined up to end when the timer does.")
+                    print("Note: the saved Premiere project doesn't match that music file, so the line-up is a best guess. Save the project in Premiere and make the video again for an exact one.")
                 }
-            } else {
-                print("Sound: \(music.lastPathComponent), lined up to end when the timer does.")
-                print("Note: the saved Premiere project doesn't match that music file, so the line-up is a best guess. Save the project in Premiere and make the video again for an exact one.")
             }
-        }
-        // A stretch chosen in the app wins over one worked out from the laps or the music.
-        if let chosen = options.videoStart { start = max(0, chosen) }
-        if let chosen = options.videoEnd { end = chosen }
-        guard end > start else {
-            print("No finished video for \(run.name.isEmpty ? "this run" : run.name): the stretch to show ends before it starts.")
-            continue
-        }
-        let direct = URL(fileURLWithPath: clipPath)
-        let clip = loadTracks(of: AVURLAsset(url: direct)) != nil
-            ? ReadableClip(url: direct, offset: 0, temporary: false)
-            : rewrapTransportStream(path: clipPath, from: start, to: end)
-        guard let clip else {
-            print("No finished video for \(run.name): \(direct.lastPathComponent) can't be read.")
-            continue
-        }
-        let base = run.name.isEmpty ? direct.deletingPathExtension().lastPathComponent : run.name
-        let title = options.titleFromFile && !run.name.isEmpty ? run.name : options.title
-        for shape in shapes {
-            let folder = finishedFolder(shape, forOverlayFolder: run.outputURL.deletingLastPathComponent())
-            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let output = nextNumbered(in: folder, base: base, ext: "mp4")
-            let label = jobs.count == 1 ? "Rendering \(shape.name) video" : "Rendering \(shape.name) video \(index + 1) of \(jobs.count), \(run.name)"
-            let problem = writeFinishedVideo(shape: shape, clip: clip, race: run.race, from: start, to: end, accent: accentRGB,
-                                             title: title, badge: options.badge, event: options.event, track: run.track,
-                                             sound: sound, options: options, to: output, label: label)
-            if let problem {
-                print("No \(shape.name) video for \(run.name): \(problem).")
-            } else {
-                finishedVideos.append(output)
-                print("Wrote \(output.path)")
+            // A stretch chosen in the app wins over one worked out from the laps or the music.
+            if let chosen = options.videoStart { start = max(0, chosen) }
+            if let chosen = options.videoEnd { end = chosen }
+            guard end > start else {
+                print("No finished video for \(run.name.isEmpty ? "this run" : run.name): the stretch to show ends before it starts.")
+                continue
             }
+            let direct = URL(fileURLWithPath: clipPath)
+            let clip = loadTracks(of: AVURLAsset(url: direct)) != nil
+                ? ReadableClip(url: direct, offset: 0, temporary: false)
+                : rewrapTransportStream(path: clipPath, from: start, to: end)
+            guard let clip else {
+                print("No finished video for \(run.name): \(direct.lastPathComponent) can't be read.")
+                continue
+            }
+            let base = run.name.isEmpty ? direct.deletingPathExtension().lastPathComponent : run.name
+            let title = options.titleFromFile && !run.name.isEmpty ? run.name : options.title
+            for shape in shapes {
+                let folder = finishedFolder(shape, forOverlayFolder: run.outputURL.deletingLastPathComponent())
+                try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let output = nextNumbered(in: folder, base: base, ext: "mp4")
+                let label = jobs.count == 1 ? "Rendering \(shape.name) video" : "Rendering \(shape.name) video \(index + 1) of \(jobs.count), \(run.name)"
+                let problem = writeFinishedVideo(shape: shape, clip: clip, race: run.race, from: start, to: end, accent: accentRGB,
+                                                 title: title, badge: options.badge, event: options.event, track: run.track,
+                                                 sound: sound, options: options, to: output, label: label)
+                if let problem {
+                    print("No \(shape.name) video for \(run.name): \(problem).")
+                } else {
+                    finishedVideos.append(output)
+                    print("Wrote \(output.path)")
+                }
+            }
+            if clip.temporary { try? FileManager.default.removeItem(at: clip.url) }
         }
-        if clip.temporary { try? FileManager.default.removeItem(at: clip.url) }
+        if !finishedVideos.isEmpty {
+            print("\nThe finished videos are .mp4 files ready to upload: 16:9 for YouTube, 9:16 for Shorts, TikTok and Reels.")
+        }
     }
-    if !finishedVideos.isEmpty {
-        print("\nThe finished videos are .mp4 files ready to upload: 16:9 for YouTube, 9:16 for Shorts, TikTok and Reels.")
+
+    if options.interactive {
+        let made = (options.makeOverlay ? jobs.map(\.run.outputURL) : []) + finishedVideos
+        if !made.isEmpty { NSWorkspace.shared.activateFileViewerSelecting(made) }
     }
 }
 
-if options.interactive {
-    let made = (options.makeOverlay ? jobs.map(\.run.outputURL) : []) + finishedVideos
-    if !made.isEmpty { NSWorkspace.shared.activateFileViewerSelecting(made) }
+// The app compiles this file into itself with EMBEDDED set, for the timer's drawing: the timer the
+// marker editor shows is then the very one the videos get. The app has its own way in, so this one
+// is left out there, and the lap timer inside the app is still a program of its own.
+#if !EMBEDDED
+@main
+enum LapTimer {
+    static func main() { commandLine() }
 }
+#endif

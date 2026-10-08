@@ -24,6 +24,10 @@ enum Theme {
     static let warn = Color(red: 1, green: 0.62, blue: 0.22)
     /// The bass in a song's sound wave.
     static let bass = Color(red: 0.96, green: 0.3, blue: 0.2)
+    /// A drop the app heard in a song, and a mark the pilot put in it. Two colours that are neither
+    /// each other's nor the playhead's, so one is never taken for the other.
+    static let drop = Color(red: 0.36, green: 0.8, blue: 1)
+    static let mark = Color(red: 1, green: 0.4, blue: 0.74)
 }
 
 extension View {
@@ -138,16 +142,25 @@ struct RunEdit: Codable, Equatable {
     /// The clip times the finished videos start and end at. Nil leaves it to the lap timer.
     var videoStart: Double?
     var videoEnd: Double?
-    /// A song in the track's music folder. Empty is silence. Nil is the sound file named after the
-    /// run, lined up from the Premiere project, when there is one.
+    /// A song in the library's Songs folder, or in the track's own music folder, where songs were
+    /// kept before there was a library. Empty is silence. Nil is the sound file named after the run,
+    /// lined up from the Premiere project, when there is one.
     var song: String?
     /// The clip time the song's first moment belongs at. Before 0 means the song is already under way when the clip starts.
     var songStart: Double?
     /// The clip times the music comes in at and stops at. Nil is the whole of the video.
     var musicIn: Double?
     var musicOut: Double?
-    /// Marks in the song, such as a drop, as times into the song. They move with it.
+    /// Marks in the song, such as a drop, as times into the song. They move with it. They belong to
+    /// the song, which keeps them for every run (`Store.songs`); this copy is what the editor works
+    /// on, and what a version of the app from before the song library reads.
     var songMarks: [Double]?
+}
+
+/// What is kept about a song, whichever run it is used in.
+struct SongNotes: Codable, Equatable {
+    /// The pilot's own marks in the song, as times into it.
+    var marks: [Double]?
 }
 
 struct TrackState: Codable, Equatable {
@@ -202,6 +215,8 @@ struct Store: Codable, Equatable {
     var tracks: [String: TrackState] = [:]
     /// By event folder. Optional so a dashboard.json from before there were events still loads.
     var events: [String: EventState]?
+    /// By song file name. Optional so a dashboard.json from before the song library still loads.
+    var songs: [String: SongNotes]?
 }
 
 // MARK: - Submission form
@@ -859,7 +874,7 @@ enum ReadMe {
             Section(title: "Getting started", items: [
                 .step("Answer the two questions the app asks first: your pilot name, and whether you fly RaceGOW6. If you do, it finds your registration number on the series' pilot list. Both go on every timer and video and into the entry form, and both can be changed in Pilot & settings."),
                 .step("On the first screen, open Video Creator, under RaceGOW. If you fly RaceGOW6 its open tracks are there already. Otherwise press New event, then New track. Press Add clips and choose your recordings, or drop them onto the track's page."),
-                .step("Press Mark laps on a clip. Step to the frame where you cross the start/finish gate and press M. Do that for every crossing, then Save."),
+                .step("Press Mark laps on a clip. A recording you add by itself opens there straight away. Step to the frame where you cross the start/finish gate and press M. Do that for every crossing, then press Done, which saves it."),
                 .step("Press Make 16:9 video for YouTube, or Make 9:16 video for Shorts, TikTok and Reels. Markers & music lets you add a song, put one of its drops on the start gate, and choose where the video starts and ends."),
                 .step("Upload your video to YouTube and press Submit this run. The app fills the track's entry form in, and you press Submit on the form yourself. A RaceGOW6 track has its form already. For any other, paste its Google Form link on the track page first."),
                 .paragraph("The full walk-through and the editor's keys are in the app under How it works."),
@@ -996,6 +1011,14 @@ struct SubmitTarget: Identifiable, Equatable {
     let track: String
     let run: RunInfo
     var id: String { track + "/" + run.id }
+}
+
+/// A finished video that has just been made, for the question whether to watch it now.
+struct MadeVideo: Equatable {
+    let path: String
+    /// What it is, such as "16:9 video", and the run it is of.
+    let title: String
+    let run: String
 }
 
 final class OutputBox: @unchecked Sendable {
@@ -1168,6 +1191,8 @@ final class Model: ObservableObject {
     /// Runs whose files are showing.
     @Published var expanded: Set<String> = []
     @Published var pendingTrash: PendingTrash?
+    /// The finished video made a moment ago, while the pilot is being asked whether to watch it.
+    @Published var justMade: MadeVideo?
     /// The race clips in each track's Raw files folder.
     @Published var clips: [String: [String]] = [:]
     /// The clip open in the marker editor.
@@ -1234,6 +1259,7 @@ final class Model: ObservableObject {
         settings = (try? Data(contentsOf: settingsFile)).flatMap { try? decoder.decode(TimerSettings.self, from: $0) } ?? fresh
         store = (try? Data(contentsOf: storeFile)).flatMap { try? decoder.decode(Store.self, from: $0) } ?? Store()
         loaded = true
+        gatherSongMarks()
         summaries = [:]
         clips = [:]
         expanded = []
@@ -1476,6 +1502,9 @@ final class Model: ObservableObject {
         if let saved = (try? Data(contentsOf: storeFile)).flatMap({ try? decoder.decode(Store.self, from: $0) }), saved != store { store = saved }
         if let saved = (try? Data(contentsOf: settingsFile)).flatMap({ try? decoder.decode(TimerSettings.self, from: $0) }), saved != settings { settings = saved }
         loaded = true
+        // A copy from before the song library saves the file without the songs' own marks. They are
+        // still in the runs, so they are gathered again.
+        gatherSongMarks()
     }
 
     func folder(_ track: String, _ name: String) -> URL { root.appendingPathComponent(track).appendingPathComponent(name) }
@@ -1543,14 +1572,82 @@ final class Model: ObservableObject {
 
     /// The pilot's details and the timer's corner, handed to the lap timer directly: the one inside the
     /// app has no settings file beside it to read them from.
-    private func pilotArguments(for track: String) -> [String] {
+    private func pilotArguments(for track: String, withLogo: Bool = true) -> [String] {
         let event = details(ofEvent: Self.eventFolder(of: track))
         var arguments = ["--position", settings.corner, "--id-label", event.idLabel]
         if !settings.pilot.isEmpty { arguments += ["--pilot", settings.pilot] }
         if !event.id.isEmpty { arguments += ["--id", event.id] }
         if !event.name.isEmpty { arguments += ["--event", event.name] }
         if let accent = settings.accent, !accent.isEmpty { arguments += ["--accent", accent] }
+        if withLogo, let logo = logo(ofEvent: Self.eventFolder(of: track)) { arguments += ["--logo", logo.path] }
         return arguments
+    }
+
+    // MARK: An event's logo
+
+    static let pictureExtensions: Set<String> = ["png", "jpg", "jpeg", "webp", "heic", "tif", "tiff", "gif", "bmp"]
+
+    /// An event can have a logo: a picture called Logo in its folder. It goes in the heading of the
+    /// event's 9:16 videos, beside the pilot's name. It is the pilot's own copy, kept with the event.
+    func logo(ofEvent folder: String) -> URL? {
+        guard !folder.isEmpty else { return nil }
+        let place = root.appendingPathComponent(folder, isDirectory: true)
+        return ((try? FileManager.default.contentsOfDirectory(atPath: place.path)) ?? [])
+            .first { ($0 as NSString).deletingPathExtension.lowercased() == "logo" && Self.pictureExtensions.contains(($0 as NSString).pathExtension.lowercased()) }
+            .map { place.appendingPathComponent($0) }
+    }
+
+    func chooseLogo(forEvent folder: String) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.message = "Choose a picture for this event's logo. A copy is kept with the event. One with a see-through background looks best."
+        guard panel.runModal() == .OK, let picked = panel.url else { return }
+        if let problem = setLogo(from: picked, ofEvent: folder) { notice = problem }
+    }
+
+    /// Keeps a copy of a picture as an event's logo. It is saved as a PNG, which keeps any see-through
+    /// background and is a kind the lap timer can always read. Returns what went wrong, or nil.
+    func setLogo(from picture: URL, ofEvent folder: String) -> String? {
+        guard !folder.isEmpty else { return "Give these tracks an event of their own first, in Pilot & settings. The logo is kept in the event's folder." }
+        guard let source = CGImageSourceCreateWithURL(picture as CFURL, nil), let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            return "\(picture.lastPathComponent) can't be read as a picture."
+        }
+        let place = root.appendingPathComponent(folder, isDirectory: true)
+        let file = place.appendingPathComponent("Logo.png")
+        // The one it replaces goes to the Trash, unless it is the very file that was picked.
+        if let old = logo(ofEvent: folder), old.standardizedFileURL != picture.standardizedFileURL { try? FileManager.default.trashItem(at: old, resultingItemURL: nil) }
+        guard let destination = CGImageDestinationCreateWithURL(file as CFURL, "public.png" as CFString, 1, nil) else { return "The logo couldn't be saved in \(folder)." }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { return "The logo couldn't be saved in \(folder)." }
+        objectWillChange.send()
+        return nil
+    }
+
+    func removeLogo(ofEvent folder: String) {
+        guard let old = logo(ofEvent: folder) else { return }
+        do {
+            try FileManager.default.trashItem(at: old, resultingItemURL: nil)
+            notice = "Moved \(details(ofEvent: folder).name)'s logo to the Trash."
+        } catch {
+            notice = "The logo couldn't be moved to the Trash: \(error.localizedDescription)"
+        }
+        objectWillChange.send()
+    }
+
+    /// The pilot's details and the timer's look for a track's videos, as the lap timer itself takes
+    /// them from what it is handed. The marker editor draws its timer from this.
+    func timerOptions(for track: String) -> Options {
+        // The logo is for the 9:16 video's heading, which the editor doesn't draw: no need to look for it at every frame.
+        var options = parseArguments(pilotArguments(for: track, withLogo: false))
+        options.trackName = Self.trackName(track)
+        return options
+    }
+
+    /// The timer as the lap timer program draws it for a run's 16:9 video at one moment of the clip,
+    /// on a see-through frame. The marker editor's own timer is checked against this.
+    func timerStill(markers: String, track: String, at seconds: Double, to file: URL) -> Bool {
+        let arguments = ["--markers", markers, "--size", "1920x1080", "--still", String(seconds), file.path] + pilotArguments(for: track) + toolArguments(track)
+        return runTool(tool, arguments).status == 0
     }
 
     /// Where things that can be made again are kept: the timer preview and the editor's playable copies.
@@ -1653,11 +1750,43 @@ final class Model: ObservableObject {
         }
     }
 
+    /// Songs are kept in one place, for every track of every event: this folder in the library.
+    static let songsFolder = "Songs"
+    var songLibrary: URL { root.appendingPathComponent(Self.songsFolder, isDirectory: true) }
+
+    /// Where a song is: in the song library, or failing that in the track's own music folder, which
+    /// is where songs were kept before there was a library.
+    func songFile(_ name: String, track: String) -> URL {
+        let shared = songLibrary.appendingPathComponent(name)
+        return FileManager.default.fileExists(atPath: shared.path) ? shared : folder(track, "music").appendingPathComponent(name)
+    }
+
+    /// The pilot's marks in each song that has any.
+    var songMarks: [String: [Double]] { (store.songs ?? [:]).compactMapValues { $0.marks } }
+
+    /// Marks made before songs kept their own are in the runs they were made in. Each song with none
+    /// of its own takes them from every run that used it, so they are there for the next run too.
+    private func gatherSongMarks() {
+        var found: [String: [Double]] = [:]
+        for state in store.tracks.values {
+            for edit in (state.edits ?? [:]).values {
+                guard let song = edit.song, !song.isEmpty, store.songs?[song] == nil else { continue }
+                for mark in edit.songMarks ?? [] where !(found[song] ?? []).contains(where: { abs($0 - mark) < 0.02 }) {
+                    found[song, default: []].append(mark)
+                }
+            }
+        }
+        guard !found.isEmpty else { return }
+        var all = store.songs ?? [:]
+        for (song, marks) in found { all[song] = SongNotes(marks: marks.sorted()) }
+        store.songs = all
+    }
+
     /// The sound a run's finished videos get: the song chosen in the marker editor, or else the file
     /// named after the run in the music folder. Nil when they are silent.
     func music(for run: RunInfo, track: String) -> String? {
         if let song = state(track).edits?[run.name]?.song {
-            return song.isEmpty ? nil : folder(track, "music").appendingPathComponent(song).path
+            return song.isEmpty ? nil : songFile(song, track: track).path
         }
         return (run.music ?? "").isEmpty ? nil : run.music
     }
@@ -1672,7 +1801,7 @@ final class Model: ObservableObject {
             if song.isEmpty {
                 arguments.append("--no-music")
             } else {
-                arguments += ["--music", folder(track, "music").appendingPathComponent(song).path]
+                arguments += ["--music", songFile(song, track: track).path]
                 if let start = edit.songStart { arguments += ["--music-start", String(start)] }
                 if let comesIn = edit.musicIn { arguments += ["--music-in", String(comesIn)] }
                 if let stops = edit.musicOut { arguments += ["--music-out", String(stops)] }
@@ -1684,8 +1813,8 @@ final class Model: ObservableObject {
     func make(_ run: RunInfo, track: String, output: Output) {
         guard job == nil else { return }
         if output != .overlay, let song = state(track).edits?[run.name]?.song, !song.isEmpty,
-           !FileManager.default.fileExists(atPath: folder(track, "music").appendingPathComponent(song).path) {
-            notice = "\(song) isn't in \(Self.trackName(track))'s music folder any more. Open Markers & music for \(run.name) and pick the song again."
+           !FileManager.default.fileExists(atPath: songFile(song, track: track).path) {
+            notice = "\(song) isn't among your songs any more. Open Markers & music for \(run.name) and pick the song again."
             return
         }
         // Without an overlays folder the lap timer writes beside the marker files instead, and the finished videos follow it there.
@@ -1709,7 +1838,10 @@ final class Model: ObservableObject {
                 if result.status == 0 {
                     // The tool rewrites its progress line in place, so split on returns as well as new lines.
                     let lines = result.output.components(separatedBy: CharacterSet(charactersIn: "\r\n"))
-                    let written = lines.last { $0.hasPrefix("Wrote ") }.map { "Made \(URL(fileURLWithPath: String($0.dropFirst(6))).lastPathComponent)" }
+                    let file = lines.last { $0.hasPrefix("Wrote ") }.map { String($0.dropFirst(6)) }
+                    let written = file.map { "Made \(URL(fileURLWithPath: $0).lastPathComponent)" }
+                    // A finished video is something to look at straight away: ask.
+                    if let file, output != .overlay { self.justMade = MadeVideo(path: file, title: output.title, run: run.name) }
                     let extra = lines.filter { $0.hasPrefix("Sound: ") || $0.hasPrefix("Note: ") }.map { $0.replacingOccurrences(of: "Note: ", with: "") }
                     var notes = [written ?? lines.last { $0.hasPrefix("No ") }].compactMap { $0 } + extra
                     if written != nil, already > 0 {
@@ -1748,7 +1880,8 @@ final class Model: ObservableObject {
         notice = nil
         let names = Set((clips[target.track] ?? []).map { URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent.lowercased() })
         editor = Editor(target: target, edit: state(target.track).edits?[target.name] ?? RunEdit(), window: summaries[target.track]?.window ?? 3,
-                        tool: tool, musicFolder: folder(target.track, "music"), clipNames: names.union([target.name.lowercased()]))
+                        tool: tool, musicFolder: folder(target.track, "music"), songLibrary: songLibrary, songMarks: songMarks,
+                        clipNames: names.union([target.name.lowercased()]))
     }
 
     func closeEditor() {
@@ -1797,6 +1930,10 @@ final class Model: ObservableObject {
             edits[target.name] = editor.edit == RunEdit() ? nil : editor.edit
             state.edits = edits.isEmpty ? nil : edits
         }
+        // A song's marks are kept with the song, for every run that uses it.
+        var songs = store.songs ?? [:]
+        for (song, marks) in editor.marksToKeep { songs[song] = SongNotes(marks: marks) }
+        if songs != store.songs ?? [:] { store.songs = songs }
         editor.markSaved()
         if !replaced.isEmpty {
             editor.message = "Saved. \(replaced.joined(separator: ", ")) from Premiere went to the Trash, since these markers replace it."
@@ -1881,11 +2018,14 @@ final class Model: ObservableObject {
         return "\(tracks.count == 1 ? "It holds" : "They hold") \(list), \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) in all."
     }
 
-    /// Whether a folder has anything in it worth losing: any file at all, however deep, that isn't hidden.
-    private func holdsAnything(_ folder: URL) -> Bool {
+    /// Whether a folder has anything in it worth losing: any file at all, however deep, that isn't
+    /// hidden. One file can be left out of the count, which is how an event's logo doesn't make its
+    /// folder count as full.
+    private func holdsAnything(_ folder: URL, besides spared: URL? = nil) -> Bool {
         let files = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles])
         while let file = files?.nextObject() as? URL {
             let values = try? file.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            if let spared, file.standardizedFileURL == spared.standardizedFileURL { continue }
             if values?.isDirectory != true || values?.isSymbolicLink == true { return true }
         }
         return false
@@ -1919,7 +2059,7 @@ final class Model: ObservableObject {
             title: "Move \(name) to the Trash?",
             detail: "It has no tracks, but there are other files in its folder, and they go too. You can put it back from the Trash.",
             tracks: [], event: folder)
-        if holdsAnything(root.appendingPathComponent(folder)) {
+        if holdsAnything(root.appendingPathComponent(folder), besides: logo(ofEvent: folder)) {
             pendingRemoval = pending
         } else {
             remove(pending)
@@ -2065,7 +2205,24 @@ final class Model: ObservableObject {
                 if left > 0 { lines.append("\(left) other file\(left == 1 ? " isn't a video and was" : "s aren't videos and were") left out.") }
                 self.notice = lines.joined(separator: "\n")
                 self.loadSummary(track)
+                // One recording added by itself goes straight to having its laps marked. Several are
+                // left on the page, for the pilot to pick which to mark first.
+                if clips.count == 1, let name = result.added.first ?? result.present.first {
+                    self.openForMarking(destination.appendingPathComponent(name).path, track: track)
+                }
             }
+        }
+    }
+
+    /// Opens a clip in the marker editor: with its markers when it is already a timed run, and
+    /// otherwise ready for its first one.
+    func openForMarking(_ clip: String, track: String) {
+        // A track's clips all sit in one folder, so the file's name is enough to tell which run it is.
+        let name = URL(fileURLWithPath: clip).lastPathComponent
+        if let run = summaries[track]?.runs.first(where: { URL(fileURLWithPath: $0.clip).lastPathComponent == name }) {
+            edit(run, track: track)
+        } else {
+            mark(clip: clip, track: track)
         }
     }
 
@@ -2172,6 +2329,9 @@ final class Model: ObservableObject {
     func newEvent(named raw: String) -> String? {
         let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if let problem = problem(withEventName: name) { return problem }
+        if name.caseInsensitiveCompare(Self.songsFolder) == .orderedSame {
+            return "\(Self.songsFolder) is the folder your song library is kept in. Give the event another name."
+        }
         guard !FileManager.default.fileExists(atPath: root.appendingPathComponent(name).path) else {
             return "There is already a folder called \(name) in your library."
         }
@@ -2336,6 +2496,12 @@ struct RootView: View {
         } message: { pending in
             Text(pending.paths.map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: ", ")
                 + (pending.warning.map { "\n\n" + $0 } ?? ""))
+        }
+        .alert("Your video is ready", isPresented: Binding(get: { model.justMade != nil }, set: { if !$0 { model.justMade = nil } }), presenting: model.justMade) { made in
+            Button("Watch it now") { model.play(made.path) }
+            Button("Not now", role: .cancel) {}
+        } message: { made in
+            Text("The \(made.title) of \(made.run) is made. Watch it now?")
         }
     }
 
@@ -3159,7 +3325,7 @@ struct TrackView: View {
                 Text("No runs yet").font(.system(size: 18, weight: .heavy))
                 Text((model.clips[track] ?? []).isEmpty
                      ? "Add your recordings: press Add clips, or drop them onto this page. Each one then gets a Mark laps button."
-                     : "Press Mark laps on a clip below, step to each start/finish gate crossing and press M. Save, and the run shows up here, ranked.")
+                     : "Press Mark laps on a clip below, step to each start/finish gate crossing and press M. Press Done, and the run shows up here, ranked.")
                     .font(.system(size: 13)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
                 if (model.clips[track] ?? []).isEmpty {
                     Button("Add clips…") { model.chooseClips(for: track) }.buttonStyle(PrimaryButton()).disabled(model.job != nil)
@@ -3209,6 +3375,10 @@ extension TrackView {
                             Button(model.vlc == nil ? "Open" : "Open in VLC") { model.play(clip) }.buttonStyle(SecondaryButton())
                             Button("Mark laps") { model.mark(clip: clip, track: track) }.buttonStyle(SecondaryButton())
                                 .help("Step through this clip and mark each start/finish gate crossing.")
+                            // A clip added by mistake, or not worth marking, can go from here.
+                            Button { model.askToTrash([file], track: track) } label: { Image(systemName: "trash") }
+                                .buttonStyle(SecondaryButton()).help("Move this clip to the Trash. It asks first.")
+                                .accessibilityLabel("Move \(file.name) to the Trash")
                         }
                         .padding(.vertical, 8)
                     }
@@ -3547,6 +3717,11 @@ struct SubmitSheet: View {
     @State private var open: String?
     /// Whether the answers the app fills in are opened up to be changed.
     @State private var changingKnown = false
+    /// No email was kept when the window opened, so it is asked for in a place of its own. It stays
+    /// there while it is typed: a field must not fold away after its first letter.
+    @State private var askingEmail = false
+    /// Something the app fills in was empty when the window opened, so those answers are opened up.
+    @State private var knownOpened = false
 
     private var form: FormDefinition? { model.form(target.track) }
     private var time: String { target.run.best?.seconds ?? "" }
@@ -3564,6 +3739,39 @@ struct SubmitSheet: View {
             answers[question.id] = [value]
             model.update(target.track) { $0.links[target.run.name] = value.trimmingCharacters(in: .whitespacesAndNewlines) }
         })
+    }
+
+    /// Something@something.something, with no spaces. Enough to catch a slip, not to judge an address.
+    static func looksLikeEmail(_ text: String) -> Bool {
+        let typed = text.trimmingCharacters(in: .whitespaces)
+        let parts = typed.split(separator: "@", omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty, !typed.contains(" "), let dot = parts[1].lastIndex(of: ".") else { return false }
+        return dot != parts[1].startIndex && parts[1].index(after: dot) != parts[1].endIndex
+    }
+
+    /// The email is asked for by itself the first time an entry is made: the form won't take one without it.
+    private var emailCard: some View {
+        let typed = email.trimmingCharacters(in: .whitespaces)
+        return VStack(alignment: .leading, spacing: 9) {
+            Text("YOUR EMAIL").label()
+            Text("The entry form asks for an email address. Type yours once and it is kept for every track after this.")
+                .font(.system(size: 12)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+            TextField("Your email address", text: $email)
+                .textFieldStyle(.plain).font(.system(size: 14))
+                .padding(.horizontal, 12).padding(.vertical, 9)
+                .background(Theme.raised, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            if typed.isEmpty {
+                Text("The form can't be filled in without it.").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.warn)
+            } else if !Self.looksLikeEmail(typed) {
+                Label("That isn't a whole email address yet.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.warn)
+            } else {
+                Label("That goes on the form, and is kept for next time.", systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.good)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card(padding: 16)
     }
 
     static func looksLikeYouTube(_ text: String) -> Bool {
@@ -3652,6 +3860,7 @@ struct SubmitSheet: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 12) {
                             if let question = linkQuestion { linkCard(question) }
+                            if askingEmail { emailCard }
                             yours(form)
                             filledIn(form)
                         }
@@ -3680,15 +3889,15 @@ struct SubmitSheet: View {
                 } else {
                     Button("Cancel") { dismiss() }.buttonStyle(SecondaryButton())
                     Spacer()
-                    if !missing.isEmpty {
-                        Text("\(missing.count) required answer\(missing.count == 1 ? "" : "s") still empty").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.warn)
+                    if form != nil, let waiting = inTheWay {
+                        Text(waiting).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.warn)
                     }
                     Button("Fill in the form") {
                         remember()
                         showingForm = true
                     }
                     .buttonStyle(PrimaryButton())
-                    .disabled(form == nil || !missing.isEmpty || email.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(form == nil || inTheWay != nil)
                 }
             }
             .padding(18)
@@ -3702,6 +3911,20 @@ struct SubmitSheet: View {
         .onChange(of: form) { _, _ in prepare() }
     }
 
+    /// What still has to be given before the form can be filled in, in a line. Nil when nothing does.
+    private var inTheWay: String? {
+        var waiting: [String] = []
+        if !missing.isEmpty { waiting.append("\(missing.count) required answer\(missing.count == 1 ? "" : "s") still empty") }
+        let typed = email.trimmingCharacters(in: .whitespaces)
+        if typed.isEmpty {
+            waiting.append("your email is still empty")
+        } else if !Self.looksLikeEmail(typed) {
+            waiting.append("your email isn't a whole address yet")
+        }
+        guard let first = waiting.first else { return nil }
+        return ([first.prefix(1).uppercased() + first.dropFirst()] + waiting.dropFirst()).joined(separator: ", and ")
+    }
+
     /// What the app answers by itself, in a line. It opens up when one of them needs changing or is missing.
     private func filledIn(_ form: FormDefinition) -> some View {
         let known = form.questions.filter { $0.role == .handle || $0.role == .number || $0.role == .time }
@@ -3709,26 +3932,26 @@ struct SubmitSheet: View {
             question.role == .handle ? "Pilot handle" : question.role == .number ? "Registration number" : "Fastest three laps in a row"
         }
         let empty = known.contains { $0.required && (answers[$0.id]?.first ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
-            || email.trimmingCharacters(in: .whitespaces).isEmpty
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 Text("FILLED IN FOR YOU").label()
                 Spacer()
-                if !empty {
+                if !empty, !knownOpened {
                     Button(changingKnown ? "Done" : "Change") { changingKnown.toggle() }.buttonStyle(.plain)
                         .font(.system(size: 11, weight: .heavy)).foregroundStyle(Theme.accent)
                 }
             }
-            if changingKnown || empty {
+            if changingKnown || knownOpened || empty {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], alignment: .leading, spacing: 10) {
                     ForEach(known) { question in
                         AnswerField(title: name(question), required: question.required, text: Binding(get: { answers[question.id]?.first ?? "" }, set: { answers[question.id] = [$0] }))
                             .help(question.title)
                     }
-                    AnswerField(title: "Your email", required: true, text: $email)
+                    // Asked for in its own place above when there was none to begin with.
+                    if !askingEmail { AnswerField(title: "Your email", required: true, text: $email) }
                 }
                 if empty {
-                    Text("Something here is empty. Your name and ID come from Pilot & settings, and your email is kept once you have typed it.")
+                    Text("Something here is empty. Your name and ID come from Pilot & settings.")
                         .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.warn).fixedSize(horizontal: false, vertical: true)
                 }
             } else {
@@ -3740,9 +3963,11 @@ struct SubmitSheet: View {
                             Text(answers[question.id]?.first ?? "").font(.system(size: 13, weight: .bold).monospacedDigit())
                         }
                     }
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text("Your email").font(.system(size: 12)).foregroundStyle(Theme.dim).frame(width: 190, alignment: .leading)
-                        Text(email).font(.system(size: 13, weight: .bold))
+                    if !askingEmail {
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Text("Your email").font(.system(size: 12)).foregroundStyle(Theme.dim).frame(width: 190, alignment: .leading)
+                            Text(email).font(.system(size: 13, weight: .bold))
+                        }
                     }
                 }
             }
@@ -3835,6 +4060,7 @@ struct SubmitSheet: View {
     /// Starts from what's known: the pilot, the time, and whatever was answered last time.
     private func prepare() {
         email = email.isEmpty ? model.store.email : email
+        if email.trimmingCharacters(in: .whitespaces).isEmpty { askingEmail = true }
         guard let form else { return }
         var unknown: Set<String> = []
         for question in form.questions where answers[question.id] == nil {
@@ -3853,6 +4079,12 @@ struct SubmitSheet: View {
         }
         fresh.formUnion(unknown)
         if open == nil { open = mine(form).first { $0.kind != .other && $0.required && summary($0) == nil }?.id }
+        // The pilot's name, number or time missing: open those up, and leave them open while they are typed.
+        let filled: [FormQuestion.Role] = [.handle, .number, .time]
+        if form.questions.contains(where: { question in
+            guard let role = question.role, filled.contains(role), question.required else { return false }
+            return (answers[question.id]?.first ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+        }) { knownOpened = true }
     }
 
     private func remember() {
@@ -4134,7 +4366,13 @@ final class Editor: ObservableObject {
     let window: Int
     let player = AVPlayer()
     private let tool: URL
+    /// The track's own music folder: where Premiere's exports are, and songs from before the song library.
     private let musicFolder: URL
+    /// The library's Songs folder, where songs are kept for every track.
+    private let songLibrary: URL
+    /// The pilot's marks in each song, as they were when the editor opened and as they are changed
+    /// here. The chosen song's are worked on in `edit.songMarks`.
+    private var marksBySong: [String: [Double]]
     /// Lower-case names of the track's clips. A sound file named after one is a Premiere export, not a song.
     private let clipNames: Set<String>
 
@@ -4146,7 +4384,7 @@ final class Editor: ObservableObject {
     /// Gate crossings as frames of the clip, in order. The first starts lap 1.
     @Published var markers: [Int] = []
     @Published var edit: RunEdit
-    /// Songs in the track's music folder.
+    /// The songs to choose from: the library's, and any that are only in the track's music folder.
     @Published var songs: [String] = []
     /// The sound exported from the run's Premiere sequence, if the music folder has one.
     @Published var premiereMusic: String?
@@ -4162,6 +4400,10 @@ final class Editor: ObservableObject {
     /// Whether the playhead and the marks in the sound wave window catch on the beat.
     @Published var snapToBeat = UserDefaults.standard.object(forKey: "snapToBeat") as? Bool ?? true {
         didSet { UserDefaults.standard.set(snapToBeat, forKey: "snapToBeat") }
+    }
+    /// Whether the lap timer is drawn over the picture, as the 16:9 video will have it.
+    @Published var showsTimer = UserDefaults.standard.object(forKey: "showsTimer") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showsTimer, forKey: "showsTimer") }
     }
     /// The stretch of the clip the timeline is showing, in seconds.
     @Published var visible = 0.0...1.0
@@ -4182,15 +4424,41 @@ final class Editor: ObservableObject {
     private var generation = 0
     private var observer: Any?
 
-    init(target: EditTarget, edit: RunEdit, window: Int, tool: URL, musicFolder: URL, clipNames: Set<String>) {
+    init(target: EditTarget, edit: RunEdit, window: Int, tool: URL, musicFolder: URL, songLibrary: URL, songMarks: [String: [Double]], clipNames: Set<String>) {
         self.target = target
-        self.edit = edit
         self.window = max(1, window)
         self.tool = tool
         self.musicFolder = musicFolder
+        self.songLibrary = songLibrary
+        marksBySong = songMarks
         self.clipNames = clipNames
-        savedEdit = edit
+        // The song's own marks are the ones that count: they may have been changed in another run since this one was saved.
+        var opened = edit
+        if let song = edit.song, !song.isEmpty, let kept = songMarks[song] { opened.songMarks = kept.isEmpty ? nil : kept }
+        self.edit = opened
+        savedEdit = opened
         Task { await load() }
+    }
+
+    /// Where a song is: in the library, or failing that in the track's own music folder.
+    private func songFile(_ name: String) -> URL {
+        let shared = songLibrary.appendingPathComponent(name)
+        return FileManager.default.fileExists(atPath: shared.path) ? shared : musicFolder.appendingPathComponent(name)
+    }
+
+    /// The marks to keep with each song when this is saved: the chosen song's as they are now, and
+    /// those of any song marked earlier in this sitting.
+    var marksToKeep: [String: [Double]] {
+        var all = touched
+        if let song = edit.song, !song.isEmpty, songMarks != (marksBySong[song] ?? []) || touched[song] != nil { all[song] = songMarks }
+        return all
+    }
+    /// Songs whose marks were changed here and then left for another song.
+    private var touched: [String: [Double]] = [:]
+
+    func revealSongs() {
+        try? FileManager.default.createDirectory(at: songLibrary, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(songLibrary)
     }
 
     var fps: Double { Double(num) / Double(den) }
@@ -4599,11 +4867,17 @@ final class Editor: ObservableObject {
     // MARK: Music
 
     private func findSongs() {
-        let names = ((try? FileManager.default.contentsOfDirectory(atPath: musicFolder.path)) ?? [])
-            .filter { !$0.hasPrefix(".") && Model.audioExtensions.contains(($0 as NSString).pathExtension.lowercased()) }
-            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-        premiereMusic = names.first { ($0 as NSString).deletingPathExtension.lowercased() == target.name.lowercased() }
-        songs = names.filter { !clipNames.contains(($0 as NSString).deletingPathExtension.lowercased()) }
+        func sounds(in folder: URL) -> [String] {
+            ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [])
+                .filter { !$0.hasPrefix(".") && Model.audioExtensions.contains(($0 as NSString).pathExtension.lowercased()) }
+        }
+        let own = sounds(in: musicFolder)
+        premiereMusic = own.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            .first { ($0 as NSString).deletingPathExtension.lowercased() == target.name.lowercased() }
+        // The library's songs, and any still only in this track's folder. A sound file named after a clip is Premiere's, not a song.
+        let kept = sounds(in: songLibrary)
+        let onlyHere = own.filter { !clipNames.contains(($0 as NSString).deletingPathExtension.lowercased()) && !kept.contains($0) }
+        songs = (kept + onlyHere).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
     /// `nil` is the sound from Premiere when there is some, an empty name is silence, anything else is a song in the music folder.
@@ -4611,9 +4885,11 @@ final class Editor: ObservableObject {
         guard name != edit.song else { return }
         pause()
         remember()
+        // Marks belong to the song they were made in: this song's are put by, and the new one's brought out.
+        if let old = edit.song, !old.isEmpty, songMarks != (marksBySong[old] ?? []) || touched[old] != nil { touched[old] = songMarks }
         edit.song = name
-        // Marks belong to the song they were made in.
-        edit.songMarks = nil
+        let kept = name.flatMap { touched[$0] ?? marksBySong[$0] } ?? []
+        edit.songMarks = kept.isEmpty ? nil : kept
         // A song that hasn't been placed yet starts with the video.
         if let name, !name.isEmpty, edit.songStart == nil { edit.songStart = stretch?.lowerBound ?? 0 }
         Task {
@@ -4758,31 +5034,38 @@ final class Editor: ObservableObject {
         placeSong(at: ((time - mark) * 1000).rounded() / 1000)
     }
 
-    /// Asks for an audio file and copies it into the track's music folder.
+    /// Asks for an audio file and adds it to the song library.
     func importSong() {
         pause()
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.audio]
-        panel.message = "Choose a song. A copy goes into this track's music folder."
+        panel.message = "Choose a song. A copy goes into your song library, where every track can use it."
         guard panel.runModal() == .OK, let picked = panel.url else { return }
         importSong(from: picked)
     }
 
-    /// Copies an audio file into the track's music folder and makes it the run's song.
+    /// Copies an audio file into the song library and makes it the run's song.
     func importSong(from picked: URL) {
         let name = picked.lastPathComponent
-        let destination = musicFolder.appendingPathComponent(name)
-        if picked.standardizedFileURL.path != destination.standardizedFileURL.path, !FileManager.default.fileExists(atPath: destination.path) {
-            do {
-                try FileManager.default.createDirectory(at: musicFolder, withIntermediateDirectories: true)
-                try FileManager.default.copyItem(at: picked, to: destination)
-            } catch {
-                message = "\(name) couldn't be copied into the music folder: \(error.localizedDescription)"
-                return
-            }
+        if let problem = keep(picked, as: name) {
+            message = "\(name) couldn't be added to your songs: \(problem)"
+            return
         }
         findSongs()
         choose(song: name)
+    }
+
+    /// Puts a copy of a sound file in the song library, unless one of that name is there. Returns what went wrong, or nil.
+    private func keep(_ file: URL, as name: String) -> String? {
+        let destination = songLibrary.appendingPathComponent(name)
+        guard file.standardizedFileURL.path != destination.standardizedFileURL.path, !FileManager.default.fileExists(atPath: destination.path) else { return nil }
+        do {
+            try FileManager.default.createDirectory(at: songLibrary, withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: file, to: destination)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
     }
 
     private func loadSong() async {
@@ -4793,12 +5076,16 @@ final class Editor: ObservableObject {
         analysis = nil
         listening = false
         guard let name = edit.song, !name.isEmpty else { return }
-        let url = musicFolder.appendingPathComponent(name)
+        // A song that is only in this track's folder, from before there was a library, joins the
+        // library when it is used, so the next track has it too. The track's copy is left where it is.
+        let own = musicFolder.appendingPathComponent(name)
+        if FileManager.default.fileExists(atPath: own.path), keep(own, as: name) == nil { findSongs() }
+        let url = songFile(name)
         // Exact timing, so the song plays and is cut exactly where its sound wave shows it.
         let asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
         guard let length = try? await asset.load(.duration), length.seconds > 0,
               (try? await asset.loadTracks(withMediaType: .audio).first) != nil else {
-            message = "\(name) isn't in the music folder any more, or can't be read."
+            message = "\(name) isn't among your songs any more, or can't be read."
             return
         }
         guard edit.song == name else { return }
@@ -5051,6 +5338,8 @@ final class Editor: ObservableObject {
     }
 
     func markSaved() {
+        for (song, marks) in marksToKeep { marksBySong[song] = marks }
+        touched = [:]
         savedMarkers = markers
         savedEdit = edit
         saved = true
@@ -5230,6 +5519,95 @@ final class SoundWave: ObservableObject {
     }
 }
 
+/// Draws the lap timer for the marker editor with the lap timer's own code, which is compiled into
+/// the app for this: what shows over the picture here is what the 16:9 video gets. It keeps one
+/// box and draws it again for each frame, and makes a new one only when the laps, the size or the
+/// pilot's details change.
+@MainActor
+final class TimerDrawer {
+    private var panel: Panel?
+    private var made = ""
+
+    /// The timer as it reads `seconds` into the clip, and where its top-left corner goes in a frame
+    /// of that many pixels. Nil while there are fewer than two gates, when there is no lap to time.
+    func picture(crossings: [Double], at seconds: Double, options: Options, frame: CGSize) -> (image: CGImage, origin: CGPoint)? {
+        // The video's frame is 1080 high, and the box is drawn for that. Here the frame is whatever size the picture is.
+        let scale = frame.height / 1080 * CGFloat(options.userScale)
+        let wanted = "\(crossings) \(scale) \(options.title ?? "") \(options.badge ?? "") \(options.event ?? "") \(options.trackName ?? "") "
+            + "\(options.accent) \(options.maxRows) \(options.window) \(options.decimals)"
+        if wanted != made {
+            made = wanted
+            panel = nil
+            if scale > 0.1, let race = try? makeRace(crossings: crossings, options: options), let accent = parseHexColor(options.accent) {
+                panel = Panel(race: race, scale: scale, accent: accent, title: options.title, badge: options.badge,
+                              event: options.event, track: options.trackName, maxRows: options.maxRows)
+            }
+        }
+        guard let panel else { return nil }
+        panel.draw(at: seconds)
+        let inset = Int((CGFloat(options.margin) * panel.scale).rounded())
+        let spot = corner(options.position, boxWidth: panel.pixelWidth, boxHeight: panel.pixelHeight,
+                          frameWidth: Int(frame.width), frameHeight: Int(frame.height), inset: inset)
+            ?? (x: Int(frame.width) - panel.pixelWidth - inset, y: inset)
+        return (panel.image(), CGPoint(x: spot.x, y: spot.y))
+    }
+
+    /// The same, written as a picture of the whole frame with the rest of it see-through, the way the
+    /// lap timer writes a still. For checking one against the other.
+    func still(crossings: [Double], at seconds: Double, options: Options, frame: CGSize, to file: URL) -> Bool {
+        guard let drawn = picture(crossings: crossings, at: seconds, options: options, frame: frame), let panel else { return false }
+        writeStill(to: file, panel: panel, placement: Placement(frameWidth: Int(frame.width), frameHeight: Int(frame.height), x: Int(drawn.origin.x), y: Int(drawn.origin.y)),
+                   seconds: seconds, background: nil)
+        return true
+    }
+}
+
+/// The lap timer over the picture in the marker editor: where the 16:9 video will have it, reading
+/// what it will read on the frame that is showing. Each marker added, moved or removed changes it
+/// at once, so a run can be checked before a video is made of it.
+struct TimerOverlay: View {
+    @ObservedObject var editor: Editor
+    let options: Options
+    @State private var drawer = TimerDrawer()
+    @Environment(\.displayScale) private var displayScale
+
+    /// The corner of the frame the box sits in, for the note that stands in for it.
+    private var alignment: Alignment {
+        switch options.position.trimmed.lowercased().replacingOccurrences(of: " ", with: "-") {
+        case "tl", "top-left": return .topLeading
+        case "bl", "bottom-left": return .bottomLeading
+        case "br", "bottom-right": return .bottomTrailing
+        case "tc", "top-center": return .top
+        case "bc", "bottom-center": return .bottom
+        default: return .topTrailing
+        }
+    }
+
+    var body: some View {
+        GeometryReader { space in
+            // The finished video's frame as it sits here: 16:9, as big as fits, in the middle. A 16:9
+            // recording fills exactly that.
+            let width = min(space.size.width, space.size.height * 16 / 9), height = width * 9 / 16
+            let left = (space.size.width - width) / 2, top = (space.size.height - height) / 2
+            let pixels = CGSize(width: (width * displayScale).rounded(), height: (height * displayScale).rounded())
+            if let timer = drawer.picture(crossings: editor.markers.map(editor.seconds), at: editor.seconds(editor.frame), options: options, frame: pixels) {
+                Image(decorative: timer.image, scale: displayScale)
+                    .offset(x: left + timer.origin.x / displayScale, y: top + timer.origin.y / displayScale)
+            } else {
+                Text(editor.markers.isEmpty ? "The lap timer shows here once you mark the start gate and the end of a lap."
+                     : "Mark the end of lap 1 and the lap timer shows here.")
+                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(.white.opacity(0.85)).multilineTextAlignment(.leading)
+                    .padding(.horizontal, 10).padding(.vertical, 7).frame(maxWidth: 220, alignment: .leading)
+                    .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .padding(max(8, 54 * height / 1080))
+                    .frame(width: width, height: height, alignment: alignment)
+                    .offset(x: left, y: top)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
 /// The clip's picture.
 struct PlayerView: NSViewRepresentable {
     let player: AVPlayer
@@ -5259,7 +5637,10 @@ struct EditorView: View {
     @EnvironmentObject var model: Model
     @ObservedObject var editor: Editor
     @State private var monitor: Any?
-    @State private var closing = false
+    /// Asking whether to throw the changes away.
+    @State private var discarding = false
+    /// Why the work can't be saved as it stands, while the pilot is asked whether to stay or leave without it.
+    @State private var unsavable: String?
 
     /// How wide the editor gets in a window of a given height. The picture can only grow as tall as
     /// the window lets it, so past the width that picture needs, more width would only put black bars
@@ -5308,10 +5689,17 @@ struct EditorView: View {
             if let monitor { NSEvent.removeMonitor(monitor) }
             monitor = nil
         }
-        .confirmationDialog("Save the changes to \(editor.target.name)?", isPresented: $closing) {
-            Button("Save") { if save() { model.closeEditor() } }
-            Button("Don't save", role: .destructive) { model.closeEditor() }
-            Button("Cancel", role: .cancel) {}
+        .confirmationDialog("Throw away the changes to \(editor.target.name)?", isPresented: $discarding) {
+            Button("Throw them away", role: .destructive) { model.closeEditor() }
+            Button("Keep working", role: .cancel) {}
+        } message: {
+            Text("Its markers and music go back to how they were when they were last saved.")
+        }
+        .confirmationDialog("\(editor.target.name) can't be saved yet", isPresented: Binding(get: { unsavable != nil }, set: { if !$0 { unsavable = nil } }), presenting: unsavable) { _ in
+            Button("Leave without saving", role: .destructive) { model.closeEditor() }
+            Button("Keep working", role: .cancel) {}
+        } message: { reason in
+            Text(reason)
         }
     }
 
@@ -5323,7 +5711,7 @@ struct EditorView: View {
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             // Leave typing, and anything aimed at a dialog, alone.
             let window = event.window ?? NSApp.mainWindow
-            if closing || NSApp.modalWindow != nil || window?.attachedSheet != nil || window?.firstResponder is NSTextView { return event }
+            if discarding || unsavable != nil || NSApp.modalWindow != nil || window?.attachedSheet != nil || window?.firstResponder is NSTextView { return event }
             let command = event.modifierFlags.contains(.command)
             if command, event.charactersIgnoringModifiers?.lowercased() == "s" {
                 _ = save()
@@ -5348,10 +5736,16 @@ struct EditorView: View {
         return true
     }
 
+    /// Done keeps the work and goes back: there is nothing to answer first. Only when it can't be
+    /// saved as it stands, with fewer than two gates marked say, is the pilot asked what to do.
     private func done() {
-        if editor.dirty {
-            editor.pause()
-            closing = true
+        guard editor.dirty else {
+            model.closeEditor()
+            return
+        }
+        editor.pause()
+        if let problem = model.save(editor) {
+            unsavable = problem
         } else {
             model.closeEditor()
         }
@@ -5369,14 +5763,24 @@ struct EditorView: View {
                 if let message = editor.message {
                     Text(message).foregroundStyle(Theme.warn)
                 } else if editor.dirty {
-                    Text("Not saved yet").foregroundStyle(Theme.dim)
+                    Text("Not saved yet. Done saves it.").foregroundStyle(Theme.dim)
                 } else if editor.saved {
                     Label("Saved", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.good)
                 }
             }
             .font(.system(size: 12, weight: .semibold)).multilineTextAlignment(.trailing).frame(maxWidth: 460, alignment: .trailing)
-            Button("Save") { save() }.buttonStyle(PrimaryButton()).disabled(!editor.dirty || editor.phase != .ready)
-            Button("Done", action: done).buttonStyle(SecondaryButton())
+            // One button finishes: it saves and goes back. Leaving without saving is the other choice,
+            // and only there while there is something to lose.
+            if editor.dirty {
+                Button("Discard changes") {
+                    editor.pause()
+                    discarding = true
+                }
+                .buttonStyle(SecondaryButton()).help("Go back without keeping what you changed since it was last saved.")
+            }
+            Button("Done", action: done).buttonStyle(PrimaryButton())
+                .help(editor.dirty ? "Save, and go back to \(Model.trackName(editor.target.track)) (Esc). To save and stay here, press ⌘S."
+                      : "Back to \(Model.trackName(editor.target.track)) (Esc)")
         }
         .padding(.horizontal, 24).padding(.top, 38).padding(.bottom, 14)
     }
@@ -5388,6 +5792,9 @@ struct EditorView: View {
                     PlayerView(player: editor.player)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Color.black)
+                        .overlay {
+                            if editor.showsTimer { TimerOverlay(editor: editor, options: model.timerOptions(for: editor.target.track)) }
+                        }
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .overlay(Color.clear.contentShape(Rectangle()).onTapGesture { editor.togglePlay() })
                     transport
@@ -5438,6 +5845,12 @@ struct EditorView: View {
             .padding(.horizontal, 10).padding(.vertical, 7)
             .background(Theme.raised, in: Capsule()).overlay(Capsule().strokeBorder(Theme.stroke))
             .help("Playback speed")
+            Button { editor.showsTimer.toggle() } label: {
+                Image(systemName: "timer").frame(width: 18, height: 14).foregroundStyle(editor.showsTimer ? Theme.accent : .white.opacity(0.92))
+            }
+            .buttonStyle(SecondaryButton())
+            .help(editor.showsTimer ? "Hide the lap timer on the picture" : "Show the lap timer on the picture, as the 16:9 video will have it")
+            .accessibilityLabel(editor.showsTimer ? "Hide the lap timer" : "Show the lap timer")
             if editor.markers.contains(editor.frame) && !editor.playing {
                 Button("Remove marker") { editor.removeMarker() }.buttonStyle(SecondaryButton()).help("Remove the marker on this frame (⌫)")
             } else {
@@ -5556,7 +5969,8 @@ struct EditorView: View {
                     ForEach(editor.songs, id: \.self) { name in Button(name) { editor.choose(song: name) } }
                 }
                 Divider()
-                Button("Choose a file…") { editor.importSong() }
+                Button("Add a song…") { editor.importSong() }
+                Button("Show my songs in Finder") { editor.revealSongs() }
             } label: {
                 Label(title, systemImage: "music.note").font(.system(size: 12, weight: .bold)).lineLimit(1)
             }
@@ -5564,6 +5978,7 @@ struct EditorView: View {
             .padding(.horizontal, 11).padding(.vertical, 7)
             .background(Theme.raised, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.stroke))
+            .help("Your songs. A song you add is kept in your library for every track, and so are the marks you put in it.")
             if let span = editor.songSpan {
                 songFindings
                 Text(songPlacement(span.lowerBound))
@@ -5587,14 +6002,21 @@ struct EditorView: View {
                     Button("Sound wave") { editor.openSoundWave() }.buttonStyle(SecondaryButton())
                         .help("Open the song's sound wave, big enough to mark it by eye. Double-clicking the song on the timeline does the same.")
                     if !editor.songMarks.isEmpty {
-                        Text("\(editor.songMarks.count) mark\(editor.songMarks.count == 1 ? "" : "s")").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.faint)
+                        // In the colour the pilot's own marks are drawn in.
+                        HStack(spacing: 4) {
+                            Image(systemName: "diamond.fill").font(.system(size: 8))
+                            Text("\(editor.songMarks.count) of yours").font(.system(size: 11, weight: .bold))
+                        }
+                        .foregroundStyle(Theme.mark)
+                        .help("Your own marks in this song. They are drawn in this colour, and the drops the app found in blue.")
                     }
                 }
             } else if chosen == nil, editor.premiereMusic != nil {
                 Text("Lined up from your saved Premiere project when a video is made. Pick a song instead to place it here.")
                     .font(.system(size: 11)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
             } else if title == "No music" {
-                Text("Pick a song and drag it along the timeline to line it up.")
+                Text(editor.songs.isEmpty ? "Add a song and drag it along the timeline to line it up. It is kept in your song library, with any marks you put in it, for your other clips."
+                     : "Pick a song and drag it along the timeline to line it up.")
                     .font(.system(size: 11)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -5612,7 +6034,12 @@ struct EditorView: View {
             }
             .padding(.vertical, 3)
         } else if let heard = editor.analysis {
-            Text("DROPS").label().padding(.top, 5)
+            HStack(spacing: 6) {
+                // The colour the drops are drawn in on the timeline and the sound wave.
+                Image(systemName: "arrowtriangle.up.fill").font(.system(size: 8)).foregroundStyle(Theme.drop)
+                Text("DROPS THE APP FOUND").label()
+            }
+            .padding(.top, 5)
             if heard.spots.isEmpty {
                 Text("Nothing in this song stands out as a drop. Open its sound wave to pick a moment yourself.")
                     .font(.system(size: 11)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
@@ -5640,7 +6067,7 @@ struct EditorView: View {
                 // How much it stands out.
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.white.opacity(0.1)).frame(width: 40, height: 5)
-                    Capsule().fill(Theme.accent).frame(width: max(5, 40 * spot.strength), height: 5)
+                    Capsule().fill(Theme.drop).frame(width: max(5, 40 * spot.strength), height: 5)
                 }
                 .help(spot.strength >= 0.995 ? "The biggest in the song" : "How much it stands out, next to the biggest in the song")
                 Spacer(minLength: 4)
@@ -6036,32 +6463,37 @@ struct EditorTimeline: View {
                     index += 1
                 }
             }
-            // The drops the lap timer heard: a dotted line with an arrowhead at the foot.
+            // The drops the lap timer heard: a dotted line with an arrowhead at the foot, in the
+            // drops' own colour. Each sits on a dark line, so it shows over the wave.
             for spot in editor.spots {
                 let place = x(song.lowerBound + spot.time)
                 guard place >= -6, place <= size.width + 6 else { continue }
+                context.fill(Path(CGRect(x: place - 1.5, y: Self.musicTop + 2, width: 3, height: Self.musicHeight - 4)), with: .color(.black.opacity(0.45)))
                 var line = Path()
                 line.move(to: CGPoint(x: place, y: Self.musicTop + 2))
                 line.addLine(to: CGPoint(x: place, y: Self.musicTop + Self.musicHeight - 2))
-                context.stroke(line, with: .color(.white.opacity(0.75)), style: StrokeStyle(lineWidth: 1, dash: [2, 3]))
+                context.stroke(line, with: .color(Theme.drop), style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
                 var arrow = Path()
                 arrow.move(to: CGPoint(x: place, y: Self.musicTop + Self.musicHeight - 9))
                 arrow.addLine(to: CGPoint(x: place + 5, y: Self.musicTop + Self.musicHeight - 1))
                 arrow.addLine(to: CGPoint(x: place - 5, y: Self.musicTop + Self.musicHeight - 1))
                 arrow.closeSubpath()
-                context.fill(arrow, with: .color(.white.opacity(0.9)))
+                context.stroke(arrow, with: .color(.black.opacity(0.5)), lineWidth: 2)
+                context.fill(arrow, with: .color(Theme.drop))
             }
-            // Marks in the song.
+            // The pilot's own marks in the song: a solid line with a diamond at its head, in the marks' colour.
             for mark in editor.songMarks {
                 let place = x(song.lowerBound + mark)
-                context.fill(Path(CGRect(x: place - 0.75, y: Self.musicTop, width: 1.5, height: Self.musicHeight)), with: .color(.white))
+                context.fill(Path(CGRect(x: place - 1.75, y: Self.musicTop, width: 3.5, height: Self.musicHeight)), with: .color(.black.opacity(0.45)))
+                context.fill(Path(CGRect(x: place - 0.75, y: Self.musicTop, width: 1.5, height: Self.musicHeight)), with: .color(Theme.mark))
                 var diamond = Path()
                 diamond.move(to: CGPoint(x: place, y: Self.musicTop - 1))
                 diamond.addLine(to: CGPoint(x: place + 5, y: Self.musicTop + 4))
                 diamond.addLine(to: CGPoint(x: place, y: Self.musicTop + 9))
                 diamond.addLine(to: CGPoint(x: place - 5, y: Self.musicTop + 4))
                 diamond.closeSubpath()
-                context.fill(diamond, with: .color(.white))
+                context.stroke(diamond, with: .color(.black.opacity(0.5)), lineWidth: 2)
+                context.fill(diamond, with: .color(Theme.mark))
             }
         } else {
             let note = editor.edit.song == nil && editor.premiereMusic != nil ? "\(editor.premiereMusic ?? ""): lined up from Premiere when a video is made" : "No music"
@@ -6293,7 +6725,10 @@ struct SoundWaveOverview: View {
                 context.fill(shape, with: .color(Theme.accent.opacity(0.6)))
                 context.fill(bass, with: .color(Theme.bass.opacity(0.8)))
                 for spot in editor.spots {
-                    context.fill(Path(CGRect(x: x(spot.time) - 0.5, y: 0, width: 1, height: size.height)), with: .color(.white.opacity(0.6)))
+                    context.fill(Path(CGRect(x: x(spot.time) - 0.75, y: 0, width: 1.5, height: size.height)), with: .color(Theme.drop))
+                }
+                for mark in editor.songMarks {
+                    context.fill(Path(CGRect(x: x(mark) - 0.75, y: 0, width: 1.5, height: size.height)), with: .color(Theme.mark))
                 }
                 let shown = CGRect(x: x(wave.visible.lowerBound), y: 0, width: max(3, x(wave.visible.upperBound) - x(wave.visible.lowerBound)), height: size.height)
                 context.fill(Path(roundedRect: shown, cornerRadius: 3), with: .color(.white.opacity(0.12)))
@@ -6500,7 +6935,8 @@ struct SoundWaveCanvas: View {
             // The beat again, dark this time, so it shows over the wave as well as beside it.
             context.fill(beats, with: .color(.black.opacity(0.4)))
             // Which colour is which.
-            tag([("PEAKS", Theme.accent.opacity(0.55)), ("LOUDNESS", Theme.accent), ("BASS", Theme.bass)], at: CGPoint(x: size.width - 10, y: top + 12), trailing: true)
+            tag([("PEAKS", Theme.accent.opacity(0.55)), ("LOUDNESS", Theme.accent), ("BASS", Theme.bass), ("DROPS", Theme.drop), ("YOUR MARKS", Theme.mark)],
+                at: CGPoint(x: size.width - 10, y: top + 12), trailing: true)
         }
         if let lies, let heard = editor.musicHeard {
             let start = x(heard.lowerBound - lies), end = x(heard.upperBound - lies)
@@ -6511,11 +6947,12 @@ struct SoundWaveCanvas: View {
         for spot in editor.spots {
             let place = x(spot.time)
             guard place >= -90, place <= size.width + 4 else { continue }
+            context.fill(Path(CGRect(x: place - 1.5, y: top, width: 3, height: bottom - top)), with: .color(.black.opacity(0.45)))
             var line = Path()
             line.move(to: CGPoint(x: place, y: top))
             line.addLine(to: CGPoint(x: place, y: bottom))
-            context.stroke(line, with: .color(.white.opacity(0.85)), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-            tag([(spot.strength >= 0.995 ? "BIGGEST DROP" : "DROP", .white)], at: CGPoint(x: place + 8, y: top + 12))
+            context.stroke(line, with: .color(Theme.drop), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+            tag([(spot.strength >= 0.995 ? "BIGGEST DROP" : "DROP", Theme.drop)], at: CGPoint(x: place + 8, y: top + 12))
         }
 
         // The gates, where they fall in the song as it lies now.
@@ -6532,14 +6969,16 @@ struct SoundWaveCanvas: View {
         for mark in editor.songMarks {
             let place = x(mark)
             guard place >= -8, place <= size.width + 8 else { continue }
-            context.fill(Path(CGRect(x: place - 0.75, y: top - 5, width: 1.5, height: bottom - top + 5)), with: .color(.white))
+            context.fill(Path(CGRect(x: place - 1.75, y: top - 5, width: 3.5, height: bottom - top + 5)), with: .color(.black.opacity(0.45)))
+            context.fill(Path(CGRect(x: place - 0.75, y: top - 5, width: 1.5, height: bottom - top + 5)), with: .color(Theme.mark))
             var diamond = Path()
             diamond.move(to: CGPoint(x: place, y: top - 11))
             diamond.addLine(to: CGPoint(x: place + 6, y: top - 5))
             diamond.addLine(to: CGPoint(x: place, y: top + 1))
             diamond.addLine(to: CGPoint(x: place - 6, y: top - 5))
             diamond.closeSubpath()
-            context.fill(diamond, with: .color(.white))
+            context.stroke(diamond, with: .color(.black.opacity(0.5)), lineWidth: 2)
+            context.fill(diamond, with: .color(Theme.mark))
         }
 
         for one in tags { draw(one.parts, at: one.point, trailing: one.trailing) }
@@ -6983,7 +7422,33 @@ struct EventFields: View {
                 AnswerField(title: "Your ID number", required: false, text: field(\.id)).frame(width: 150)
                 AnswerField(title: "Shown before the ID", required: false, text: field(\.idLabel)).frame(width: 200)
             }
+            if !event.folder.isEmpty { logo }
         }
+    }
+
+    /// The event's logo, for its 9:16 videos: the picture when there is one, and the way to choose it.
+    private var logo: some View {
+        let file = model.logo(ofEvent: event.folder)
+        return HStack(spacing: 12) {
+            if let file, let picture = NSImage(contentsOf: file) {
+                Image(nsImage: picture).resizable().interpolation(.high).scaledToFit().frame(maxWidth: 110, maxHeight: 46)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                Text("This logo goes at the top of this event's 9:16 videos, beside your name.")
+                    .font(.system(size: 12)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Button("Change…") { model.chooseLogo(forEvent: event.folder) }.buttonStyle(SecondaryButton())
+                Button { model.removeLogo(ofEvent: event.folder) } label: { Image(systemName: "trash") }
+                    .buttonStyle(SecondaryButton()).help("Move the logo to the Trash. The videos go back to having none.").accessibilityLabel("Remove the logo")
+            } else {
+                Text("LOGO").label()
+                Text("None. Choose a picture, such as the series' own logo, and it goes at the top of this event's 9:16 videos, beside your name.")
+                    .font(.system(size: 12)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Button("Choose a picture…") { model.chooseLogo(forEvent: event.folder) }.buttonStyle(SecondaryButton())
+            }
+        }
+        .padding(.top, 2)
     }
 }
 
@@ -6994,17 +7459,17 @@ struct GuideView: View {
         ("Set up the track",
          "On the first screen, open Video Creator, under RaceGOW. Its tracks are listed down the side, grouped by event. Press New track under an event, or New event for another race or series. Press Add clips on the track's page and choose your recordings, or drop them onto the page. Then paste the track's Google Form link into Submission form on the track page."),
         ("Mark the laps",
-         "Press Mark laps on a clip. Play or drag to just before a start/finish gate crossing, step to the exact frame with the arrow keys, and press M. The first marker starts lap 1; each later one ends a lap. To fix one, go to it with the up and down arrows and move it a frame at a time with ⌘← and ⌘→. Right-click a marker, in the list or on the timeline, to delete it or all of them. The marker keys are Premiere's: M, ⇧M and ⇧⌘M for the next and previous, ⌥M to clear one and ⌥⌘M to clear all, and they are in the Markers menu too. Save, and the run appears on the track page, ranked by its best 3 laps in a row."),
+         "Press Mark laps on a clip. A recording you add by itself opens there straight away. Play or drag to just before a start/finish gate crossing, step to the exact frame with the arrow keys, and press M. The first marker starts lap 1; each later one ends a lap. The lap timer shows over the picture as the 16:9 video will have it, and changes with every marker; the timer button beside the playback speed hides it. To fix one, go to it with the up and down arrows and move it a frame at a time with ⌘← and ⌘→. Right-click a marker, in the list or on the timeline, to delete it or all of them. The marker keys are Premiere's: M, ⇧M and ⇧⌘M for the next and previous, ⌥M to clear one and ⌥⌘M to clear all, and they are in the Markers menu too. Press Done, which saves it, and the run appears on the track page, ranked by its best 3 laps in a row. Discard changes leaves without keeping them, and ⌘S saves while you carry on."),
         ("Choose what the video shows",
          "A finished video runs from 3 seconds before lap 1 to 8 seconds after the finish. To change that, open Markers & music on the run and drag the ends of the Video bar, or press I and O on the frames where it should start and end."),
         ("Add music, if you want it",
-         "In Markers & music, pick a song from the track's music folder or choose a file. The app listens to it and lists its drops, the moments it suddenly gets bigger: press On the start gate beside one and the song slides so the drop lands as you cross the gate, then press Space to hear it with the picture. The song lies under the laps with its loudness in yellow and its bass in red, and you can drag it yourself: a drop, or a point you marked with B, catches on a lap marker. Double-click the song to open its sound wave, where it is big enough to mark by eye, plays by itself, and any moment can be put on the start gate. Drag the white ends of the song, or use Music in and Music out, to choose where the music starts and stops."),
+         "In Markers & music, pick one of your songs or add one. A song you add is kept in your song library, for every clip on every track, and the marks you put in it stay with it. The app listens to it and lists its drops, the moments it suddenly gets bigger: press On the start gate beside one and the song slides so the drop lands as you cross the gate, then press Space to hear it with the picture. The song lies under the laps with its loudness in yellow and its bass in red, and you can drag it yourself: a drop, or a point you marked with B, catches on a lap marker. The drops the app found are blue and your own marks are pink. Double-click the song to open its sound wave, where it is big enough to mark by eye, plays by itself, and any moment can be put on the start gate. Drag the white ends of the song, or use Music in and Music out, to choose where the music starts and stops."),
         ("Make the videos",
-         "Make 16:9 video is for YouTube. Make 9:16 video is for Shorts, TikTok and Reels. Both carry the timer, your name and ID, the event and track, and the music."),
+         "Make 16:9 video is for YouTube. Make 9:16 video is for Shorts, TikTok and Reels. Both carry the timer, your name and ID, the event and track, and the music. The 9:16 timer is built around your best 3 laps in a row: one big time for the three together, those laps under it, and the others smaller. An event's logo, chosen in Pilot & settings, goes at the top of its 9:16 videos. When a video is made the app asks whether to watch it."),
         ("Check them",
-         "Click a run to see its files and open any of them in VLC. If there are two versions of something, press Keep only this one on the right one and the other goes to the Trash."),
+         "Click a run to see its files and open any of them in VLC. If there are two versions of something, press Keep only this one on the right one and the other goes to the Trash. A clip you haven't marked has a Trash button of its own on the track page."),
         ("Submit",
-         "Upload the 16:9 video to YouTube, then press Submit this run. Paste the link, and look over the answers: the app fills in your handle, number and time, and for the questions it can't know it shows what you answered last time, one line each, with Change beside it. Press Fill in the form, check the Google Form, and press Submit at the bottom of it yourself. The track page then shows what you sent."),
+         "Upload the 16:9 video to YouTube, then press Submit this run. Paste the link, type your email the first time, since the form asks for one, and look over the answers: the app fills in your handle, number and time, and for the questions it can't know it shows what you answered last time, one line each, with Change beside it. Press Fill in the form, check the Google Form, and press Submit at the bottom of it yourself. The track page then shows what you sent."),
     ]
     private let notes = [
         "Lap times are only as exact as the markers: one frame, which is about 0.017 seconds at 60 frames a second. A run shows a warning when its markers aren't on exact frames.",
@@ -7250,6 +7715,7 @@ enum Main {
         print("progress reached \(Int(furthest * 100))%")
         print(model.notice ?? "(nothing was said)")
         print("clips in \(track): \((model.clips[track] ?? []).map { URL(fileURLWithPath: $0).lastPathComponent })")
+        print("opened for marking: \(model.editor?.target.name ?? "nothing, which is right for more than one")")
         exit(0)
     }
 
@@ -7455,6 +7921,7 @@ enum Main {
         print(wrong == 0 ? "frame seeking: every frame asked for was the frame shown" : "frame seeking: \(wrong) wrong")
         print("laps: \(editor.laps.map(EditorFormat.lap).joined(separator: "  "))   best \(editor.window): \(editor.best.map { EditorFormat.lap($0.total) } ?? "none")")
         print("marker file:\n\(editor.markerFile())", terminator: "")
+        wrong += checkTimer(in: editor, model: model)
         // The marker keys, as the editor receives them.
         func press(_ modifiers: NSEvent.ModifierFlags = []) {
             if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0, windowNumber: 0, context: nil,
@@ -7507,6 +7974,43 @@ enum Main {
             }
         }
         exit(wrong == 0 ? 0 : 1)
+    }
+
+    /// The timer the marker editor draws over the picture against the still the lap timer program
+    /// writes for the same run at the same moment: the two have to be the same picture, to the pixel,
+    /// or the editor would be showing something the video doesn't get. Returns how many differed.
+    @MainActor
+    static func checkTimer(in editor: Editor, model: Model) -> Int {
+        let track = editor.target.track
+        guard !editor.markersChanged, editor.markers.count >= 2,
+              let run = model.summaries[track]?.runs.first(where: { $0.name == editor.target.name }) else {
+            print("timer: this clip has no saved laps to draw a timer for")
+            return 0
+        }
+        let crossings = editor.markers.map(editor.seconds)
+        let options = model.timerOptions(for: track)
+        let drawer = TimerDrawer()
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("fpv-hangar-timer-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        // Before the start, in a lap, just after a lap ends (while its line still glows), at the
+        // moment the best laps are set, and after the finish.
+        let first = crossings[0], last = crossings[crossings.count - 1]
+        let moments = [max(0, first - 1), first + 2.5, crossings[1] + 0.3, (first + last) / 2, last + 0.2, last + 4]
+        var different = 0
+        for (index, moment) in moments.enumerated() {
+            let ours = folder.appendingPathComponent("editor-\(index).png"), theirs = folder.appendingPathComponent("video-\(index).png")
+            let drew = drawer.still(crossings: crossings, at: moment, options: options, frame: CGSize(width: 1920, height: 1080), to: ours)
+            let wrote = model.timerStill(markers: run.markers, track: track, at: moment, to: theirs)
+            let same = drew && wrote && (try? Data(contentsOf: ours)) == (try? Data(contentsOf: theirs)) && (try? Data(contentsOf: ours)) != nil
+            if !same {
+                different += 1
+                print("  timer at \(EditorFormat.clock(moment)): the editor's and the video's DIFFER\(drew ? "" : " (the editor drew none)")\(wrote ? "" : " (the lap timer wrote none)")")
+            }
+        }
+        print(different == 0 ? "timer: over the picture it is the video's timer, pixel for pixel, at \(moments.count) moments of the run"
+              : "timer: \(different) of \(moments.count) moments differ")
+        return different
     }
 
     /// Does to the library given with --root what opening the app does, without a window: takes up
@@ -7794,8 +8298,10 @@ enum Main {
         let clip = model.clips[track]?.first
         step("Add clips copies the recording in", clip != nil, model.notice ?? "")
         guard let clip else { exit(1) }
-        // 4. Marking the laps.
-        model.mark(clip: clip, track: track)
+        // 4. Marking the laps. A recording added by itself opens there without being asked.
+        wait(5) { model.editor != nil }
+        step("a recording added by itself opens straight into marking", model.editor?.target.clip == clip)
+        if model.editor == nil { model.mark(clip: clip, track: track) }
         wait(120) { model.editor?.phase != .loading }
         guard let editor = model.editor, editor.phase == .ready else {
             if case .failed(let reason)? = model.editor?.phase { step("Mark laps opens the recording", false, reason) } else { step("Mark laps opens the recording", false) }
@@ -7827,15 +8333,40 @@ enum Main {
         step("Markers & music opens the run with its markers", again.markers.count == crossings.count)
         again.importSong(from: song)
         wait { again.songSpan != nil && !again.listening && !again.wave.isEmpty }
-        step("choosing a song file copies it into the track and listens to it", again.songSpan != nil && again.analysis != nil,
+        let kept = model.songLibrary.appendingPathComponent(song.lastPathComponent)
+        step("adding a song keeps it in the song library, not in the track", FileManager.default.fileExists(atPath: kept.path)
+             && !FileManager.default.fileExists(atPath: model.folder(track, "music").appendingPathComponent(song.lastPathComponent).path), Model.songsFolder + "/" + song.lastPathComponent)
+        step("the song is listened to", again.songSpan != nil && again.analysis != nil,
              again.analysis.map { "\($0.tempoLabel ?? "no tempo"), drops at \($0.spots.map { EditorFormat.songClock($0.time) }.joined(separator: ", "))" } ?? "nothing heard")
         if let drop = again.spots.max(by: { $0.strength < $1.strength }) {
             again.put(songTime: drop.time)
             step("its biggest drop goes on the start gate", again.gate(under: drop.time) == 0, again.shortfall(withStartGateAt: drop.time) ?? "the song covers the whole video")
         }
+        again.addSongMark(inSong: 12.5)
         step("Save keeps the song and where it lies", model.save(again) == nil && model.state(track).edits?[run.name]?.song == song.lastPathComponent)
+        // A mark belongs to the song: a clip that has never used the song finds the mark there.
+        let other = Editor(target: again.target, edit: RunEdit(song: song.lastPathComponent, songStart: 0), window: 3, tool: model.tool,
+                           musicFolder: model.folder(track, "music"), songLibrary: model.songLibrary, songMarks: model.songMarks, clipNames: [])
+        step("a mark put in the song stays with the song, for the next clip that uses it", other.songMarks == [12.5] && Model().songMarks[song.lastPathComponent] == [12.5],
+             "marks kept with \(song.lastPathComponent): \(model.songMarks[song.lastPathComponent] ?? [])")
+        other.stop()
         let length = again.stretch.map { $0.upperBound - $0.lowerBound } ?? 0
         model.closeEditor()
+        // A logo for the event, which the 9:16 video then carries. A small made-up one: a red square.
+        let picture = FileManager.default.temporaryDirectory.appendingPathComponent("fpv-hangar-logo-\(ProcessInfo.processInfo.processIdentifier).png")
+        if let surface = CGContext(data: nil, width: 96, height: 60, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
+            surface.setFillColor(CGColor(srgbRed: 0.8, green: 0.1, blue: 0.1, alpha: 1))
+            surface.fill(CGRect(x: 18, y: 0, width: 60, height: 60))
+            if let made = surface.makeImage(), let file = CGImageDestinationCreateWithURL(picture as CFURL, "public.png" as CFString, 1, nil) {
+                CGImageDestinationAddImage(file, made, nil)
+                CGImageDestinationFinalize(file)
+            }
+        }
+        let logoProblem = model.setLogo(from: picture, ofEvent: event)
+        step("an event's logo is kept in the event's folder", logoProblem == nil && model.logo(ofEvent: event)?.lastPathComponent == "Logo.png"
+             && Model().logo(ofEvent: event) != nil, logoProblem ?? "\(event)/Logo.png")
+        try? FileManager.default.removeItem(at: picture)
         // 6. The videos.
         for (output, folder) in [(Model.Output.landscape, "landscape"), (Model.Output.upright, "vertical")] {
             guard let current = model.summaries[track]?.runs.first else { break }
@@ -7862,6 +8393,8 @@ enum Main {
                 detail = "\(file), \(String(format: "%.2f", box.seconds)) s for a stretch of \(String(format: "%.2f", length)) s, \(box.picture ? "picture" : "NO PICTURE") and \(box.sound ? "sound" : "NO SOUND")"
             }
             step("Make \(output.title)", good, detail)
+            step("and asks whether to watch it now", model.justMade?.title == output.title && made.first.map { model.justMade?.path.hasSuffix($0) ?? false } ?? false)
+            model.justMade = nil
             wait { model.summaries[track] != nil }
         }
         // 7. What a new pilot would find in the library.

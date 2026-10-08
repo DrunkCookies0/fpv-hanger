@@ -12,13 +12,13 @@ The app is not from the App Store, so macOS asks before opening it the first tim
 
 - **Set up in two questions.** Your pilot name, and whether you fly RaceGOW6. If you do, the app finds your registration number on the series' public pilot list.
 - **Follow the season.** For RaceGOW6, each track appears on the day it opens, with its deadline and its own entry form, read from what the series publishes.
-- **Add clips.** Choose your recordings, or drop them onto a track's page.
-- **Mark laps.** Step through a clip frame by frame and press M each time you cross the start/finish gate.
+- **Add clips.** Choose your recordings, or drop them onto a track's page. One added by itself opens straight into marking.
+- **Mark laps.** Step through a clip frame by frame and press M each time you cross the start/finish gate. The lap timer shows over the picture as you go, exactly as the video will have it.
 - **Rank runs.** Each track's runs are listed fastest first by best three laps in a row.
-- **Make videos.** A 16:9 video for YouTube and a 9:16 one for Shorts, TikTok and Reels, with the timer, your name and the event drawn in.
-- **Add music.** The app works out a song's tempo and finds its drops, and puts a drop on the start gate with one press. Or place the song against the laps yourself on a timeline, mark points in it on a big sound wave, and drag its ends to choose where the music comes in and stops.
+- **Make videos.** A 16:9 video for YouTube and a 9:16 one for Shorts, TikTok and Reels, with the timer, your name and the event drawn in. The 9:16 timer is built around your best three laps in a row.
+- **Add music.** Songs go into one library, for every track, and the marks you put in a song stay with it. The app works out a song's tempo and finds its drops, and puts a drop on the start gate with one press. Or place the song against the laps yourself on a timeline, mark points in it on a big sound wave, and drag its ends to choose where the music comes in and stops.
 - **Submit.** The app checks your answers with you, then fills the track's Google Form in. For RaceGOW6 it finds each track's form by itself; for anything else, paste the link. You press Submit yourself.
-- **Keep events apart.** Tracks are grouped by event, a race or a series, each with its own name on the timer and its own ID number.
+- **Keep events apart.** Tracks are grouped by event, a race or a series, each with its own name on the timer, its own ID number, and a logo of your choosing for its 9:16 videos.
 
 ## Coming soon
 
@@ -41,13 +41,13 @@ That writes `FPV Hangar.app` into this folder, built for the Mac you are on, wit
 |---|---|
 | `Dashboard/Dashboard.swift` | The app, in SwiftUI, one file |
 | `Dashboard/build.sh` | Builds the app and puts the lap timer inside it |
-| `Lap Timer/laptimer.swift` | The lap timer: a command-line tool that does all the timing and rendering, and listens to songs for their tempo and drops. `./laptimer --help` lists its options |
+| `Lap Timer/laptimer.swift` | The lap timer: a command-line tool that does all the timing and rendering, and listens to songs for their tempo and drops. `./laptimer --help` lists its options. Its source is compiled into the app too, for drawing the timer |
 | `VERSION` | The version number, used by everything |
 | `CHANGELOG.md` | What changed in each version |
 | `package.sh`, `publish.sh` | Package the app, and start a release |
 | `.github/workflows/release.yml` | Builds and publishes a release when a version tag is pushed |
 
-A copy of the app that sits in a folder with a `dashboard.json` or a `Lap Timer` folder keeps its tracks in that folder. Any other copy keeps them in `~/Movies/FPV Hangar`. Inside that library, each event is a folder with its tracks inside, and a track is known by its path there, such as `RaceGOW6/Track 1`.
+A copy of the app that sits in a folder with a `dashboard.json` or a `Lap Timer` folder keeps its tracks in that folder. Any other copy keeps them in `~/Movies/FPV Hangar`. Inside that library, each event is a folder with its tracks inside, and a track is known by its path there, such as `RaceGOW6/Track 1`. Songs are in a `Songs` folder beside the events.
 
 ### Things to keep
 
@@ -55,6 +55,8 @@ A copy of the app that sits in a folder with a `dashboard.json` or a `Lap Timer`
 - New fields in `dashboard.json` must be optional in the Swift structs. A required field that an older file lacks makes the whole file fail to load, and the next save then overwrites it.
 - The marker editor takes its keys through a local event monitor, and takes the keyboard away from any text field underneath when it opens. Without that, keys are typed into the hidden field.
 - A song is opened with exact timing (`AVURLAssetPreferPreciseDurationAndTimingKey`) everywhere it is read: listened to, drawn, played and cut into a video. A drop only lands on a gate if all four agree on where it is.
+- The timer is drawn by one piece of code. `build.sh` compiles `laptimer.swift` into the app as well, with `-D EMBEDDED`, which leaves out the lap timer's own entry point. The marker editor draws the timer over the picture with it, so what it shows is what the video gets. `--check-editor` compares the two, pixel for pixel. This is also why `laptimer.swift` has no code at the top level and is built with `-parse-as-library`.
+- Nothing in either file may call `fatalError` or `precondition`: they put the source file's full path into the app, and `package.sh` refuses an app with a home folder path in it.
 
 ## Releasing a version
 
@@ -78,6 +80,6 @@ The app can also check itself without showing a window. `--root <folder>` points
 
 - `--check-fresh <recording> <song> <gate crossings in seconds…>` goes from an empty folder to finished videos the way a new pilot does.
 - `--check-clicks [WIDTHxHEIGHT]` works the first screen, the editor and the sound wave window with real clicks, drags and keys, in a window put up off-screen.
-- `--check-editor` checks frame-exact seeking, the marker keys and what is heard in a song.
+- `--check-editor` checks frame-exact seeking, the marker keys, what is heard in a song, and that the timer drawn over the picture is the video's.
 - `--check-pilots [names or numbers…]` checks the pilot list lookup, and `--check-season` the reading of the season's schedule and forms and the way a library fills with its tracks.
 - `--snapshot out.png <page> [WIDTHxHEIGHT]` draws a page to a picture. The lap timer checks its own ear with `laptimer --check-listening`, which `package.sh` runs before it packages.

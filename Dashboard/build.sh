@@ -43,9 +43,11 @@ compile() {
   mv -f "$output.new" "$output"
 }
 
-compile Dashboard.swift "$APP/Contents/MacOS/$NAME" -parse-as-library
+# The lap timer's source is compiled into the app as well, with its command line left out (EMBEDDED),
+# so the timer the marker editor draws is the timer the videos get: one piece of code, not two.
+compile Dashboard.swift "$APP/Contents/MacOS/$NAME" -parse-as-library -D EMBEDDED "../Lap Timer/laptimer.swift"
 # The app runs this copy of the lap timer, so the two always come from the same source.
-compile "../Lap Timer/laptimer.swift" "$APP/Contents/MacOS/laptimer"
+compile "../Lap Timer/laptimer.swift" "$APP/Contents/MacOS/laptimer" -parse-as-library
 [[ -f AppIcon.icns ]] && cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # The app shows this as its "What's new" note.
 cp ../CHANGELOG.md "$APP/Contents/Resources/CHANGELOG.md"

@@ -2,6 +2,19 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.11.0 (8 October 2026)
+
+- The timer shows on the picture while you mark laps. In Markers & music the lap timer sits over your clip exactly as the 16:9 video will have it, and reads what it will read on the frame you are on. Add, move or remove a marker and it changes at once, so you can check a run before making its video. The timer button beside the playback speed hides it.
+- A bigger timer box on 9:16 videos, built around your best 3 laps in a row. One big time for the three together: it waits at zero until the first of them starts, runs through them, and stops on your result. Those three laps sit under it with their own times, and the other laps are under those, smaller. The box sits centred under the picture, nearly as wide as the video, and fills the room down to the part of the screen the apps cover with their captions.
+- An event can have a logo. In Pilot & settings, choose a picture for an event, such as the series' own logo, and it goes at the top of that event's 9:16 videos, beside your name.
+- A song library. A song you add is kept in one Songs folder, and every clip on every track can use it. The marks you put in a song stay with the song, so they are there the next time you use it. A song that is in a track's own music folder joins the library the first time you open a run that uses it.
+- Drops and your own marks are different colours. Drops the app found are blue and marks you made are pink, on the timeline and in the sound wave window.
+- **Done** saves. In Markers & music, Done keeps your work and takes you back, with nothing to answer first. **Discard changes** leaves without keeping it, and ⌘S still saves while you carry on. The separate Save button is gone.
+- A recording you add by itself opens straight into marking its laps. Add several at once and they wait on the track page.
+- Clips you haven't marked can be moved to the Trash from the track page, with the Trash button beside Mark laps.
+- When a 16:9 or 9:16 video is made, the app asks whether you want to watch it now.
+- Submitting asks for your email in a box of its own the first time, since the entry form needs one, and keeps it for the next track. Fixed: the email box used to fold away after the first letter you typed.
+
 ## v0.10.0 (8 October 2026)
 
 - A new first screen. FPV Hangar now opens on a hangar of tools, grouped by what they are for. The tool you know is **Video Creator**, under RaceGOW, and **Hangar** at its top left brings you back. Tools that aren't built yet say Coming soon.
