@@ -1572,14 +1572,14 @@ final class Model: ObservableObject {
 
     /// The pilot's details and the timer's corner, handed to the lap timer directly: the one inside the
     /// app has no settings file beside it to read them from.
-    private func pilotArguments(for track: String, withLogo: Bool = true) -> [String] {
+    private func pilotArguments(for track: String) -> [String] {
         let event = details(ofEvent: Self.eventFolder(of: track))
         var arguments = ["--position", settings.corner, "--id-label", event.idLabel]
         if !settings.pilot.isEmpty { arguments += ["--pilot", settings.pilot] }
         if !event.id.isEmpty { arguments += ["--id", event.id] }
         if !event.name.isEmpty { arguments += ["--event", event.name] }
         if let accent = settings.accent, !accent.isEmpty { arguments += ["--accent", accent] }
-        if withLogo, let logo = logo(ofEvent: Self.eventFolder(of: track)) { arguments += ["--logo", logo.path] }
+        if let logo = logo(ofEvent: Self.eventFolder(of: track)) { arguments += ["--logo", logo.path] }
         return arguments
     }
 
@@ -1587,8 +1587,9 @@ final class Model: ObservableObject {
 
     static let pictureExtensions: Set<String> = ["png", "jpg", "jpeg", "webp", "heic", "tif", "tiff", "gif", "bmp"]
 
-    /// An event can have a logo: a picture called Logo in its folder. It goes in the heading of the
-    /// event's 9:16 videos, beside the pilot's name. It is the pilot's own copy, kept with the event.
+    /// An event can have a logo: a picture called Logo in its folder. It goes on the event's videos:
+    /// across the head of the timer box on a 16:9 one, and in the heading of a 9:16 one, beside the
+    /// pilot's name. It is the pilot's own copy, kept with the event.
     func logo(ofEvent folder: String) -> URL? {
         guard !folder.isEmpty else { return nil }
         let place = root.appendingPathComponent(folder, isDirectory: true)
@@ -1637,8 +1638,7 @@ final class Model: ObservableObject {
     /// The pilot's details and the timer's look for a track's videos, as the lap timer itself takes
     /// them from what it is handed. The marker editor draws its timer from this.
     func timerOptions(for track: String) -> Options {
-        // The logo is for the 9:16 video's heading, which the editor doesn't draw: no need to look for it at every frame.
-        var options = parseArguments(pilotArguments(for: track, withLogo: false))
+        var options = parseArguments(pilotArguments(for: track))
         options.trackName = Self.trackName(track)
         return options
     }
@@ -5533,14 +5533,16 @@ final class TimerDrawer {
     func picture(crossings: [Double], at seconds: Double, options: Options, frame: CGSize) -> (image: CGImage, origin: CGPoint)? {
         // The video's frame is 1080 high, and the box is drawn for that. Here the frame is whatever size the picture is.
         let scale = frame.height / 1080 * CGFloat(options.userScale)
+        // The event's logo is part of the box. A different picture, or the same file changed, is a different box.
+        let logoChanged = options.logoPath.flatMap { try? FileManager.default.attributesOfItem(atPath: $0)[.modificationDate] as? Date }
         let wanted = "\(crossings) \(scale) \(options.title ?? "") \(options.badge ?? "") \(options.event ?? "") \(options.trackName ?? "") "
-            + "\(options.accent) \(options.maxRows) \(options.window) \(options.decimals)"
+            + "\(options.accent) \(options.maxRows) \(options.window) \(options.decimals) \(options.logoPath ?? "") \(logoChanged?.timeIntervalSince1970 ?? 0)"
         if wanted != made {
             made = wanted
             panel = nil
             if scale > 0.1, let race = try? makeRace(crossings: crossings, options: options), let accent = parseHexColor(options.accent) {
                 panel = Panel(race: race, scale: scale, accent: accent, title: options.title, badge: options.badge,
-                              event: options.event, track: options.trackName, maxRows: options.maxRows)
+                              event: options.event, track: options.trackName, maxRows: options.maxRows, logo: loadPicture(options.logoPath))
             }
         }
         guard let panel else { return nil }
@@ -7434,7 +7436,7 @@ struct EventFields: View {
                 Image(nsImage: picture).resizable().interpolation(.high).scaledToFit().frame(maxWidth: 110, maxHeight: 46)
                     .padding(.horizontal, 10).padding(.vertical, 6)
                     .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                Text("This logo goes at the top of this event's 9:16 videos, beside your name.")
+                Text("This logo goes on this event's videos: at the head of the timer box on 16:9, and at the top beside your name on 9:16.")
                     .font(.system(size: 12)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
                 Button("Change…") { model.chooseLogo(forEvent: event.folder) }.buttonStyle(SecondaryButton())
@@ -7442,7 +7444,7 @@ struct EventFields: View {
                     .buttonStyle(SecondaryButton()).help("Move the logo to the Trash. The videos go back to having none.").accessibilityLabel("Remove the logo")
             } else {
                 Text("LOGO").label()
-                Text("None. Choose a picture, such as the series' own logo, and it goes at the top of this event's 9:16 videos, beside your name.")
+                Text("None. Choose a picture, such as the series' own logo, and it goes on this event's videos: at the head of the timer box on 16:9, and at the top beside your name on 9:16.")
                     .font(.system(size: 12)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
                 Button("Choose a picture…") { model.chooseLogo(forEvent: event.folder) }.buttonStyle(SecondaryButton())
@@ -7465,7 +7467,7 @@ struct GuideView: View {
         ("Add music, if you want it",
          "In Markers & music, pick one of your songs or add one. A song you add is kept in your song library, for every clip on every track, and the marks you put in it stay with it. The app listens to it and lists its drops, the moments it suddenly gets bigger: press On the start gate beside one and the song slides so the drop lands as you cross the gate, then press Space to hear it with the picture. The song lies under the laps with its loudness in yellow and its bass in red, and you can drag it yourself: a drop, or a point you marked with B, catches on a lap marker. The drops the app found are blue and your own marks are pink. Double-click the song to open its sound wave, where it is big enough to mark by eye, plays by itself, and any moment can be put on the start gate. Drag the white ends of the song, or use Music in and Music out, to choose where the music starts and stops."),
         ("Make the videos",
-         "Make 16:9 video is for YouTube. Make 9:16 video is for Shorts, TikTok and Reels. Both carry the timer, your name and ID, the event and track, and the music. The 9:16 timer is built around your best 3 laps in a row: one big time for the three together, those laps under it, and the others smaller. An event's logo, chosen in Pilot & settings, goes at the top of its 9:16 videos. When a video is made the app asks whether to watch it."),
+         "Make 16:9 video is for YouTube. Make 9:16 video is for Shorts, TikTok and Reels. Both carry the timer, your name and ID, the event and track, and the music. The 9:16 timer is built around your best 3 laps in a row: one big time for the three together, those laps under it, and the others smaller. An event's logo, chosen in Pilot & settings, goes on its videos: at the head of the timer box on 16:9, and at the top beside your name on 9:16. When a video is made the app asks whether to watch it."),
         ("Check them",
          "Click a run to see its files and open any of them in VLC. If there are two versions of something, press Keep only this one on the right one and the other goes to the Trash. A clip you haven't marked has a Trash button of its own on the track page."),
         ("Submit",

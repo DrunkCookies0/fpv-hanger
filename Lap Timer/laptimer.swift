@@ -12,7 +12,7 @@ import CoreImage
 import Foundation
 
 /// The same number as the VERSION file and the app. package.sh refuses to package if they differ.
-let toolVersion = "0.11.0"
+let toolVersion = "0.12.0"
 
 // MARK: - Utilities
 
@@ -261,6 +261,9 @@ final class Panel {
     private let headerHeight: CGFloat
     private let rowHeight: CGFloat = 38
     private let footerHeight: CGFloat = 66
+    /// A logo for the head of the corner box, such as the event's, and the height of the band it sits in.
+    private let logo: CGImage?
+    private let logoHeight: CGFloat
 
     private let titleFont = NSFont.systemFont(ofSize: 16, weight: .bold) as CTFont
     private let badgeFont = NSFont.systemFont(ofSize: 13, weight: .heavy) as CTFont
@@ -301,8 +304,9 @@ final class Panel {
     /// `room` is for the wide box: the height there is for it, in reference points. It grows a little
     /// to use room it is given, shrinks to fit less, and leaves out rows of the smaller laps before
     /// it shrinks further than reads well.
+    /// `logo` is for the corner box: it goes across its head, above the event and track.
     init(race: Race, scale: CGFloat, accent rgb: [CGFloat], title: String?, badge: String? = nil,
-         event: String? = nil, track: String? = nil, maxRows: Int, layout: Layout = .stack, room: CGFloat? = nil) {
+         event: String? = nil, track: String? = nil, maxRows: Int, layout: Layout = .stack, room: CGFloat? = nil, logo: CGImage? = nil) {
         self.race = race
         self.scale = scale
         self.title = title
@@ -326,11 +330,15 @@ final class Panel {
             rows = min(race.lapCount, max(0, maxRows))
             width = 400
             headerHeight = 118
-            height = stripHeight + titleHeight + headerHeight + (rows > 0 ? CGFloat(rows) * 38 + 16 : 0) + 66
+            self.logo = logo.flatMap { $0.width > 0 && $0.height > 0 ? $0 : nil }
+            logoHeight = self.logo == nil ? 0 : 104
+            height = logoHeight + stripHeight + titleHeight + headerHeight + (rows > 0 ? CGFloat(rows) * 38 + 16 : 0) + 66
             judged = 0..<0
             others = []
         case .wide:
-            // The pilot and the event are in the heading above the picture, not in this box.
+            // The pilot, the event and its logo are in the heading above the picture, not in this box.
+            self.logo = nil
+            logoHeight = 0
             stripHeight = 0
             titleHeight = 0
             headerHeight = 0
@@ -445,15 +453,30 @@ final class Panel {
 
         var y: CGFloat = 0
 
+        if let logo, logoHeight > 0 {
+            // Across the head of the box, in the middle, as big as its band lets it be.
+            let room = CGSize(width: width - 2 * pad, height: logoHeight - 20)
+            let fit = min(room.width / CGFloat(logo.width), room.height / CGFloat(logo.height))
+            let size = CGSize(width: CGFloat(logo.width) * fit, height: CGFloat(logo.height) * fit)
+            c.saveGState()
+            // The box is drawn top-down, and a picture would come out upside down: turn it back.
+            c.translateBy(x: (width - size.width) / 2, y: (logoHeight + size.height) / 2 + 2)
+            c.scaleBy(x: 1, y: -1)
+            c.interpolationQuality = .high
+            c.draw(logo, in: CGRect(origin: .zero, size: size))
+            c.restoreGState()
+            y += logoHeight
+        }
+
         if stripHeight > 0 {
             c.setFillColor(white(0.09))
-            c.fill(CGRect(x: 0, y: 0, width: width, height: stripHeight))
+            c.fill(CGRect(x: 0, y: y, width: width, height: stripHeight))
             // With both, the event sits left and the track right; one alone sits left.
             if let first = event ?? track {
-                put(line(first.uppercased(), stripFont, accent, kern: 1.8), x: pad, centerY: stripHeight / 2 + 1, font: stripFont)
+                put(line(first.uppercased(), stripFont, accent, kern: 1.8), x: pad, centerY: y + stripHeight / 2 + 1, font: stripFont)
             }
             if event != nil, let track {
-                put(line(track.uppercased(), stripFont, white(0.9), kern: 1.8), x: width - pad, centerY: stripHeight / 2 + 1, font: stripFont, align: .right)
+                put(line(track.uppercased(), stripFont, white(0.9), kern: 1.8), x: width - pad, centerY: y + stripHeight / 2 + 1, font: stripFont, align: .right)
             }
             y += stripHeight
         }
@@ -1610,7 +1633,7 @@ func writeFinishedVideo(shape: VideoShape, clip: ReadableClip, race: Race, from 
     // the room between the picture and the captions.
     var panel = shape == .upright ? nil
         : Panel(race: race, scale: CGFloat(options.userScale), accent: accent, title: title, badge: badge,
-                event: event, track: track, maxRows: options.maxRows)
+                event: event, track: track, maxRows: options.maxRows, logo: loadPicture(options.logoPath))
     let corner = panel.map {
         place(panel: $0, frameWidth: Int(canvas.width), frameHeight: Int(canvas.height), position: options.position, margin: CGFloat(options.margin))
     }
@@ -2352,7 +2375,7 @@ struct Options {
     var stillBackground: String?
     /// For a still of the upright video's box: the height it has to fit, in reference points.
     var stillRoom: Double?
-    /// A picture for the heading of an upright video, such as the event's logo.
+    /// A picture such as the event's logo, for the head of the timer box and the heading of an upright video.
     var logoPath: String?
     var compact = false
     var interactive = false
@@ -2441,7 +2464,8 @@ Look (pilot, id, idLabel, event, corner and accent can also be set in settings.j
   --scale N             Panel size multiplier (default 1).
   --margin N            Distance from the frame edge, in 1080p pixels (default 54).
   --accent HEX          Highlight colour (default #FFD60A).
-  --logo FILE           A picture, such as the event's logo, for the heading of an upright video.
+  --logo FILE           A picture, such as the event's logo. It goes across the head of the timer box,
+                        and in the heading of an upright video.
   --decimals N          Decimal places, 0-3 (default 3).
   --best N              Consecutive laps to combine (default 3).
   --max-rows N          Most lap rows shown at once (default 8).
@@ -3260,11 +3284,13 @@ func commandLine() {
         let frameCount: Int
     }
 
+    // Read once, for every run's box.
+    let logo = loadPicture(options.logoPath)
     var jobs = selected.map { run -> Job in
         let title = options.titleFromFile && !run.name.isEmpty ? run.name : options.title
         let scale = CGFloat(min(run.width, run.height)) / 1080 * CGFloat(options.userScale)
         let panel = Panel(race: run.race, scale: scale, accent: accentRGB, title: title, badge: options.badge,
-                          event: options.event, track: run.track, maxRows: options.maxRows)
+                          event: options.event, track: run.track, maxRows: options.maxRows, logo: logo)
         let placement = place(panel: panel, frameWidth: run.width, frameHeight: run.height, position: options.position, margin: CGFloat(options.margin))
         let endSeconds = Double(run.race.bounds.last!) / unitsPerSecond + options.hold
         return Job(run: run, panel: panel, placement: placement, frameCount: Int((endSeconds * run.fps.value).rounded(.up)) + 1)

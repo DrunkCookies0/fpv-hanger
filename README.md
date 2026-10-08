@@ -18,7 +18,7 @@ The app is not from the App Store, so macOS asks before opening it the first tim
 - **Make videos.** A 16:9 video for YouTube and a 9:16 one for Shorts, TikTok and Reels, with the timer, your name and the event drawn in. The 9:16 timer is built around your best three laps in a row.
 - **Add music.** Songs go into one library, for every track, and the marks you put in a song stay with it. The app works out a song's tempo and finds its drops, and puts a drop on the start gate with one press. Or place the song against the laps yourself on a timeline, mark points in it on a big sound wave, and drag its ends to choose where the music comes in and stops.
 - **Submit.** The app checks your answers with you, then fills the track's Google Form in. For RaceGOW6 it finds each track's form by itself; for anything else, paste the link. You press Submit yourself.
-- **Keep events apart.** Tracks are grouped by event, a race or a series, each with its own name on the timer, its own ID number, and a logo of your choosing for its 9:16 videos.
+- **Keep events apart.** Tracks are grouped by event, a race or a series, each with its own name on the timer, its own ID number, and a logo of your choosing on its videos.
 
 ## Coming soon
 

@@ -2,6 +2,10 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.12.0 (8 October 2026)
+
+- An event's logo goes on its 16:9 videos too, across the head of the timer box. The timer over the picture in Markers & music shows it there as well. Choose the logo in Pilot & settings, under the event.
+
 ## v0.11.0 (8 October 2026)
 
 - The timer shows on the picture while you mark laps. In Markers & music the lap timer sits over your clip exactly as the 16:9 video will have it, and reads what it will read on the frame you are on. Add, move or remove a marker and it changes at once, so you can check a run before making its video. The timer button beside the playback speed hides it.
