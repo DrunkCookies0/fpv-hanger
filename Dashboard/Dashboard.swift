@@ -914,6 +914,45 @@ final class Model: ObservableObject {
         return arguments
     }
 
+    /// Where things that can be made again are kept: the timer preview and the editor's playable copies.
+    /// The bundle identifier still has the app's first name in it, so its caches carried over.
+    nonisolated static var caches: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "local.racegow.dashboard", isDirectory: true)
+    }
+
+    /// The timer exactly as the lap timer draws it on a 16:9 frame, once the last of `laps` is done,
+    /// with the rest of the frame see-through. For the preview in Pilot & settings.
+    func timerPreview(laps: [String], track: String) async -> NSImage? {
+        guard toolFound else { return nil }
+        try? FileManager.default.createDirectory(at: Self.caches, withIntermediateDirectories: true)
+        let file = Self.caches.appendingPathComponent("Timer preview.png")
+        let finish = laps.compactMap { Double($0) }.reduce(0, +)
+        let arguments = ["--laps"] + laps + ["--first-crossing", "0", "--fps", "60", "--size", "1920x1080", "--track", track,
+                                             "--still", String(finish + 1), file.path] + pilotArguments
+        let tool = tool
+        let result = await Task.detached { runTool(tool, arguments) }.value
+        guard result.status == 0, let data = try? Data(contentsOf: file) else { return nil }
+        return NSImage(data: data)
+    }
+
+    /// A frame of the pilot's own footage to show the timer over, when one can be had without making
+    /// anything: from the clip itself if macOS plays it, or from a playable copy the editor made earlier.
+    nonisolated static func footageFrame(of clip: String, at seconds: Double) async -> NSImage? {
+        let copy = Editor.copyLocation(of: clip).movie
+        for file in [URL(fileURLWithPath: clip), copy] where FileManager.default.fileExists(atPath: file.path) {
+            let asset = AVURLAsset(url: file)
+            guard (try? await asset.loadTracks(withMediaType: .video).first) != nil else { continue }
+            let frames = AVAssetImageGenerator(asset: asset)
+            frames.appliesPreferredTrackTransform = true
+            frames.maximumSize = CGSize(width: 1280, height: 720)
+            if let frame = try? await frames.image(at: CMTime(seconds: seconds, preferredTimescale: 600)).image {
+                return NSImage(cgImage: frame, size: NSSize(width: frame.width, height: frame.height))
+            }
+        }
+        return nil
+    }
+
     private func toolArguments(_ track: String) -> [String] {
         let rate = state(track).mismatchFPS
         return rate.isEmpty ? [] : ["--mismatch-fps", rate]
@@ -2281,16 +2320,20 @@ final class Editor: ObservableObject {
 
     /// A copy of the clip that macOS can play, made by the lap timer and kept in the Caches folder.
     /// A clip macOS already plays is used as it is.
-    nonisolated static func playableCopy(of clip: String, tool: URL) -> (info: PreviewInfo?, problem: String) {
-        let manager = FileManager.default
-        // The bundle identifier still has the app's first name in it, so its caches and web session carried over.
-        let folder = manager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "local.racegow.dashboard").appendingPathComponent("Clip previews", isDirectory: true)
-        let attributes = try? manager.attributesOfItem(atPath: clip)
+    /// Where a clip's playable copy is kept. The name carries the clip's size and date, so a clip that
+    /// has changed gets a new copy.
+    nonisolated static func copyLocation(of clip: String) -> (folder: URL, movie: URL, note: URL, size: Int64) {
+        let folder = Model.caches.appendingPathComponent("Clip previews", isDirectory: true)
+        let attributes = try? FileManager.default.attributesOfItem(atPath: clip)
         let size = (attributes?[.size] as? Int64) ?? 0
         let changed = Int((attributes?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)
         let base = "\(URL(fileURLWithPath: clip).deletingPathExtension().lastPathComponent)-\(size)-\(changed)"
-        let movie = folder.appendingPathComponent(base + ".mov"), note = folder.appendingPathComponent(base + ".json")
+        return (folder, folder.appendingPathComponent(base + ".mov"), folder.appendingPathComponent(base + ".json"), size)
+    }
+
+    nonisolated static func playableCopy(of clip: String, tool: URL) -> (info: PreviewInfo?, problem: String) {
+        let manager = FileManager.default
+        let (folder, movie, note, size) = copyLocation(of: clip)
         if manager.fileExists(atPath: movie.path), let data = try? Data(contentsOf: note), let info = try? JSONDecoder().decode(PreviewInfo.self, from: data) {
             try? manager.setAttributes([.modificationDate: Date()], ofItemAtPath: movie.path)
             return (info, "")
@@ -3308,6 +3351,9 @@ struct LeaderboardView: View {
 
 struct SettingsView: View {
     @EnvironmentObject var model: Model
+    /// The timer as the lap timer draws it, and a frame of footage to show it over.
+    @State private var timer: NSImage?
+    @State private var footage: NSImage?
     private let corners = [("tl", "Top left"), ("tr", "Top right"), ("bl", "Bottom left"), ("br", "Bottom right")]
 
     @ViewBuilder private var updateStatus: some View {
@@ -3318,6 +3364,73 @@ struct SettingsView: View {
         case .available(let release): Text("v\(release.version) is ready to install").foregroundStyle(Theme.accent)
         case .installing(let release): Text("Installing v\(release.version). The app will reopen.").foregroundStyle(Theme.accent)
         case .failed(let problem): Text(problem).foregroundStyle(Theme.warn)
+        }
+    }
+
+    /// What the timer preview is drawn from. When any of it changes, the preview is drawn again.
+    private struct PreviewSource: Equatable {
+        var settings: TimerSettings
+        var track: String
+        var laps: [String]
+        var clip = ""
+        /// A moment in the middle of the first lap, to take a frame of footage from.
+        var moment = 1.0
+        /// The run the laps are borrowed from, or empty when they are made up.
+        var run = ""
+    }
+
+    /// The fastest run on the first track that has one lends the preview its laps and a frame.
+    private var previewSource: PreviewSource {
+        for track in model.tracks {
+            guard let run = model.summaries[track]?.runs.first else { continue }
+            let crossings = run.crossings ?? []
+            return PreviewSource(settings: model.settings, track: track, laps: Array(run.laps.prefix(8)), clip: run.clip,
+                                 moment: crossings.count > 1 ? (crossings[0] + crossings[1]) / 2 : 1, run: run.name)
+        }
+        return PreviewSource(settings: model.settings, track: model.tracks.first ?? "Track 1", laps: ["12.345", "11.876", "12.012"])
+    }
+
+    private var timerPreview: some View {
+        let source = previewSource
+        return VStack(alignment: .leading, spacing: 8) {
+            ZStack {
+                if let footage {
+                    Image(nsImage: footage).resizable().aspectRatio(contentMode: .fit)
+                } else {
+                    LinearGradient(colors: [Color(white: 0.24), Color(white: 0.09)], startPoint: .top, endPoint: .bottom)
+                    Text("YOUR VIDEO").label()
+                }
+                if let timer { Image(nsImage: timer).resizable().aspectRatio(contentMode: .fit) }
+                // Clicking a corner of the picture moves the timer there.
+                VStack(spacing: 0) {
+                    ForEach([["tl", "tr"], ["bl", "br"]], id: \.self) { row in
+                        HStack(spacing: 0) {
+                            ForEach(row, id: \.self) { corner in
+                                Color.clear.contentShape(Rectangle()).onTapGesture { model.settings.corner = corner }
+                            }
+                        }
+                    }
+                }
+            }
+            .aspectRatio(16.0 / 9, contentMode: .fit)
+            .frame(maxWidth: 640)
+            .background(Color.black)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.stroke))
+            .help("Click a corner to put the timer there.")
+            Text("How the timer sits on a 16:9 video and on the Premiere overlay, " + (source.run.isEmpty ? "with made-up laps" : "with the laps from \(source.run)")
+                 + ". On a 9:16 video it goes under the picture instead, so the corner doesn't apply there.")
+                .font(.system(size: 12)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+        }
+        // Wait for typing to pause before asking the lap timer to draw it again.
+        .task(id: source) {
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            guard !Task.isCancelled else { return }
+            let drawn = await model.timerPreview(laps: source.laps, track: source.track)
+            if !Task.isCancelled { timer = drawn }
+        }
+        .task(id: source.clip) {
+            footage = source.clip.isEmpty ? nil : await Model.footageFrame(of: source.clip, at: source.moment)
         }
     }
 
@@ -3360,6 +3473,7 @@ struct SettingsView: View {
                         }
                     }
                 }
+                timerPreview
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .card()
