@@ -2,6 +2,14 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.7.0 (7 October 2026)
+
+- **Add clips** on a track's page copies your recordings into the track. Choose them, or drop them onto the page. The originals stay where they are.
+- Tracks and events can be moved to the Trash from the app: the bin button on a track's page, the bin beside an event in Pilot & settings, or a right-click in the sidebar. It asks first and says what is inside. If you put one back from the Trash, what the app remembered about it comes back too.
+- Submitting has its own step for the YouTube link. The form can't be sent until the video is online, so the link gets a box at the top with a Paste button, a check that it is a YouTube link, and a shortcut to YouTube's upload page. The link is kept as you type it.
+- Fixed: multiple-choice questions that mention a lap time were mistaken for the lap time itself, which left them unanswered on the form.
+- A new event can't take the name of one you already have.
+
 ## v0.6.0 (7 October 2026)
 
 - Tracks are now grouped into **events**. An event is a race or a series, with its own tracks, its own name on the timer and its own ID number. **New event** in the sidebar makes one.

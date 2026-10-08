@@ -10,6 +10,7 @@ The app is not from the App Store, so macOS asks before opening it the first tim
 
 ## What it does
 
+- **Add clips.** Choose your recordings, or drop them onto a track's page.
 - **Mark laps.** Step through a clip frame by frame and press M each time you cross the start/finish gate.
 - **Rank runs.** Each track's runs are listed fastest first by best three laps in a row.
 - **Make videos.** A 16:9 video for YouTube and a 9:16 one for Shorts, TikTok and Reels, with the timer, your name and the event drawn in. Or a transparent timer overlay to finish the video in Premiere.

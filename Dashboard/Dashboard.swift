@@ -188,6 +188,9 @@ struct FormQuestion: Identifiable, Equatable {
     let options: [String]
 
     var role: Role? {
+        // Only something typed can be one of these. Without this, every multiple-choice question
+        // that mentions a lap time was taken for the lap time itself.
+        guard kind == .text || kind == .paragraph else { return nil }
         let text = title.lowercased()
         if text.contains("pilot handle") || text.contains("pilot name") { return .handle }
         if text.contains("registration number") { return .number }
@@ -515,7 +518,7 @@ enum ReadMe {
             ], fileOnly: true),
             Section(title: "Getting started", items: [
                 .step("In Pilot & settings, type your pilot name, and under Events your ID for the race or series. They go on every timer and video, and into the entry form."),
-                .step("Press New track under the event in the sidebar, then Open folder, and put your recordings in that track's \"Raw files\" folder."),
+                .step("Press New track under the event in the sidebar, then Add clips, and choose your recordings. Or drop them onto the track's page."),
                 .step("Press Mark laps on a clip. Step to the frame where you cross the start/finish gate and press M. Do that for every crossing, then Save."),
                 .step("Press Make 16:9 video for YouTube, or Make 9:16 video for Shorts, TikTok and Reels. Markers & music lets you add a song and choose where the video starts and ends."),
                 .step("Paste the track's Google Form link on the track page, upload your video to YouTube, and press Submit this run. The app fills the form in. You press Submit on the form yourself."),
@@ -735,6 +738,18 @@ final class Model: ObservableObject {
         var tracks: [String]
         var id: String { folder }
     }
+
+    /// A track or an event waiting for a yes before it goes to the Trash.
+    struct PendingRemoval: Equatable {
+        let title: String
+        let detail: String
+        let tracks: [String]
+        /// The event's folder, when the whole event is going.
+        var event: String?
+    }
+    @Published var pendingRemoval: PendingRemoval?
+    /// Where the tracks and events sent to the Trash this session ended up.
+    private(set) var trashed: [URL] = []
 
     /// What an event puts on its tracks' timers and into their forms.
     struct EventDetails: Equatable {
@@ -975,6 +990,18 @@ final class Model: ObservableObject {
             if !inside.isEmpty || store.events?[name] != nil { found.append(Event(folder: name, tracks: inside.map { name + "/" + $0 })) }
         }
         if !loose.isEmpty { found.insert(Event(folder: "", tracks: loose), at: 0) }
+        // Anything put back from the Trash brings what was remembered about it.
+        for event in found {
+            if !event.folder.isEmpty, store.events?[event.folder] == nil,
+               let kept = takeBack(EventState.self, from: root.appendingPathComponent(event.folder)) {
+                var all = store.events ?? [:]
+                all[event.folder] = kept
+                store.events = all
+            }
+            for track in event.tracks where store.tracks[track] == nil {
+                if let kept = takeBack(TrackState.self, from: root.appendingPathComponent(track)) { store.tracks[track] = kept }
+            }
+        }
         if found != events { events = found }
         let all = found.flatMap(\.tracks)
         if all != tracks { tracks = all }
@@ -990,7 +1017,7 @@ final class Model: ObservableObject {
     func refresh() {
         findTracks()
         for track in tracks { loadSummary(track) }
-        if case .track(let name) = page, !tracks.contains(name), let first = tracks.first { page = .track(first) }
+        if case .track(let name) = page, !tracks.contains(name) { page = tracks.first.map { .track($0) } ?? .settings }
     }
 
     /// The pilot's details and the timer's corner, handed to the lap timer directly: the one inside the
@@ -1279,6 +1306,252 @@ final class Model: ObservableObject {
         update(track) { $0.submissions.append(Submission(run: run, time: time, link: link, date: Date())) }
     }
 
+    // MARK: Deleting tracks and events
+
+    /// The file tucked inside a track or event on its way to the Trash, holding what the app
+    /// remembers about it. If the folder is put back, that comes back with it.
+    static let keepsake = ".fpv-hangar.json"
+
+    private func tuck<T: Encodable>(_ value: T?, into folder: URL) {
+        guard let value else { return }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        if let data = try? encoder.encode(value) { try? data.write(to: folder.appendingPathComponent(Self.keepsake)) }
+    }
+
+    private func takeBack<T: Decodable>(_ type: T.Type, from folder: URL) -> T? {
+        let file = folder.appendingPathComponent(Self.keepsake)
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        try? FileManager.default.removeItem(at: file)
+        return try? decoder.decode(type, from: data)
+    }
+
+    /// What some tracks hold, in words, for the question before they go.
+    private func summary(of tracks: [String]) -> String {
+        let manager = FileManager.default
+        func count(_ track: String, _ part: String, _ kinds: Set<String>) -> Int {
+            ((try? manager.contentsOfDirectory(atPath: folder(track, part).path)) ?? [])
+                .filter { !$0.hasPrefix(".") && kinds.contains(($0 as NSString).pathExtension.lowercased()) }.count
+        }
+        var clips = 0, runs = 0, videos = 0
+        var bytes: Int64 = 0
+        for track in tracks {
+            clips += count(track, "Raw files", Self.videoExtensions)
+            runs += count(track, "csv markers", ["csv", "txt"])
+            videos += count(track, "landscape", ["mp4"]) + count(track, "vertical", ["mp4"])
+            let files = manager.enumerator(at: root.appendingPathComponent(track), includingPropertiesForKeys: [.fileSizeKey])
+            while let file = files?.nextObject() as? URL { bytes += Int64((try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+        }
+        func some(_ number: Int, _ one: String, _ many: String) -> String? { number == 0 ? nil : "\(number) \(number == 1 ? one : many)" }
+        let parts = [some(clips, "clip", "clips"), some(runs, "marked run", "marked runs"), some(videos, "finished video", "finished videos")].compactMap { $0 }
+        guard !parts.isEmpty else { return "There is nothing in it yet." }
+        let list = parts.count > 1 ? parts.dropLast().joined(separator: ", ") + " and " + parts.last! : parts[0]
+        return "\(tracks.count == 1 ? "It holds" : "They hold") \(list), \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) in all."
+    }
+
+    func askToDelete(track: String) {
+        guard job == nil, editor == nil else { return }
+        pendingRemoval = PendingRemoval(
+            title: "Move \(Self.trackName(track)) to the Trash?",
+            detail: summary(of: [track]) + " Everything in it goes too, your recordings included. You can put it back from the Trash.",
+            tracks: [track], event: nil)
+    }
+
+    func askToDelete(event folder: String) {
+        guard job == nil, editor == nil, let event = events.first(where: { $0.folder == folder }) else { return }
+        let name = details(ofEvent: folder).name
+        let title = name.isEmpty ? "these tracks" : name
+        let tracks = event.tracks.isEmpty ? "It has no tracks yet." : "That is \(event.tracks.map(Self.trackName).joined(separator: ", ")). " + summary(of: event.tracks)
+        pendingRemoval = PendingRemoval(
+            title: "Move \(title) to the Trash?",
+            detail: tracks + (event.tracks.isEmpty ? "" : " Everything in them goes too, your recordings included. You can put it back from the Trash."),
+            tracks: event.tracks, event: folder.isEmpty ? nil : folder)
+    }
+
+    /// Moves the track or event that was asked about to the Trash, with what the app remembers about
+    /// it tucked inside in case it is ever put back.
+    func confirmRemoval() {
+        guard let pending = pendingRemoval else { return }
+        pendingRemoval = nil
+        guard job == nil, editor == nil else { return }
+        let manager = FileManager.default
+        var remembered = store
+        var gone: [String] = [], stuck: [String] = []
+        if let event = pending.event {
+            // The whole event's folder goes in one piece.
+            let place = root.appendingPathComponent(event)
+            for track in pending.tracks { tuck(remembered.tracks[track], into: root.appendingPathComponent(track)) }
+            tuck(remembered.events?[event], into: place)
+            do {
+                var landed: NSURL?
+                if manager.fileExists(atPath: place.path) { try manager.trashItem(at: place, resultingItemURL: &landed) }
+                if let landed { trashed.append(landed as URL) }
+                for track in pending.tracks { remembered.tracks[track] = nil }
+                remembered.events?[event] = nil
+                gone.append(details(ofEvent: event).name)
+            } catch {
+                stuck.append("\(event): \(error.localizedDescription)")
+            }
+        } else {
+            for track in pending.tracks {
+                let place = root.appendingPathComponent(track)
+                tuck(remembered.tracks[track], into: place)
+                do {
+                    var landed: NSURL?
+                    try manager.trashItem(at: place, resultingItemURL: &landed)
+                    if let landed { trashed.append(landed as URL) }
+                    remembered.tracks[track] = nil
+                    gone.append(Self.trackName(track))
+                } catch {
+                    try? manager.removeItem(at: place.appendingPathComponent(Self.keepsake))
+                    stuck.append("\(Self.trackName(track)): \(error.localizedDescription)")
+                }
+            }
+        }
+        store = remembered
+        for track in pending.tracks { summaries[track] = nil }
+        var lines: [String] = []
+        if !gone.isEmpty { lines.append("Moved \(gone.joined(separator: ", ")) to the Trash.") }
+        if !stuck.isEmpty { lines.append("Couldn't move " + stuck.joined(separator: "; ")) }
+        notice = lines.joined(separator: "\n")
+        refresh()
+    }
+
+    // MARK: Adding clips
+
+    /// Asks which recordings to add to a track.
+    func chooseClips(for track: String) {
+        /// Lets recordings and folders be picked and greys out the rest. It goes by the file's
+        /// extension, because macOS takes a .ts recording for a TypeScript file when a code editor is installed.
+        final class Chooser: NSObject, NSOpenSavePanelDelegate {
+            func panel(_ sender: Any, shouldEnable url: URL) -> Bool {
+                (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true || Model.videoExtensions.contains(url.pathExtension.lowercased())
+            }
+        }
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.prompt = "Add"
+        panel.message = "Choose the recordings to add to \(Self.trackName(track)). They are copied in, and the originals stay where they are."
+        let chooser = Chooser()
+        panel.delegate = chooser
+        let answer = withExtendedLifetime(chooser) { panel.runModal() }
+        if answer == .OK { addClips(panel.urls, to: track) }
+    }
+
+    /// Copies recordings into a track's Raw files folder, which is where its clips are looked for. The
+    /// originals are left alone. A folder stands for the recordings directly inside it.
+    func addClips(_ picked: [URL], to track: String) {
+        guard job == nil else {
+            notice = "Wait for what is being made to finish, then add the clips."
+            return
+        }
+        let manager = FileManager.default
+        var files: [URL] = []
+        for url in picked {
+            if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                files += ((try? manager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? [])
+                    .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+            } else {
+                files.append(url)
+            }
+        }
+        let clips = files.filter { Self.videoExtensions.contains($0.pathExtension.lowercased()) }
+        guard !clips.isEmpty else {
+            notice = "None of those are video recordings."
+            return
+        }
+        let destination = folder(track, "Raw files")
+        func size(_ url: URL) -> Int64 { Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+        let total = clips.reduce(Int64(0)) { $0 + size($1) }
+        try? manager.createDirectory(at: destination, withIntermediateDirectories: true)
+        if let free = try? destination.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage,
+           free < total + 200_000_000 {
+            let format = { (bytes: Int64) in ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) }
+            notice = "There isn't room for \(clips.count == 1 ? "that clip" : "those clips"): \(format(total)) is needed and \(format(free)) is free."
+            return
+        }
+        let name = Self.trackName(track)
+        let left = files.count - clips.count
+        job = Job(title: clips.count == 1 ? "Adding \(clips[0].lastPathComponent) to \(name)" : "Adding \(clips.count) clips to \(name)", progress: 0)
+        Task.detached {
+            let result = Model.copy(clips, into: destination, total: total) { fraction in
+                Task { @MainActor in if self.job != nil { self.job?.progress = fraction } }
+            }
+            await MainActor.run {
+                self.job = nil
+                var lines: [String] = []
+                if !result.added.isEmpty {
+                    lines.append(result.added.count == 1 ? "Added \(result.added[0]) to \(name)." : "Added \(result.added.count) clips to \(name).")
+                }
+                if !result.present.isEmpty {
+                    lines.append("\(result.present.joined(separator: ", ")) \(result.present.count == 1 ? "was" : "were") already there.")
+                }
+                lines += result.failed
+                if left > 0 { lines.append("\(left) other file\(left == 1 ? " isn't a video and was" : "s aren't videos and were") left out.") }
+                self.notice = lines.joined(separator: "\n")
+                self.loadSummary(track)
+            }
+        }
+    }
+
+    /// Copies files into a folder one after another, reporting how far along the whole lot is. A file
+    /// that is already there, with the same name and size, is left; a different one with the same
+    /// name is kept and the new one gets a number after its name, the way Finder does it.
+    nonisolated static func copy(_ files: [URL], into folder: URL, total: Int64, progress: @Sendable (Double) -> Void)
+        -> (added: [String], present: [String], failed: [String]) {
+        let manager = FileManager.default
+        var added: [String] = [], present: [String] = [], failed: [String] = []
+        var done: Int64 = 0
+        func size(_ url: URL) -> Int64 { Int64((try? manager.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0) }
+        for file in files {
+            var target = folder.appendingPathComponent(file.lastPathComponent)
+            if manager.fileExists(atPath: target.path) {
+                if file.standardizedFileURL == target.standardizedFileURL || size(target) == size(file) {
+                    present.append(file.lastPathComponent)
+                    done += size(file)
+                    progress(total > 0 ? Double(done) / Double(total) : 1)
+                    continue
+                }
+                var number = 2
+                repeat {
+                    target = folder.appendingPathComponent("\(file.deletingPathExtension().lastPathComponent) \(number).\(file.pathExtension)")
+                    number += 1
+                } while manager.fileExists(atPath: target.path)
+            }
+            // Written under a hidden name first, so a half-copied clip is never taken for a whole one.
+            let part = folder.appendingPathComponent("." + target.lastPathComponent + ".part")
+            do {
+                try? manager.removeItem(at: part)
+                manager.createFile(atPath: part.path, contents: nil)
+                let from = try FileHandle(forReadingFrom: file), to = try FileHandle(forWritingTo: part)
+                defer {
+                    try? from.close()
+                    try? to.close()
+                }
+                while let chunk = try from.read(upToCount: 4 << 20), !chunk.isEmpty {
+                    try to.write(contentsOf: chunk)
+                    done += Int64(chunk.count)
+                    progress(total > 0 ? Double(done) / Double(total) : 1)
+                }
+                try to.close()
+                // Keep the recording's own date, which is when it was flown.
+                if let date = try? manager.attributesOfItem(atPath: file.path)[.modificationDate] as? Date {
+                    try? manager.setAttributes([.modificationDate: date], ofItemAtPath: part.path)
+                }
+                try manager.moveItem(at: part, to: target)
+                added.append(target.lastPathComponent)
+            } catch {
+                try? manager.removeItem(at: part)
+                failed.append("\(file.lastPathComponent) couldn't be added: \(error.localizedDescription)")
+            }
+        }
+        return (added, present, failed)
+    }
+
     /// Makes the next track in an event: "Track 3" after two.
     func newTrack(in event: String) {
         let place = event.isEmpty ? root : root.appendingPathComponent(event)
@@ -1306,6 +1579,10 @@ final class Model: ObservableObject {
         if let problem = problem(withEventName: name) { return problem }
         guard !FileManager.default.fileExists(atPath: root.appendingPathComponent(name).path) else {
             return "There is already a folder called \(name) in your library."
+        }
+        // Two events with one name would be two headings nobody can tell apart.
+        if events.contains(where: { details(ofEvent: $0.folder).name.caseInsensitiveCompare(name) == .orderedSame }) {
+            return "You already have an event called \(name). New track under it adds a track."
         }
         var all = store.events ?? [:]
         all[name] = EventState()
@@ -1444,6 +1721,12 @@ struct RootView: View {
             Text(pending.paths.map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: ", ")
                 + (pending.warning.map { "\n\n" + $0 } ?? ""))
         }
+        .alert(model.pendingRemoval?.title ?? "", isPresented: Binding(get: { model.pendingRemoval != nil }, set: { if !$0 { model.pendingRemoval = nil } }), presenting: model.pendingRemoval) { _ in
+            Button("Move to Trash", role: .destructive) { model.confirmRemoval() }
+            Button("Cancel", role: .cancel) { model.pendingRemoval = nil }
+        } message: { pending in
+            Text(pending.detail)
+        }
     }
 }
 
@@ -1472,9 +1755,17 @@ struct Sidebar: View {
                         let title = model.details(ofEvent: event.folder).name
                         Text((title.isEmpty ? "Tracks" : title).uppercased()).label().lineLimit(1)
                             .padding(.horizontal, 20).padding(.top, event.id == model.events.first?.id ? 0 : 20).padding(.bottom, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                            .contextMenu {
+                                Button("New track") { model.newTrack(in: event.folder) }
+                                Button("Move this event to the Trash…") { model.askToDelete(event: event.folder) }
+                            }
                         ForEach(event.tracks, id: \.self) { track in
                             SidebarRow(title: Model.trackName(track), detail: model.summaries[track]?.best?.best?.seconds, selected: model.page == .track(track)) {
                                 model.page = .track(track)
+                            }
+                            .contextMenu {
+                                Button("Move \(Model.trackName(track)) to the Trash…") { model.askToDelete(track: track) }
                             }
                         }
                         Button { model.newTrack(in: event.folder) } label: {
@@ -1611,6 +1902,8 @@ struct StatusBar: View {
 struct TrackView: View {
     @EnvironmentObject var model: Model
     let track: String
+    /// True while recordings are being dragged over the page.
+    @State private var dropping = false
 
     private var summary: TrackSummary { model.summaries[track] ?? TrackSummary() }
     private var state: TrackState { model.state(track) }
@@ -1642,6 +1935,21 @@ struct TrackView: View {
             model.loadSummary(track)
             model.loadForm(track)
         }
+        // Recordings dropped anywhere on the page are added to the track.
+        .dropDestination(for: URL.self) { dropped, _ in
+            model.addClips(dropped, to: track)
+            return true
+        } isTargeted: { dropping = $0 }
+        .overlay {
+            if dropping {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Theme.background.opacity(0.82))
+                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.accent, style: StrokeStyle(lineWidth: 3, dash: [12, 7])))
+                    .overlay(Label("Drop to add to \(Model.trackName(track))", systemImage: "square.and.arrow.down").font(.system(size: 20, weight: .heavy)).foregroundStyle(Theme.accent))
+                    .padding(14)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 
     private var header: some View {
@@ -1653,8 +1961,12 @@ struct TrackView: View {
             }
             if let deadline = form?.deadline { DeadlinePill(deadline: deadline) }
             Spacer()
+            Button("Add clips…") { model.chooseClips(for: track) }.buttonStyle(SecondaryButton()).disabled(model.job != nil)
+                .help("Copy recordings into this track. You can also drop them onto this page.")
             Button("Refresh") { model.refresh() }.buttonStyle(SecondaryButton())
             Button("Open folder") { NSWorkspace.shared.open(model.root.appendingPathComponent(track)) }.buttonStyle(SecondaryButton())
+            Button { model.askToDelete(track: track) } label: { Image(systemName: "trash") }
+                .buttonStyle(SecondaryButton()).disabled(model.job != nil).help("Move this track to the Trash…").accessibilityLabel("Move this track to the Trash")
         }
     }
 
@@ -1696,9 +2008,12 @@ struct TrackView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("No runs yet").font(.system(size: 18, weight: .heavy))
                 Text((model.clips[track] ?? []).isEmpty
-                     ? "Put the raw clips in this track's \"Raw files\" folder and press Refresh. Each one then gets a Mark laps button."
+                     ? "Add your recordings: press Add clips, or drop them onto this page. Each one then gets a Mark laps button."
                      : "Press Mark laps on a clip below, step to each start/finish gate crossing and press M. Save, and the run shows up here, ranked.")
                     .font(.system(size: 13)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                if (model.clips[track] ?? []).isEmpty {
+                    Button("Add clips…") { model.chooseClips(for: track) }.buttonStyle(PrimaryButton()).disabled(model.job != nil)
+                }
                 Text("Markers exported from Premiere still work: File > Export > Markers as CSV into this track's \"csv markers\" folder, named after the race clip (hdz_0008.csv for hdz_0008.ts).")
                     .font(.system(size: 12)).foregroundStyle(Theme.faint).fixedSize(horizontal: false, vertical: true)
                 if !model.toolFound {
@@ -2082,6 +2397,62 @@ struct SubmitSheet: View {
         (form?.questions ?? []).filter { $0.required && $0.kind != .other && (answers[$0.id] ?? []).allSatisfy { $0.trimmingCharacters(in: .whitespaces).isEmpty } }
     }
 
+    /// The form's question that asks for the video's link, if it has one.
+    private var linkQuestion: FormQuestion? { form?.questions.first { $0.role == .link } }
+
+    /// The link as typed so far. It is kept while it is typed, so closing the sheet doesn't lose it.
+    private var link: Binding<String> {
+        Binding(get: { linkQuestion.flatMap { answers[$0.id]?.first } ?? "" }, set: { value in
+            guard let question = linkQuestion else { return }
+            answers[question.id] = [value]
+            model.update(target.track) { $0.links[target.run.name] = value.trimmingCharacters(in: .whitespacesAndNewlines) }
+        })
+    }
+
+    static func looksLikeYouTube(_ text: String) -> Bool {
+        guard let host = URL(string: text.trimmingCharacters(in: .whitespacesAndNewlines))?.host?.lowercased() else { return false }
+        return host == "youtu.be" || host == "youtube.com" || host.hasSuffix(".youtube.com")
+    }
+
+    /// The link gets a step of its own, because the form can't be sent until the video is online.
+    private func linkCard(_ question: FormQuestion) -> some View {
+        let typed = link.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let video = target.run.landscapes?.last
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("This form asks for a link to your video, so the video has to be on YouTube before you can send it. Upload the 16:9 video, then paste its link here.")
+                .font(.system(size: 13)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .bottom, spacing: 8) {
+                AnswerField(title: question.title, required: question.required, text: link)
+                Button("Paste") {
+                    if let copied = NSPasteboard.general.string(forType: .string) { link.wrappedValue = copied.trimmingCharacters(in: .whitespacesAndNewlines) }
+                }
+                .buttonStyle(SecondaryButton()).padding(.bottom, 3).help("Paste the link you copied from YouTube.")
+            }
+            if typed.isEmpty {
+                Text("No link yet.").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.faint)
+            } else if Self.looksLikeYouTube(typed) {
+                Label("That is a YouTube link.", systemImage: "checkmark.circle.fill").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.good)
+            } else {
+                Label("That doesn't look like a YouTube link. Check it before you send the form.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.warn)
+            }
+            HStack(spacing: 8) {
+                Button("Open YouTube's upload page") {
+                    if let page = URL(string: "https://www.youtube.com/upload") { NSWorkspace.shared.open(page) }
+                }
+                .buttonStyle(SecondaryButton())
+                if let video {
+                    Button("Show the 16:9 video in Finder") { model.reveal([video]) }.buttonStyle(SecondaryButton())
+                } else {
+                    Text("There is no 16:9 video of this run yet. Make it on the track page.").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.warn)
+                }
+                Spacer()
+                ComingSoonBadge().help("Uploading the video to YouTube from here, with the link filled in for you.")
+            }
+        }
+        .card(padding: 16)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
@@ -2115,16 +2486,13 @@ struct SubmitSheet: View {
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 18) {
+                            if let question = linkQuestion { linkCard(question) }
                             AnswerField(title: "Your email", required: true, text: $email)
-                            ForEach(form.questions) { question in
+                            // The link has its own step above.
+                            ForEach(form.questions.filter { $0.role != .link }) { question in
                                 QuestionRow(question: question, values: Binding(
                                     get: { answers[question.id] ?? [] },
                                     set: { answers[question.id] = $0 }))
-                            }
-                            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                ComingSoonBadge()
-                                Text("Uploading the video to YouTube from here and filling its link in for you. For now, upload the 16:9 video yourself and paste the link above.")
-                                    .font(.system(size: 12)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
                             }
                         }
                         .padding(24)
@@ -3891,6 +4259,8 @@ struct EventFields: View {
                     .buttonStyle(SecondaryButton())
                     .help("These tracks sit loose in your library, from before there were events. This moves them into a folder named after the event, like any other. If their clips are in a Premiere project, Premiere will ask where they went.")
                 }
+                Button { model.askToDelete(event: event.folder) } label: { Image(systemName: "trash") }
+                    .buttonStyle(SecondaryButton()).disabled(model.job != nil).help("Move this event and its tracks to the Trash…").accessibilityLabel("Move this event to the Trash")
             }
             HStack(spacing: 14) {
                 AnswerField(title: "Name on the timer", required: false, text: field(\.name)).frame(width: 260)
@@ -3906,7 +4276,7 @@ struct GuideView: View {
     @EnvironmentObject var model: Model
     private let steps: [(String, String)] = [
         ("Set up the track",
-         "Tracks are grouped by event in the sidebar. Press New track under an event, or New event for another race or series. Put the raw clips in the track's Raw files folder and paste the track's Google Form link into Submission form on the track page."),
+         "Tracks are grouped by event in the sidebar. Press New track under an event, or New event for another race or series. Press Add clips on the track's page and choose your recordings, or drop them onto the page. Then paste the track's Google Form link into Submission form on the track page."),
         ("Mark the laps",
          "Press Mark laps on a clip. Play or drag to just before a start/finish gate crossing, step to the exact frame with the arrow keys, and press M. The first marker starts lap 1; each later one ends a lap. To fix one, go to it with the up and down arrows and move it a frame at a time with ⌘← and ⌘→. Save, and the run appears on the track page, ranked by its best 3 laps in a row."),
         ("Choose what the video shows",
@@ -3925,6 +4295,7 @@ struct GuideView: View {
         "Premiere still works for all of this. Export a sequence's markers as CSV into the track's csv markers folder, named after the clip, and its sound as an MP3 into the music folder, also named after the clip. Place those markers while the clip still starts at the very beginning of its sequence.",
         "Saving markers here for a run that had a Premiere export moves that export to the Trash, so the run isn't timed twice.",
         "Some clips say 50 frames a second in their header but record 60. That only matters for markers from Premiere, and the track page asks which one the sequence uses. Markers placed here are always in the clip's real time.",
+        "Add clips copies your recordings into the track's Raw files folder and leaves the originals where they were. Putting files in that folder yourself works too.",
         "Everything lives in the track's folder: Raw files, csv markers and music go in; overlays, landscape and vertical are what gets made. The tracks sit in your library folder, which Pilot & settings shows and can change.",
         "New versions are picked up from Pilot & settings, where Check for updates downloads and installs one in place.",
     ]
@@ -4027,6 +4398,10 @@ enum Main {
             MainActor.assumeIsolated { checkForm() }
         } else if arguments.contains("--check-editor") {
             MainActor.assumeIsolated { checkEditor() }
+        } else if let index = arguments.firstIndex(of: "--check-add-clips") {
+            MainActor.assumeIsolated { checkAddClips(arguments.dropFirst(index + 1).filter { !$0.hasPrefix("--") }) }
+        } else if arguments.contains("--check-delete") {
+            MainActor.assumeIsolated { checkDelete() }
         } else if arguments.contains("--check-events") {
             MainActor.assumeIsolated { checkEvents() }
         } else if arguments.contains("--check-update") {
@@ -4042,15 +4417,29 @@ enum Main {
     static func checkForm() {
         final class Checker: NSObject, WKNavigationDelegate {
             let script: String
-            init(script: String) { self.script = script }
+            /// The questions the app answers by itself: their ids, titles and what was put in.
+            let expected: [(String, String, String)]
+            init(script: String, expected: [(String, String, String)]) {
+                self.script = script
+                self.expected = expected
+            }
             func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
                 let read = "JSON.stringify(Object.fromEntries([...document.querySelectorAll('input[type=hidden][name^=\"entry.\"]')].filter(i => i.value).map(i => [i.name, i.value]).concat([['email', (document.querySelector('input[type=email]') || {}).value || '']])))"
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                     webView.evaluateJavaScript(self.script) { filled, _ in
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                             webView.evaluateJavaScript(read) { result, error in
-                                print("questions filled:", filled ?? "none", "\nform now holds:", result ?? String(describing: error))
-                                exit(0)
+                                let held = ((result as? String).flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) } as? [String: String]) ?? [:]
+                                print("questions the page took an answer for: \(filled ?? "none")")
+                                var wrong = 0
+                                for (id, title, expected) in self.expected {
+                                    let got = held["entry." + id] ?? ""
+                                    if got != expected { wrong += 1 }
+                                    print("  \(got == expected ? "ok   " : "WRONG") \(title.prefix(60)): \(got.isEmpty ? "(nothing)" : got)")
+                                }
+                                print("email on the form: \(held["email"] ?? "(nothing)")")
+                                print(wrong == 0 ? "every answer the app fills in by itself reached the form. Nothing was sent." : "\(wrong) didn't reach the form. Nothing was sent.")
+                                exit(wrong == 0 ? 0 : 1)
                             }
                         }
                     }
@@ -4066,7 +4455,15 @@ enum Main {
             exit(1)
         }
         var answers: [String: [String]] = [:]
+        var expected: [(String, String, String)] = []
         for question in form.questions {
+            // The four the app fills in by itself get something shaped like the real thing.
+            let samples: [FormQuestion.Role: String] = [.handle: "TEST PILOT", .number: "000", .time: "28.316", .link: "https://youtu.be/TEST1234567"]
+            if let role = question.role, let sample = samples[role] {
+                answers[question.id] = [sample]
+                expected.append((question.id, "\(role): \(question.title)", sample))
+                continue
+            }
             switch question.kind {
             case .text, .paragraph: answers[question.id] = ["TEST"]
             case .choice, .checkboxes: answers[question.id] = question.options.first.map { [$0] } ?? []
@@ -4074,13 +4471,92 @@ enum Main {
             }
         }
         print("\(form.title): \(form.questions.count) questions, \(answers.count) answerable here")
-        let checker = Checker(script: fillScript(answers: answers, email: "test@example.com"))
+        if !expected.contains(where: { $0.1.hasPrefix("link") }) { print("This form has no question the app takes for the video's link.") }
+        let checker = Checker(script: fillScript(answers: answers, email: "test@example.com"), expected: expected)
         let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 900, height: 1200))
         view.navigationDelegate = checker
         view.load(URLRequest(url: url))
         withExtendedLifetime(checker) { RunLoop.main.run(until: Date().addingTimeInterval(30)) }
         print("The form never finished loading.")
         exit(1)
+    }
+
+    /// Adds the files and folders named after it to the first track of the library given with --root,
+    /// the way Add clips and a drop on the track page do, and prints what happened. It changes the
+    /// library, so it is only for a throwaway copy.
+    @MainActor
+    static func checkAddClips(_ paths: [String]) {
+        guard CommandLine.arguments.contains("--root") else {
+            print("This changes the library it is run on. Point it at a copy with --root.")
+            exit(1)
+        }
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let model = Model()
+        guard let track = model.tracks.first else {
+            print("That library has no track to add to.")
+            exit(1)
+        }
+        // --root and its folder are among the arguments: leave those out.
+        let files = paths.filter { $0 != model.root.path }.map { URL(fileURLWithPath: $0) }
+        model.addClips(files, to: track)
+        var furthest = 0.0
+        let limit = Date().addingTimeInterval(600)
+        while model.job != nil, Date() < limit {
+            furthest = max(furthest, model.job?.progress ?? 0)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        print("progress reached \(Int(furthest * 100))%")
+        print(model.notice ?? "(nothing was said)")
+        print("clips in \(track): \((model.clips[track] ?? []).map { URL(fileURLWithPath: $0).lastPathComponent })")
+        exit(0)
+    }
+
+    /// On the library given with --root, which it changes: sends the last event's first track to the
+    /// Trash and puts it back, then does the same with the whole event, printing what the app
+    /// remembers at each step. Only for a throwaway copy of a library.
+    @MainActor
+    static func checkDelete() {
+        guard CommandLine.arguments.contains("--root") else {
+            print("This changes the library it is run on. Point it at a copy with --root.")
+            exit(1)
+        }
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let model = Model()
+        guard let event = model.events.last(where: { !$0.folder.isEmpty }), let track = event.tracks.first else {
+            print("That library needs an event with a track in it.")
+            exit(1)
+        }
+        func show(_ title: String) {
+            print("\(title): events \(model.events.map { "\($0.folder) \($0.tracks.map(Model.trackName))" }), remembered tracks \(model.store.tracks.keys.sorted()), remembered events \((model.store.events ?? [:]).keys.sorted())")
+        }
+        func putBack(_ name: String) {
+            guard let landed = model.trashed.last else { return print("  nothing went to the Trash") }
+            do {
+                try FileManager.default.moveItem(at: landed, to: model.root.appendingPathComponent(name))
+                model.refresh()
+            } catch {
+                print("  couldn't put it back: \(error.localizedDescription)")
+            }
+        }
+        show("at the start")
+        model.askToDelete(track: track)
+        print("asks: \(model.pendingRemoval?.title ?? "nothing") \(model.pendingRemoval?.detail ?? "")")
+        model.confirmRemoval()
+        print("says: \(model.notice ?? "nothing")")
+        show("after deleting \(Model.trackName(track))")
+        putBack(track)
+        show("after putting it back")
+        print("its form link: \(model.state(track).formURL)")
+        model.askToDelete(event: event.folder)
+        print("asks: \(model.pendingRemoval?.title ?? "nothing") \(model.pendingRemoval?.detail ?? "")")
+        model.confirmRemoval()
+        print("says: \(model.notice ?? "nothing")")
+        show("after deleting the event")
+        putBack(event.folder)
+        show("after putting it back")
+        print("its details: \(model.details(ofEvent: event.folder)); the track's form link: \(model.state(track).formURL)")
+        exit(0)
     }
 
     /// Tries what can be done to events on the library given with --root, which it changes: makes an
