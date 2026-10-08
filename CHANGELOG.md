@@ -2,6 +2,12 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.4.0 (7 October 2026)
+
+- A welcome note opens the first time you run the app, with how to get started.
+- After an update, a **What's new** note opens with what changed.
+- Both notes stay under How it works, where you can open them again.
+
 ## v0.3.1 (7 October 2026)
 
 - New versions now come from the repository's Releases page. A copy of v0.3.0 can't see them and has to be downloaded once more.

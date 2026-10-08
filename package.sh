@@ -10,7 +10,6 @@
 set -e
 cd "${0:A:h}"
 VERSION="$(< VERSION)"
-PAGE="https://github.com/DrunkCookies0/fpv-hanger"
 
 # One number, in three places.
 grep -q "let toolVersion = \"$VERSION\"" "Lap Timer/laptimer.swift" || { echo "Lap Timer/laptimer.swift gives a different version from VERSION ($VERSION)."; exit 1 }
@@ -22,14 +21,9 @@ mkdir -p "$STAGE"
 APP_DIR="$STAGE" ARCHS="arm64 x86_64" Dashboard/build.sh
 APP="$STAGE/FPV Hangar.app"
 
-# What is planned but not built, straight from the app's own list.
-COMING="$(sed -n 's/^        case \.[a-z]*: return "\(.*\)"$/\1/p' Dashboard/Dashboard.swift | awk 'NR<=3 {print "  - " $0}')"
-python3 - "$VERSION" "$PAGE" "$COMING" "$STAGE/Read Me First.txt" <<'EOF'
-import sys
-version, page, coming, out = sys.argv[1:5]
-text = open("Dashboard/Read Me First.txt", encoding="utf-8").read()
-open(out, "w", encoding="utf-8").write(text.replace("{VERSION}", version).replace("{PAGE}", page).replace("{COMING}", coming))
-EOF
+# The read-me is written by the app itself, from the same text as its welcome note.
+"$APP/Contents/MacOS/FPV Hangar" --read-me > "$STAGE/Read Me First.txt"
+grep -q "GETTING STARTED" "$STAGE/Read Me First.txt" || { echo "The app didn't write its read-me."; exit 1 }
 
 # Checks before anything is written to Releases/.
 for binary in "$APP/Contents/MacOS/FPV Hangar" "$APP/Contents/MacOS/laptimer"; do

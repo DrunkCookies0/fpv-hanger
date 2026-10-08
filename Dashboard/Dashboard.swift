@@ -458,6 +458,168 @@ struct ComingSoonBadge: View {
     }
 }
 
+/// What a new pilot needs to know, written once. The welcome window shows it the first time the app
+/// is opened, and `--read-me` prints it as the "Read Me First" file that goes in the download.
+enum ReadMe {
+    enum Item {
+        case paragraph(String)
+        case step(String)
+        case point(String)
+        /// Lines kept exactly as they are. These go in the file only.
+        case lines([String])
+    }
+
+    struct Section: Identifiable {
+        let title: String
+        let items: [Item]
+        /// Only useful before the app is open, so the welcome window leaves it out.
+        var fileOnly = false
+        var id: String { title }
+    }
+
+    static let summary = "Lap times, timer overlays, finished videos and RaceGOW entry forms, straight from your goggle recordings. Right now it is built around the RaceGOW whoop series."
+    static let files = "Where your files are"
+    static let comingSoon = "Coming soon"
+
+    static var sections: [Section] {
+        [
+            Section(title: "What you need", items: [
+                .paragraph("A Mac running macOS 14 (Sonoma) or newer."),
+                .paragraph("The app is built for both Apple silicon and Intel Macs. It has only been run on Apple silicon so far."),
+            ], fileOnly: true),
+            Section(title: "Installing", items: [
+                .step("Drag \"FPV Hangar\" into your Applications folder."),
+                .step("Open it. The first time, macOS will refuse, because the app does not come from the App Store or a registered developer. To let it through:"),
+                .lines([
+                    "       macOS 15 or newer",
+                    "         Press Done on the warning. Open System Settings > Privacy & Security,",
+                    "         scroll down to the line about FPV Hangar, press Open Anyway, and confirm.",
+                    "",
+                    "       macOS 14",
+                    "         Right-click the app, choose Open, then press Open.",
+                    "",
+                    "     You only do this once. If neither works, open Terminal and run:",
+                    "",
+                    "       xattr -dr com.apple.quarantine \"/Applications/FPV Hangar.app\"",
+                ]),
+            ], fileOnly: true),
+            Section(title: "Getting started", items: [
+                .step("In Pilot & settings, type your pilot name and ID. They go on every timer and video, and into the entry form."),
+                .step("Press New track in the sidebar, then Open folder, and put your recordings in that track's \"Raw files\" folder."),
+                .step("Press Mark laps on a clip. Step to the frame where you cross the start/finish gate and press M. Do that for every crossing, then Save."),
+                .step("Press Make 16:9 video for YouTube, or Make 9:16 video for Shorts, TikTok and Reels. Markers & music lets you add a song and choose where the video starts and ends."),
+                .step("Paste the track's Google Form link on the track page, upload your video to YouTube, and press Submit this run. The app fills the form in. You press Submit on the form yourself."),
+                .paragraph("The full walk-through and the editor's keys are in the app under How it works."),
+            ]),
+            Section(title: files, items: [
+                .paragraph("In a folder called \"FPV Hangar\" in your Movies folder. Pilot & settings shows it and lets you use a different one."),
+            ]),
+            Section(title: "Updates", items: [
+                .paragraph("The app looks for a newer version when it opens. When there is one, a yellow update button appears at the bottom of the sidebar. It downloads the new version and swaps it in, and the previous copy goes to the Trash."),
+                .paragraph("Keep the app in your Applications folder. From anywhere else it may not be able to replace itself."),
+                .lines(["  Versions and what changed: \(Updates.page.absoluteString)"]),
+            ]),
+            Section(title: comingSoon, items: [.paragraph("These are marked \"Coming soon\" in the app and do nothing yet:")] + ComingSoon.allCases.map { .point($0.title) }),
+            Section(title: "Good to know", items: [
+                .point("Lap times are as exact as your markers: one video frame, which is about 0.017 seconds at 60 frames a second."),
+                .point("It has been used most with HDZero recordings (.ts). An .mp4 recording has been tested once. Other formats have not been tried."),
+                .point("The app goes online for two things only: to read your Google Form, and to check for a newer version."),
+                .point("It never sends your entry for you. Nothing goes to RaceGOW until you press Submit on the form."),
+                .paragraph("Something not working? Tell whoever sent you this."),
+            ]),
+        ]
+    }
+
+    /// The whole read-me as plain text, wrapped for a text file.
+    static func text() -> String {
+        func wrapped(_ text: String, first: String, rest: String) -> [String] {
+            var lines: [String] = []
+            var line = first
+            for word in text.split(separator: " ") {
+                if line.count + word.count + 1 > 84, line.trimmingCharacters(in: .whitespaces).count > first.trimmingCharacters(in: .whitespaces).count || line != first {
+                    lines.append(line)
+                    line = rest + word
+                } else {
+                    line += (line == first || line == rest ? "" : " ") + word
+                }
+            }
+            return lines + [line]
+        }
+        var lines = ["FPV HANGAR v\(AppVersion.current)", ""] + wrapped(summary, first: "", rest: "")
+        for section in sections {
+            lines += ["", "", section.title.uppercased(), ""]
+            var number = 0
+            for item in section.items {
+                switch item {
+                case .paragraph(let text):
+                    if lines.last != "" { lines.append("") }
+                    lines += wrapped(text, first: "  ", rest: "  ") + [""]
+                case .step(let text):
+                    number += 1
+                    lines += wrapped(text, first: "  \(number). ", rest: "     ")
+                case .point(let text):
+                    lines += wrapped(text, first: "  - ", rest: "    ")
+                case .lines(let kept):
+                    if lines.last != "" { lines.append("") }
+                    lines += kept + [""]
+                }
+            }
+            while lines.last == "" { lines.removeLast() }
+        }
+        return lines.joined(separator: "\n") + "\n"
+    }
+}
+
+/// The changelog, which build.sh puts inside the app. It is what the "What's new" note shows.
+enum ChangeLog {
+    struct Entry: Identifiable {
+        let version: String
+        let date: String
+        /// The entry's lines: points start with "- ", anything else is a sentence of its own.
+        var lines: [String]
+        var id: String { version }
+    }
+
+    /// Every version in the file, newest first.
+    static let entries: [Entry] = {
+        guard let file = Bundle.main.url(forResource: "CHANGELOG", withExtension: "md"),
+              let text = try? String(contentsOf: file, encoding: .utf8) else { return [] }
+        var found: [Entry] = []
+        for line in text.components(separatedBy: .newlines) {
+            if line.hasPrefix("## v") {
+                let heading = line.dropFirst(4).split(separator: " ", maxSplits: 1)
+                let date = heading.count > 1 ? heading[1].trimmingCharacters(in: CharacterSet(charactersIn: "() ")) : ""
+                found.append(Entry(version: heading.first.map(String.init) ?? "", date: date, lines: []))
+            } else if !found.isEmpty, !line.trimmingCharacters(in: .whitespaces).isEmpty {
+                found[found.count - 1].lines.append(line)
+            }
+        }
+        return found
+    }()
+
+    /// What changed after `version`, up to the version that is running. With nil, everything.
+    static func entries(after version: String?) -> [Entry] {
+        entries.filter { entry in
+            !AppVersion.isNewer(entry.version, than: AppVersion.current) && (version.map { AppVersion.isNewer(entry.version, than: $0) } ?? true)
+        }
+    }
+}
+
+/// The note that opens over the window by itself: the read-me on the very first run, and what
+/// changed the first time a newer version is run.
+enum LaunchNote: Identifiable, Equatable {
+    case welcome
+    /// What is new since a version. With nil, the whole changelog.
+    case whatsNew(since: String?)
+
+    var id: String {
+        switch self {
+        case .welcome: return "welcome"
+        case .whatsNew(let since): return "new since \(since ?? "the start")"
+        }
+    }
+}
+
 // MARK: - Model
 
 struct Job: Equatable {
@@ -542,6 +704,9 @@ final class Model: ObservableObject {
     /// True when this copy is tied to its folder: one kept beside its footage, or started with --root.
     let libraryIsFixed: Bool
     @Published var update = UpdateState.idle
+    /// The welcome or "What's new" note that is open.
+    @Published var note: LaunchNote?
+    private var greeted = false
     @Published var automaticUpdates = !UserDefaults.standard.bool(forKey: "noAutomaticUpdates") {
         didSet { UserDefaults.standard.set(!automaticUpdates, forKey: "noAutomaticUpdates") }
     }
@@ -585,9 +750,26 @@ final class Model: ObservableObject {
         self.root = root
         libraryIsFixed = fixed
         load()
-        let last = UserDefaults.standard.string(forKey: "lastVersion")
-        if let last, AppVersion.isNewer(AppVersion.current, than: last) { notice = "Updated to FPV Hangar v\(AppVersion.current)." }
-        UserDefaults.standard.set(AppVersion.current, forKey: "lastVersion")
+    }
+
+    /// Opens the welcome note on the very first run, or what is new the first time a newer version is
+    /// run. Called when the window appears, so the modes that show no window leave it for a real launch.
+    func greet() {
+        guard !greeted else { return }
+        greeted = true
+        let defaults = UserDefaults.standard
+        let last = defaults.string(forKey: "lastVersion")
+        if last == nil, !defaults.bool(forKey: "welcomed") {
+            note = .welcome
+        } else if let last, AppVersion.isNewer(AppVersion.current, than: last) {
+            if ChangeLog.entries(after: last).isEmpty {
+                notice = "Updated to FPV Hangar v\(AppVersion.current)."
+            } else {
+                note = .whatsNew(since: last)
+            }
+        }
+        defaults.set(true, forKey: "welcomed")
+        defaults.set(AppVersion.current, forKey: "lastVersion")
     }
 
     convenience init() {
@@ -612,6 +794,12 @@ final class Model: ObservableObject {
         expanded = []
         findTracks()
         page = tracks.first.map { .track($0) } ?? .settings
+    }
+
+    /// Closes the note. After the welcome, a pilot with no name yet is taken to where it goes.
+    func closeNote() {
+        if note == .welcome, settings.pilot.isEmpty { page = .settings }
+        note = nil
     }
 
     /// Asks for a different folder to keep the tracks in.
@@ -1049,6 +1237,9 @@ struct RootView: View {
             // Out of reach while the editor is up, so a text field under it can't keep the keyboard.
             .disabled(model.editor != nil)
             .accessibilityHidden(model.editor != nil)
+            .sheet(item: $model.note) { note in
+                NoteSheet(note: note).environmentObject(model)
+            }
             // The marker editor takes over the whole window while a clip is open in it.
             if let editor = model.editor { EditorView(editor: editor) }
         }
@@ -3220,8 +3411,149 @@ struct SettingsView: View {
     }
 }
 
+/// The note that opens over the window. As the welcome it is the read-me: what the app is, how to
+/// start, and what isn't built yet. As "What's new" it is the changelog since the version last run.
+/// Both can be opened again from How it works.
+struct NoteSheet: View {
+    @EnvironmentObject var model: Model
+    let note: LaunchNote
+
+    /// True when this copy can't update itself where it is: macOS is running it from a quarantined
+    /// copy, or it was opened straight out of the folder it was downloaded to.
+    private var misplaced: Bool {
+        let path = Bundle.main.bundlePath
+        guard !model.libraryIsFixed, path.hasSuffix(".app") else { return false }
+        return !path.hasPrefix("/Applications/") && !path.hasPrefix(NSHomeDirectory() + "/Applications/")
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(note == .welcome ? "WELCOME TO" : "WHAT'S NEW IN").label()
+                HStack(spacing: 0) {
+                    Text("FPV").foregroundStyle(.white)
+                    Text("HANGAR").foregroundStyle(Theme.accent)
+                }
+                .font(.system(size: 34, weight: .black)).tracking(1)
+                Text(note == .welcome ? ReadMe.summary : "You are on version \(AppVersion.current).")
+                    .font(.system(size: 14)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true).padding(.top, 2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(24)
+            Divider().overlay(Theme.stroke)
+
+            ScrollView {
+                if case .whatsNew(let since) = note {
+                    changes(after: since)
+                } else {
+                VStack(alignment: .leading, spacing: 24) {
+                    if misplaced {
+                        Label("FPV Hangar isn't in your Applications folder. Quit it, drag it there and open it again, so it can update itself.", systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.warn).fixedSize(horizontal: false, vertical: true)
+                    }
+                    ForEach(ReadMe.sections.filter { !$0.fileOnly }) { section in
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 8) {
+                                Text(section.title.uppercased()).label()
+                                if section.title == ReadMe.comingSoon { ComingSoonBadge() }
+                            }
+                            if section.title == ReadMe.files {
+                                library
+                            } else {
+                                ForEach(Array(rows(of: section).enumerated()), id: \.offset) { _, row in row }
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(24)
+                }
+            }
+
+            Divider().overlay(Theme.stroke)
+            HStack {
+                Text("FPV Hangar v\(AppVersion.current)  ·  This note stays under How it works.")
+                    .font(.system(size: 12)).foregroundStyle(Theme.faint)
+                Spacer()
+                Button(note == .welcome ? "Get started" : "Got it") { model.closeNote() }.buttonStyle(PrimaryButton()).keyboardShortcut(.defaultAction)
+            }
+            .padding(18)
+        }
+        .frame(width: 720, height: note == .welcome ? 740 : 560)
+        .background(Theme.background)
+        .preferredColorScheme(.dark)
+    }
+
+    /// The changelog's entries after a version, newest first.
+    private func changes(after version: String?) -> some View {
+        let entries = ChangeLog.entries(after: version)
+        return VStack(alignment: .leading, spacing: 26) {
+            if entries.isEmpty {
+                Text("Nothing is written down for this version.").font(.system(size: 13)).foregroundStyle(Theme.dim)
+            }
+            ForEach(entries) { entry in
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text("v\(entry.version)").font(.system(size: 18, weight: .black)).foregroundStyle(entry.version == AppVersion.current ? Theme.accent : .white)
+                        Text(entry.date.uppercased()).label()
+                    }
+                    ForEach(Array(entry.lines.enumerated()), id: \.offset) { _, line in
+                        if line.hasPrefix("- ") {
+                            HStack(alignment: .top, spacing: 9) {
+                                Circle().fill(Theme.accent).frame(width: 5, height: 5).padding(.top, 6)
+                                // The changelog is written in Markdown, so `code` and **bold** come through.
+                                Text(.init(String(line.dropFirst(2)))).font(.system(size: 13)).foregroundStyle(.white.opacity(0.88)).fixedSize(horizontal: false, vertical: true)
+                            }
+                        } else {
+                            Text(.init(line)).font(.system(size: 13)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(24)
+    }
+
+    /// Where this copy keeps things, which is not always where the read-me's file says.
+    private var library: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(model.libraryIsFixed ? "In the folder this copy of the app sits in:" : "In this folder. Pilot & settings lets you use a different one.")
+                .font(.system(size: 13)).foregroundStyle(Theme.dim)
+            Text(model.root.path).font(.system(size: 12, design: .monospaced)).foregroundStyle(.white.opacity(0.85)).textSelection(.enabled)
+            Button("Show in Finder") { NSWorkspace.shared.open(model.root) }.buttonStyle(SecondaryButton())
+        }
+    }
+
+    /// A section's steps, points and paragraphs as views. Lines meant for the file are left out.
+    private func rows(of section: ReadMe.Section) -> [AnyView] {
+        var number = 0
+        return section.items.compactMap { item -> AnyView? in
+            switch item {
+            case .paragraph(let text):
+                return AnyView(Text(text).font(.system(size: 13)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true))
+            case .step(let text):
+                number += 1
+                return AnyView(HStack(alignment: .top, spacing: 12) {
+                    Text("\(number)").font(.system(size: 13, weight: .black).monospacedDigit()).foregroundStyle(Theme.onAccent)
+                        .frame(width: 24, height: 24).background(Theme.accent, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    Text(text).font(.system(size: 13)).foregroundStyle(.white.opacity(0.88)).fixedSize(horizontal: false, vertical: true).padding(.top, 3)
+                })
+            case .point(let text):
+                return AnyView(HStack(alignment: .top, spacing: 9) {
+                    Circle().fill(Theme.accent).frame(width: 5, height: 5).padding(.top, 6)
+                    Text(text).font(.system(size: 13)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
+                })
+            case .lines:
+                return nil
+            }
+        }
+    }
+}
+
 /// A short walk through the whole job, from a raw clip to a submitted time.
 struct GuideView: View {
+    @EnvironmentObject var model: Model
     private let steps: [(String, String)] = [
         ("Set up the track",
          "Press New track in the sidebar, or use one you already have. Put the raw clips in its Raw files folder and paste the track's Google Form link into Submission form on the track page."),
@@ -3250,7 +3582,14 @@ struct GuideView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("HOW IT WORKS").font(.system(size: 40, weight: .black)).tracking(0.5)
+                HStack(alignment: .firstTextBaseline) {
+                    Text("HOW IT WORKS").font(.system(size: 40, weight: .black)).tracking(0.5)
+                    Spacer()
+                    Button("What's new") { model.note = .whatsNew(since: nil) }.buttonStyle(SecondaryButton())
+                        .help("What changed in each version.")
+                    Button("Welcome note") { model.note = .welcome }.buttonStyle(SecondaryButton())
+                        .help("The note that opens the first time the app is run.")
+                }
                 Text("From a raw clip to a submitted time.").font(.system(size: 14)).foregroundStyle(Theme.dim).padding(.bottom, 8)
                 ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
                     HStack(alignment: .top, spacing: 16) {
@@ -3316,6 +3655,7 @@ struct DashboardApp: App {
                 .onAppear {
                     model.refresh()
                     model.checkForUpdatesIfDue()
+                    model.greet()
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in model.refresh() }
         }
@@ -3328,7 +3668,10 @@ struct DashboardApp: App {
 enum Main {
     static func main() {
         let arguments = CommandLine.arguments
-        if let index = arguments.firstIndex(of: "--snapshot"), index + 1 < arguments.count {
+        if arguments.contains("--read-me") {
+            // The "Read Me First" file for the download. package.sh writes this next to the app.
+            print(ReadMe.text(), terminator: "")
+        } else if let index = arguments.firstIndex(of: "--snapshot"), index + 1 < arguments.count {
             MainActor.assumeIsolated { snapshot(to: arguments[index + 1], page: arguments.dropFirst(index + 2).first) }
         } else if arguments.contains("--check-form") {
             MainActor.assumeIsolated { checkForm() }
@@ -3528,6 +3871,14 @@ enum Main {
         if page == "guide" { model.page = .guide }
         var size = NSSize(width: 1280, height: 840)
         var content = AnyView(RootView().environmentObject(model))
+        if page == "welcome" {
+            size = NSSize(width: 720, height: 740)
+            content = AnyView(NoteSheet(note: .welcome).environmentObject(model))
+        }
+        if page == "whatsnew" {
+            size = NSSize(width: 720, height: 560)
+            content = AnyView(NoteSheet(note: .whatsNew(since: nil)).environmentObject(model))
+        }
         if page == "submit", let track = model.tracks.first, let run = model.summaries[track]?.best {
             let address = model.state(track).formURL
             if let url = URL(string: address), let data = try? Data(contentsOf: url) {

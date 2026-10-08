@@ -42,6 +42,8 @@ compile Dashboard.swift "$APP/Contents/MacOS/$NAME" -parse-as-library
 # The app runs this copy of the lap timer, so the two always come from the same source.
 compile "../Lap Timer/laptimer.swift" "$APP/Contents/MacOS/laptimer"
 [[ -f AppIcon.icns ]] && cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# The app shows this as its "What's new" note.
+cp ../CHANGELOG.md "$APP/Contents/Resources/CHANGELOG.md"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
