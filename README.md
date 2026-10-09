@@ -1,12 +1,12 @@
 # FPV Hangar
 
-A Mac app for FPV pilots: a hangar of tools, opened from one first screen. The first tool is the Video Creator, which turns a goggle recording into lap times, finished videos with a timer and music on them, and a filled-in race entry form. Right now it is set up for the [RaceGOW](https://www.racegow.com/home) whoop series, where the fastest three consecutive laps are judged from a submitted video.
+An app for FPV pilots, for Windows and Mac: a hangar of tools, opened from one first screen. The first tool is the Video Creator, which turns a goggle recording into lap times, finished videos with a timer and music on them, and a filled-in race entry form. Right now it is set up for the RaceGOW whoop series.
 
 ## Download
 
-**[Get the latest version](https://github.com/DrunkCookies0/fpv-hanger/releases/latest)**. It needs macOS 14 or newer.
+**[Get the latest version](https://github.com/DrunkCookies0/fpv-hanger/releases/latest)**: one zip for a Mac with Apple silicon (macOS 13 or newer), one for Windows 10 or 11.
 
-The app is not from the App Store, so macOS asks before opening it the first time. The read-me in the download says how to let it through. After that the app updates itself from this repository's releases.
+The app is not signed, so macOS and Windows both ask before opening it the first time. The read-me in each download says how to let it through. After that the app updates itself from this repository's releases.
 
 ## What it does
 
@@ -15,9 +15,11 @@ The app is not from the App Store, so macOS asks before opening it the first tim
 - **Add clips.** Choose your recordings, or drop them onto a track's page. One added by itself opens straight into marking.
 - **Mark laps.** Step through a clip frame by frame and press M each time you cross the start/finish gate. The lap timer shows over the picture as you go, exactly as the video will have it.
 - **Rank runs.** Each track's runs are listed fastest first by best three laps in a row.
-- **Make videos.** A 16:9 video for YouTube and a 9:16 one for Shorts, TikTok and Reels, with the timer, your name and the event drawn in. The 9:16 timer is built around your best three laps in a row.
-- **Add music.** Songs go into one library, for every track, and the marks you put in a song stay with it. The app works out a song's tempo and finds its drops, and puts a drop on the start gate with one press. Or place the song against the laps yourself on a timeline, mark points in it on a big sound wave, and drag its ends to choose where the music comes in and stops.
-- **Submit.** The app checks your answers with you, then fills the track's Google Form in. For RaceGOW6 it finds each track's form by itself; for anything else, paste the link. You press Submit yourself.
+- **Make videos.** A 16:9 video for YouTube and a 9:16 one for Shorts, TikTok and Reels, with the timer, your name and the event drawn in, in a colour you choose. A clip or a picture of your own can go before and after.
+- **Add music.** Songs go into one library, for every track, and the marks you put in a song stay with it. The app works out a song's tempo and finds its drops, and puts a drop on the start gate with one press.
+- **Submit.** The app checks your answers with you, then fills the track's Google Form in. You press Submit yourself.
+- **See the track in 3D.** A track's pipes on their grid with the lap flown round them. Build one by clicking sections into place, or have the app read the pipes out of the track's video.
+- **Leaderboards.** Every entry on each track as the series has it, with yours picked out.
 - **Keep events apart.** Tracks are grouped by event, a race or a series, each with its own name on the timer, its own ID number, and a logo of your choosing on its videos.
 
 ## Coming soon
@@ -25,61 +27,55 @@ The app is not from the App Store, so macOS asks before opening it the first tim
 These are marked "Coming soon" in the app and do nothing yet:
 
 - Upload to YouTube, TikTok and Instagram
-- Season leaderboards
+- A Video Creator for any footage, without a race series
 
 ## Building it
 
-You need a Mac with Apple's Command Line Tools (`xcode-select --install`). Nothing else: no Xcode project and no packages.
+The app is in `Hangar/`. It is [Electron](https://www.electronjs.org) with plain JavaScript modules and no build step, and it runs [FFmpeg](https://ffmpeg.org) as a separate program. You need Node 22 or newer, and an Apple silicon Mac to package it.
 
 ```sh
-Dashboard/build.sh
+cd Hangar
+npm ci              # Electron, for the computer you are on
+tools/fetch.sh      # Electron for Windows, and FFmpeg for both: fetched and checked, not kept here
+npx electron .      # the app, run from its source
+npm test            # its tests
 ```
 
-That writes `FPV Hangar.app` into this folder, built for the Mac you are on, with the lap timer inside it.
+`npx electron . --self-test --report report.txt` has the app try itself out from start to finish, with no window, on a library and a recording it makes for the purpose.
 
 | Path | What it is |
 |---|---|
-| `Dashboard/Dashboard.swift` | The app, in SwiftUI, one file |
-| `Dashboard/build.sh` | Builds the app and puts the lap timer inside it |
-| `Lap Timer/laptimer.swift` | The lap timer: a command-line tool that does all the timing and rendering, and listens to songs for their tempo and drops. `./laptimer --help` lists its options. Its source is compiled into the app too, for drawing the timer |
-| `VERSION` | The version number, used by everything |
-| `CHANGELOG.md` | What changed in each version |
-| `package.sh`, `publish.sh` | Package the app, and start a release |
+| `Hangar/main/` | The main process: the library on disk, FFmpeg, videos, updates, and the one list of things a page can ask for (`api.js`) |
+| `Hangar/renderer/` | The window's pages. They have no access to files or programs: they ask the main process |
+| `Hangar/shared/` | What both use and the tests cover: timing, the timer's drawing, the video's instructions for FFmpeg, the series' pages, tracks |
+| `Hangar/worker/` | Draws the timer for every frame of a video and hands the frames to FFmpeg |
+| `Hangar/assets/` | The typeface, the colour table that makes videos match the first Mac app's, the icon, and the tracks that come with the app |
+| `Hangar/tools/` | `fetch.sh`, and `package.sh`, which puts the app together for a Mac or for Windows |
+| `Hangar/test/` | The tests. Their pilots, times and links are made up |
+| `VERSION`, `CHANGELOG.md` | The version number, used by everything, and what changed in each version |
+| `package.sh`, `publish.sh` | Package both apps for release, and start a release |
 | `.github/workflows/release.yml` | Builds and publishes a release when a version tag is pushed |
+| `Dashboard/`, `Lap Timer/` | The first Mac app, in Swift, as it was at v0.12.1. Releases are no longer built from it. A copy of it updates into the new app by itself |
 
-A copy of the app that sits in a folder with a `dashboard.json` or a `Lap Timer` folder keeps its tracks in that folder. Any other copy keeps them in `~/Movies/FPV Hangar`. Inside that library, each event is a folder with its tracks inside, and a track is known by its path there, such as `RaceGOW6/Track 1`. Songs are in a `Songs` folder beside the events.
+The library is a folder, `FPV Hangar` in your Movies or Videos folder unless you choose another. Each event is a folder in it with its tracks inside, and a track's recordings, markers and finished videos are plain files. `dashboard.json` and `settings.json` hold what the app remembers.
 
 ### Things to keep
 
-- `build.sh` passes an explicit `-target …-macos14.0`. Without it the compiler stamps the app with its own SDK's version and older systems refuse to open it.
-- New fields in `dashboard.json` must be optional in the Swift structs. A required field that an older file lacks makes the whole file fail to load, and the next save then overwrites it.
-- The marker editor takes its keys through a local event monitor, and takes the keyboard away from any text field underneath when it opens. Without that, keys are typed into the hidden field.
-- A song is opened with exact timing (`AVURLAssetPreferPreciseDurationAndTimingKey`) everywhere it is read: listened to, drawn, played and cut into a video. A drop only lands on a gate if all four agree on where it is.
-- The timer is drawn by one piece of code. `build.sh` compiles `laptimer.swift` into the app as well, with `-D EMBEDDED`, which leaves out the lap timer's own entry point. The marker editor draws the timer over the picture with it, so what it shows is what the video gets. `--check-editor` compares the two, pixel for pixel. This is also why `laptimer.swift` has no code at the top level and is built with `-parse-as-library`.
-- Nothing in either file may call `fatalError` or `precondition`: they put the source file's full path into the app, and `package.sh` refuses an app with a home folder path in it.
+- `dashboard.json` and `settings.json` are also read and written by the first Mac app, which writes them out with only the fields it knows. Anything new the app has to remember goes in `hangar.json` beside them.
+- The timer is drawn by one piece of code, `shared/panel.js`, for the marker editor and for the videos, so the two can't differ.
+- A video is made in one run of FFmpeg. Nothing given to it may go on without end: the run is cut at its own last frame, and a still picture is given once and held, not looped. One that did kept FFmpeg running for ever whenever the music ended before the picture.
+- Recordings are lightened and everything laid over them is mixed in light (`shared/video.js`), so that videos look as the first Mac app's did. `Hangar/dev/colour/` has what measured that.
+- Nothing from the series' spreadsheets or anybody's library is in the source or the tests. The app reads them when it runs.
+- A track's video is read at 480 lines on purpose: the search for pipes was worked out on a picture that soft.
 
 ## Releasing a version
 
 Versions are `0.MINOR.PATCH`: the middle number for something new, the last for fixes.
 
-1. Put the new number in `VERSION` and in `toolVersion` at the top of `Lap Timer/laptimer.swift`, and add an entry to `CHANGELOG.md`.
+1. Put the new number in `VERSION` and add an entry to `CHANGELOG.md`.
 2. Commit, then `./publish.sh`. It pushes `main` and a `v<version>` tag.
-3. The tag starts the release workflow, which runs `./package.sh` on GitHub (building the app for Apple silicon and Intel) and publishes a release with the zip and `latest.json` attached. Copies of the app read `latest.json` from the newest release and offer the update.
+3. The tag starts the release workflow, which runs `./package.sh` on GitHub and publishes a release with the Mac zip, the Windows zip and `latest.json` attached. Copies of the app read `latest.json` to find a newer version.
 
-`./package.sh` also works on your own Mac, to try a package before releasing it. It writes into `Releases/`, which is not part of the repository.
+`./package.sh` also works on your own Mac, to try the packages before releasing them. It writes into `Releases/`, which is not part of the repository. Run from the Actions page by hand, the workflow does everything but publish.
 
-### Trying a change first
-
-```sh
-APP_NAME="FPV Hangar Test" APP_ID=local.fpvhangar.test Dashboard/build.sh
-```
-
-That builds a second copy beside the first, under its own identifier, so it has its own settings and never touches the released app. It says TEST COPY on the first screen and leaves updates alone. Beside a library it opens that library. Moved anywhere else, such as the Applications folder, it starts a library of its own in `~/Movies/FPV Hangar`, which is how to try a first run.
-
-The app can also check itself without showing a window. `--root <folder>` points any of these at a copy of a library:
-
-- `--check-fresh <recording> <song> <gate crossings in seconds…>` goes from an empty folder to finished videos the way a new pilot does.
-- `--check-clicks [WIDTHxHEIGHT]` works the first screen, the editor and the sound wave window with real clicks, drags and keys, in a window put up off-screen.
-- `--check-editor` checks frame-exact seeking, the marker keys, what is heard in a song, and that the timer drawn over the picture is the video's.
-- `--check-pilots [names or numbers…]` checks the pilot list lookup, and `--check-season` the reading of the season's schedule and forms and the way a library fills with its tracks.
-- `--snapshot out.png <page> [WIDTHxHEIGHT]` draws a page to a picture. The lap timer checks its own ear with `laptimer --check-listening`, which `package.sh` runs before it packages.
+FFmpeg is free software under the GNU General Public License. It is carried inside the app as a separate program, with its licence, and its source is at https://ffmpeg.org. The typeface is Inter, under the SIL Open Font License.

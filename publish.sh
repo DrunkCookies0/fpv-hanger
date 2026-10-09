@@ -2,12 +2,11 @@
 # Starts a release of the version in VERSION.
 #
 # Pushes main and a v<version> tag to GitHub. The tag sets off the release workflow there, which
-# packages the app and publishes it on the Releases page a few minutes later. Every copy of the app
-# looks at the newest release, so once it is up, copies in use offer the update.
+# packages the app for Mac and Windows and publishes both on the Releases page a few minutes later.
+# Every copy of the app looks at the newest release, so once it is up, copies in use offer the update.
 set -e
 cd "${0:A:h}"
 VERSION="$(< VERSION)"
-grep -q "let toolVersion = \"$VERSION\"" "Lap Timer/laptimer.swift" || { echo "Lap Timer/laptimer.swift gives a different version from VERSION ($VERSION)."; exit 1 }
 grep -q "^## v$VERSION " CHANGELOG.md || { echo "CHANGELOG.md has no entry for v$VERSION."; exit 1 }
 [[ -z "$(git status --porcelain)" ]] || { echo "There are changes that aren't committed yet. Commit them first."; exit 1 }
 [[ "$(git branch --show-current)" == "main" ]] || { echo "Releases are made from main."; exit 1 }

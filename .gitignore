@@ -10,8 +10,18 @@
 !/.github/
 !/Dashboard/
 !/Lap Timer/
+!/Hangar/
 
 # Built from the source, and one pilot's own details.
 /Lap Timer/laptimer
 /Lap Timer/settings.json
 .DS_Store
+
+# The app for Windows and Mac. What it is built on is fetched, not kept (Hangar/vendor/README.txt
+# says from where), and of the tools it was worked out with only the colour measurements are kept.
+/Hangar/node_modules/
+/Hangar/dist/
+/Hangar/vendor/*
+!/Hangar/vendor/README.txt
+/Hangar/dev/*
+!/Hangar/dev/colour/

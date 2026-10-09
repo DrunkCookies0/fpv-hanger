@@ -1,0 +1,45 @@
+{
+  "event": "RaceGOW6",
+  "track": 1,
+  "from": {
+    "video": "https://www.youtube.com/watch?v=QsWfGlFoQfQ",
+    "build": [43, 89],
+    "flythrough": [89, 209]
+  },
+  "parts": [
+    { "name": "h-Gate", "sections": 4 },
+    { "name": "Spacers", "sections": 2 },
+    { "name": "Start/Finish", "sections": 3 },
+    { "name": "Double Gate", "sections": 5 }
+  ],
+  "pipes": [
+    [[0, 0, 0], [1, 0, 0]],
+    [[0, 0, 0], [0, 1, 0]],
+    [[1, 0, 0], [1, 0, 1]],
+    [[1, 0, 1], [2, 0, 1]],
+    [[2, 0, 0], [2, 0, 1]],
+    [[2, 0, 1], [2, 1, 1]],
+    [[0, 1, 0], [0, 1, 1]],
+    [[0, 1, 1], [0, 2, 1]],
+    [[2, 1, 0], [2, 1, 1]],
+    [[2, 1, 1], [2, 2, 1]],
+    [[0, 2, 0], [0, 2, 1]],
+    [[0, 2, 1], [0, 2, 2]],
+    [[2, 2, 0], [2, 2, 1]],
+    [[2, 2, 1], [2, 2, 2]]
+  ],
+  "start": { "at": [1.5, 0, 0.5], "heading": [0, 1, 0] },
+  "lap": [
+    { "move": "Through the start gate", "by": [[1.5, -0.9, 0.5], [1.5, 0, 0.5], [1.5, 1.2, 0.5]] },
+    { "move": "Out the back and right round the far pole, climbing", "by": [[1.55, 2.25, 0.6], [2, 2.6, 0.85], [2.5, 2.15, 1.2]] },
+    { "move": "Over the double gate", "by": [[2.45, 1.45, 1.5], [2, 1, 1.55]] },
+    { "move": "Dunk: down and out through its far gate", "by": [[1.45, 1.15, 1.05], [2, 1.5, 0.5]] },
+    { "move": "Left round the back of the track", "by": [[2.5, 1.9, 0.5], [2.1, 2.55, 0.5], [1, 2.65, 0.5], [0, 2.6, 0.5], [-0.5, 2.1, 0.5]] },
+    { "move": "In through the low gate", "by": [[-0.5, 1.6, 0.5], [0, 1.5, 0.5]] },
+    { "move": "Left ladder: up and round its pole", "by": [[0.5, 1.75, 0.65], [0.45, 2.3, 0.9], [0, 2.55, 1.1], [-0.5, 2.1, 1.3]] },
+    { "move": "Over the low gate, across, and over the double gate", "by": [[-0.3, 1.4, 1.5], [0.3, 1, 1.55], [1.2, 0.6, 1.55], [2, 0.5, 1.5]] },
+    { "move": "Split-S down through the gate by the start", "by": [[2.5, 0.5, 1], [2, 0.5, 0.5]] },
+    { "move": "Back out through the low gate", "by": [[1.1, 0.9, 0.5], [0.5, 1.4, 0.5], [0, 1.5, 0.5]] },
+    { "move": "Left turn to the start", "by": [[-0.5, 1.35, 0.5], [-0.65, 0.5, 0.5], [-0.1, -0.6, 0.5], [0.8, -1, 0.5]] }
+  ]
+}

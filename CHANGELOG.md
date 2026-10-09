@@ -2,6 +2,16 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.13.0 (9 October 2026)
+
+- FPV Hangar for Windows. The app now runs on Windows 10 and 11 as well as on a Mac, and it is the same app on both: the same screens, the same videos, the same library folder. On Windows it comes as a folder you unzip and open, and it updates itself from there.
+- On a Mac, this version is that same new app. Your copy updates into it by itself, and your tracks, markers, songs and settings are where you left them. It needs a Mac with Apple silicon (an M1 or later) and macOS 13 or newer: an Intel Mac can't open it, and should stay on v0.12.1. The app is bigger than it was, and a 9:16 video takes about twice as long to make.
+- Before and after. A short clip or a picture can go before and after every video you make in an event: a title card, a sign-off. 16:9 and 9:16 videos each have their own pair, so each can be made to fit. A clip keeps its own sound. Choose them in Pilot & settings, under the event.
+- The timer's colour is yours to choose. In Pilot & settings, under **The timer on your videos**, pick one of nine colours or any other. It colours the lap bars, the labels, your ID, and the fill when your time is set.
+- The track in 3D. A track's page has **Track in 3D**: its pipes on their grid, with the lap flown round them at the pace of your own best lap. Drag to look from any side. RaceGOW6 Track 1 comes with its lap, and Track 2 with its pipes.
+- Build a track yourself. **Edit** in the 3D view lets you click sections into place and draw the lap on a plan of the track from above. Or press **Read the pipes from the video**: the app watches the build in the track's video and finds the pipes in it. Tell it how many sections the video's parts list adds up to and it finds more of them.
+- The season's leaderboards. The Leaderboard page lists every entry on each track as the series' own spreadsheet has it, with yours picked out and how far you are behind the leader. The season's standings will show there once the series fills them in.
+
 ## v0.12.1 (8 October 2026)
 
 - 9:16 videos keep clear of the apps' buttons. On a phone, YouTube Shorts, TikTok and Reels fill the screen with your video, which trims a strip off each side, and they put their own buttons over it. Your name, your ID and the logo now sit further in from the sides and below the bar the apps put across the top, so none of it is cut off or covered. The timer box starts further in on the left and stops short of the column of buttons down the right, which is why it sits a little left of centre when you watch the file on your Mac.

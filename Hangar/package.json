@@ -1,0 +1,14 @@
+{
+  "name": "fpv-hangar",
+  "productName": "FPV Hangar",
+  "description": "A hangar of tools for FPV pilots, for Windows and Mac.",
+  "private": true,
+  "type": "module",
+  "main": "main/main.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "electron": "44.7.0"
+  }
+}

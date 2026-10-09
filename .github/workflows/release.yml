@@ -1,11 +1,15 @@
-# Publishes a release when a version tag (v0.3.1, say) is pushed: packages the app the same way
-# package.sh does on a Mac, and attaches the zip and latest.json, which is what copies of the app read
-# to find a newer version.
+# Publishes a release when a version tag (v0.13.0, say) is pushed: packages the app for Mac and for
+# Windows the same way package.sh does on a Mac, and attaches the two zips and latest.json, which is
+# what copies of the app read to find a newer version.
+#
+# Run by hand from the Actions page, it does everything but publish: the packages are kept with the
+# run for a few days, to look at before a real release.
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -16,22 +20,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Fetch what the app is built on
+        working-directory: Hangar
+        run: |
+          npm ci
+          tools/fetch.sh
+
+      - name: Test
+        working-directory: Hangar
+        run: npm test
+
       - name: Package
         shell: zsh {0}
         run: |
-          [[ "$GITHUB_REF_NAME" == "v$(< VERSION)" ]] || { echo "::error::The tag is $GITHUB_REF_NAME but VERSION says $(< VERSION)."; exit 1 }
-          swiftc --version
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            [[ "$GITHUB_REF_NAME" == "v$(< VERSION)" ]] || { echo "::error::The tag is $GITHUB_REF_NAME but VERSION says $(< VERSION)."; exit 1 }
+          fi
           ./package.sh > package.log 2>&1 || {
             # Show the end of the log as the error, so it can be read without opening the run.
-            echo "::error::$(tail -n 40 package.log | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+            echo "::error::$(tail -n 60 package.log | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
             exit 1
           }
           cat package.log
 
+      - name: Keep the packages with a run made by hand
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: Releases/
+          retention-days: 5
+
       - name: Publish
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="$(cat VERSION)"
-          gh release create "v$VERSION" "Releases/FPV-Hangar-v$VERSION.zip" Releases/latest.json \
+          gh release create "v$VERSION" "Releases/FPV-Hangar-v$VERSION.zip" "Releases/FPV-Hangar-v$VERSION-win64.zip" Releases/latest.json \
             --title "FPV Hangar v$VERSION" --notes-file Releases/notes.md

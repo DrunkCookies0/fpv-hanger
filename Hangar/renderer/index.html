@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file:; style-src file: 'unsafe-inline'; img-src file: data: blob:; media-src file: blob:; font-src file:; connect-src 'none'">
+  <title>FPV Hangar</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <!-- The window is dragged by its top edge, where a title bar would be. -->
+  <div id="drag"></div>
+  <div id="stage"></div>
+  <div id="status"></div>
+  <!-- The marker editor takes over the whole window while a clip is open in it. -->
+  <div id="editor"></div>
+  <!-- So does the track in 3D. -->
+  <div id="trackview"></div>
+  <div id="sheets"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
