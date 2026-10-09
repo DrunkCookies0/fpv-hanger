@@ -49,10 +49,9 @@ export function buildShot(chapters, length) {
 }
 
 /**
- * The moments of the build at which the track is taken to be standing: spread from a third of the
- * way in to just short of where the next chapter cuts in. The build is a time-lapse and is over
- * early in it; after that whoever built the track stands in it and talks. The middle of all these
- * is taken, so somebody in front of a pipe for some of them is lost.
+ * The moments of the build at which the track is taken to be standing when the time-lapse can't be
+ * told from the picture (see captureBuild, which finds it when it can): spread from a third of the
+ * way in to just short of where the next chapter cuts in.
  */
 export function standingMoments({ from, to }) {
   const first = from + (to - from) * 0.3, last = to - Math.min(2, (to - from) * 0.1);
@@ -61,26 +60,45 @@ export function standingMoments({ from, to }) {
 
 /**
  * Runs in the page that is playing the video, because that is the one place its frames can be
- * read. `after` are the moments the track is standing, and `from` is where the build's chapter
- * starts.
+ * read. `from` and `to` are the chapter the track is built in.
  *
- * It takes the middle of the frames of the track standing. Then it finds where the time-lapse
- * really starts: the chapter opens with the builder standing among the parts with lists drawn over
- * the picture, and the bare floor is only seen in the half second after those lists go. That
- * moment is where the picture suddenly comes much closer to the track standing. The middle of the
- * frames just after it is the floor before any pipe is up. Last, it says where the picture got
- * brighter between the two and holds still.
+ * The chapter is not all time-lapse. It opens with the builder standing among the parts, with the
+ * parts lists drawn over the picture. Then the lists fade and the build runs fast. Then the track
+ * stands, and after a moment more may be drawn over it: Track 2's video lays two photos of the
+ * track over the corners a second and a half after the build ends. So the chapter is first looked
+ * at once a second, and its two sudden changes are what tell its parts apart:
  *
- * Gives the standing track as RGBA, a byte a pixel that is 1 where that is so, and the moment it
- * took the time-lapse to start at. It is put into the page as text, so it can use nothing from
+ *   the lists going       the first second, after the chapter's own first, in which the picture
+ *                         changes a lot. The time-lapse begins there
+ *   something laid over   a later second that changes a lot after calmer ones
+ *   the track standing    the second before that, or, with nothing laid over, from a few seconds
+ *                         into the time-lapse on
+ *   the bare floor        the half second after the lists have gone, which is where the picture
+ *                         suddenly comes much closer to the track standing
+ *
+ * It takes the middle of the frames of the track standing, and of the bare floor (with a few from
+ * while the lists were up, so that whoever is building is not in one place in most of them), and
+ * says where the picture got brighter between the two and holds still.
+ *
+ * `after` and `before` give the moments outright, in place of looking for them. `fallback` is
+ * the moments to take the track as standing at when no time-lapse can be told.
+ *
+ * Gives the standing track as RGBA, a byte a pixel that is 1 where the picture changed, and what
+ * it took the chapter's parts to be. It is put into the page as text, so it can use nothing from
  * outside itself.
  */
-export async function captureBuild(video, { from, after, before = null, width = 1280, rise = 28, still = 30 }) {
+export async function captureBuild(video, { from, to, after = null, before = null, fallback = [], width = 1280, soft = 854, rise = 28, still = 30 }) {
   const height = Math.round((width * video.videoHeight) / video.videoWidth), count = width * height;
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const pen = canvas.getContext("2d", { willReadFrequently: true });
+  // Every frame is first made as soft as a 480-line video, whatever the video is. The search for
+  // pipes was worked out on a picture that soft, and not every video comes in 480 lines.
+  const small = document.createElement("canvas");
+  small.width = soft;
+  small.height = Math.round((soft * video.videoHeight) / video.videoWidth);
+  const smallPen = small.getContext("2d");
   const frame = async (time) => {
     video.currentTime = time;
     await new Promise((done) => {
@@ -88,7 +106,12 @@ export async function captureBuild(video, { from, after, before = null, width = 
       setTimeout(done, 5000);
     });
     await new Promise((done) => setTimeout(done, 350));
-    pen.drawImage(video, 0, 0, width, height);
+    if (video.videoWidth > soft) {
+      smallPen.drawImage(video, 0, 0, small.width, small.height);
+      pen.drawImage(small, 0, 0, width, height);
+    } else {
+      pen.drawImage(video, 0, 0, width, height);
+    }
     return pen.getImageData(0, 0, width, height).data;
   };
   const frames = async (times) => {
@@ -110,44 +133,66 @@ export async function captureBuild(video, { from, after, before = null, width = 
     return out;
   };
   const light = (data, i) => data[i * 4] * 0.3 + data[i * 4 + 1] * 0.59 + data[i * 4 + 2] * 0.11;
+  const spread = (first, last, many) => Array.from({ length: many }, (_, index) => Math.round((first + ((last - first) * index) / Math.max(1, many - 1)) * 100) / 100);
+  // A frame as a small grey picture, every eighth pixel each way, and how much of one differs from another.
+  const smallOf = (data) => {
+    const out = [];
+    for (let y = 4; y < height; y += 8) for (let x = 4; x < width; x += 8) out.push(light(data, y * width + x));
+    return out;
+  };
+  const differ = (one, other) => one.reduce((far, value, index) => far + (Math.abs(value - other[index]) > 40 ? 1 : 0), 0) / one.length;
 
   video.pause();
-  const standing = await frames(after), built = middle(standing);
-
-  // How much of a frame is unlike the track standing, looked at every eighth pixel each way.
-  const unlike = (data) => {
-    let far = 0, all = 0;
-    for (let y = 4; y < height; y += 8) {
-      for (let x = 4; x < width; x += 8) {
-        all += 1;
-        if (Math.abs(light(data, y * width + x) - light(built, y * width + x)) > 40) far += 1;
-      }
+  let standingAt = after, lapse = null, changes = [];
+  if (!standingAt) {
+    // Once a second through the chapter.
+    const looks = [];
+    for (let time = from; time <= to - 0.5; time += 1) looks.push({ time, small: smallOf(await frame(time)) });
+    const change = looks.slice(1).map((look, index) => differ(look.small, looks[index].small));
+    const calm = [...change].sort((x, y) => x - y)[change.length >> 1] ?? 0;
+    changes = change.map((value) => Math.round(value * 100));
+    // The lists going is the first second, after the chapter's own first, in which the picture
+    // changes a lot. The time-lapse begins there. (The build itself changes the picture less from
+    // second to second than that, and not evenly, so it can't be told by being busy.)
+    const fade = change.findIndex((value, index) => index >= 1 && value >= Math.max(0.07, calm * 3));
+    const begins = fade >= 0 ? looks[fade].time : from;
+    // A later second that changes a lot, after calmer ones, is something being laid over the
+    // picture. The track stands, with nothing over it, in the second before that.
+    let over = -1;
+    for (let i = Math.max(fade, 0) + 3; i < change.length && over < 0; i += 1) {
+      if (change[i] >= Math.max(0.08, Math.max(change[i - 1], change[i - 2], change[i - 3]) * 1.8)) over = i;
     }
-    return far / all;
-  };
-  // Twice a second through the start of the build. While the lists are over the picture it is
-  // much less like the track standing than it is once they have gone, and they fade out over a
-  // second or so. So the level at the very start is set against the level of the rest: when the
-  // start is well above, the time-lapse begins at the first moment that is down with the rest. A
-  // video with nothing drawn over its build shows no such step, and starts where its chapter does.
+    // With nothing laid over it, the track is taken as standing from a few seconds into the
+    // time-lapse: the build is over early, and the middle of many frames is the track as it ends up.
+    const [first, last] = over >= 0
+      ? [Math.max(looks[over].time - 1.3, begins + 3), looks[over].time - 0.2]
+      : [begins + 4.25, Math.min(to - Math.min(2, (to - from) * 0.1), begins + 34.25)];
+    lapse = { from: begins, faded: fade >= 0, over: over >= 0 ? looks[over].time : null, standing: [first, last] };
+    if (last - first >= 0.4) standingAt = spread(first, last, 15);
+    standingAt ??= fallback;
+  }
+  const standing = await frames(standingAt), built = middle(standing);
+
+  // How much of a frame is unlike the track standing.
+  const builtSmall = smallOf(built), unlike = (data) => differ(smallOf(data), builtSmall);
+  // Where the lists go: four times a second round the start of the time-lapse, or through the
+  // start of the chapter when no time-lapse was told. The biggest fall over half a second is the
+  // lists fading, when it is a big one. A video with nothing drawn over its build has none.
   const looked = [];
-  for (let time = from; time <= Math.min(from + 10, after[0] - 1); time += 0.5) looked.push({ time, unlike: unlike(await frame(time)) });
-  const level = (list) => list.map((one) => one.unlike).sort((a, b) => a - b)[list.length >> 1] ?? 0;
-  const first = level(looked.slice(0, 3)), rest = level(looked.slice(4));
-  let start = from;
-  if (looked.length >= 8 && first > rest * 1.35 && first - rest > 0.03) {
-    const down = (one) => one.unlike <= rest * 1.3;
-    const at = looked.findIndex((one, index) => index > 0 && down(one));
-    if (at > 0) {
-      start = looked[at].time;
-      // Half a step back, if the lists had already gone by then: the first pipe is up within a second.
-      const sooner = { time: start - 0.25, unlike: unlike(await frame(start - 0.25)) };
-      looked.push(sooner);
-      if (down(sooner)) start = sooner.time;
+  const [scanFrom, scanTo] = lapse ? [Math.max(from, lapse.from - 1.5), lapse.from + 2.5] : [from, Math.min(from + 10, standingAt[0] - 1)];
+  for (let time = scanFrom; time <= scanTo; time += 0.25) looked.push({ time, unlike: unlike(await frame(time)) });
+  let start = lapse ? Math.max(from, lapse.from) : from, fell = 0, faded = false;
+  for (let i = 2; i < looked.length; i += 1) {
+    const by = looked[i - 2].unlike - looked[i].unlike;
+    if (by > fell && by >= 0.03 && by >= looked[i - 2].unlike * 0.18) {
+      [start, fell, faded] = [looked[i].time, by, true];
     }
   }
-  // `before` is for telling it the moments of the bare floor outright.
-  const bare = middle(await frames(before ?? Array.from({ length: 8 }, (_, index) => start + 0.05 + index * 0.07)));
+  // The floor before any pipe is up: the half second after the lists have gone, and a few moments
+  // from while they were up, fewer than those, so that the lists are outvoted and so is the builder.
+  const justAfter = Array.from({ length: 8 }, (_, index) => Math.round((start + 0.05 + index * 0.06) * 100) / 100);
+  const earlier = faded && start - from > 1.5 ? spread(from + 0.3, start - 0.75, 5) : [];
+  const bare = middle(await frames(before ?? [...earlier, ...justAfter]));
 
   // Lights that chase and screens that play are brighter in one middle than the other by chance.
   // What holds still shows about the same in most frames of the track standing: leave out any spot
@@ -159,5 +204,5 @@ export async function captureBuild(video, { from, after, before = null, width = 
     levels.sort();
     if (levels[Math.floor(standing.length * 0.75)] - levels[Math.floor(standing.length * 0.25)] <= still) changed[i] = 1;
   }
-  return { width, height, built, changed, start, looked };
+  return { width, height, built, changed, start, looked, lapse, standingAt, changes };
 }

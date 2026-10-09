@@ -3,9 +3,15 @@
   "track": 2,
   "from": {
     "video": "https://www.youtube.com/watch?v=PqOFU-AwNvU",
-    "photos": "Two photos of the built track, posted by the series on 8 October 2026, the evening before the video."
+    "photos": "Two photos of the built track, posted by the series on 8 October 2026, the evening before the video.",
+    "parts": "The parts lists drawn over the build in the video."
   },
-  "parts": [],
+  "parts": [
+    { "name": "Start/Finish", "sections": 3 },
+    { "name": "Spacer", "sections": 1 },
+    { "name": "Lower Cube", "sections": 7 },
+    { "name": "Upper Cube and Flag", "sections": 9 }
+  ],
   "pipes": [
     [[0, 1, 0], [0, 1, 1]],
     [[0, 1, 1], [0, 1, 2]],
@@ -28,5 +34,6 @@
     [[2, 0, 0], [2, 0, 1]],
     [[1, 0, 1], [2, 0, 1]]
   ],
+  "start": { "at": [1.5, 0, 0.5], "heading": [0, 1, 0] },
   "lap": []
 }

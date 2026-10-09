@@ -18,7 +18,7 @@ const pause = (milliseconds) => new Promise((done) => setTimeout(done, milliseco
  * Gives { width, height, built, changed, picture, chapters, shot, title }, or { problem } with,
  * where they were found, the chapters, for asking the pilot which one it is.
  */
-export async function stillsOf(link, { shot = null, moments = null, quality = "large", said = () => {} } = {}) {
+export async function stillsOf(link, { shot = null, moments = null, said = () => {} } = {}) {
   const address = videoPage(link);
   if (!address) return { problem: "That isn't a link to a YouTube video. Put the link to the track's video in the box under Track video." };
   // The window is big so that the player asks for a sharp picture, and has a memory of its own
@@ -71,13 +71,15 @@ export async function stillsOf(link, { shot = null, moments = null, quality = "l
       const wait = (ms) => new Promise((done) => setTimeout(done, ms));
       const video = document.querySelector("video"), player = document.getElementById("movie_player");
       // The video at 480 lines, and a moment for the player to change to it. Sharper is worse here:
-      // the search for pipes was worked out on a picture that soft, where a pipe is a few pixels
-      // wide. On Track 1 it finds 11 of the 14 pipes at 480 lines and 10 at 720 or 1080, and only
-      // at 480 is the whole track among the ways it can see the picture.
-      player?.setPlaybackQualityRange?.(${JSON.stringify(quality)}, ${JSON.stringify(quality)});
+      // the search for pipes was worked out on a picture that soft. On Track 1 it finds 11 of the
+      // 14 pipes at 480 lines, with the whole track among its other readings, and 10 at 720 or
+      // 1080. Not every video has 480 lines: Track 2's came in 360 and 720. Then it is 720, and
+      // the frames are made soft (see captureBuild), which is not quite as good.
+      const sharpness = (player?.getAvailableQualityLevels?.() ?? []).includes("large") ? "large" : "hd720";
+      player?.setPlaybackQualityRange?.(sharpness, sharpness);
       video.currentTime = ${JSON.stringify(where.from)};
       await wait(3500);
-      const found = await captureBuild(video, ${JSON.stringify({ from: where.from, after: moments?.after ?? standingMoments(where), before: moments?.before ?? null })});
+      const found = await captureBuild(video, ${JSON.stringify({ from: where.from, to: where.to, after: moments?.after ?? null, before: moments?.before ?? null, fallback: standingMoments(where) })});
       // Bytes cross to the app as text, a piece at a time.
       const text = (bytes) => {
         let out = "";
@@ -92,11 +94,11 @@ export async function stillsOf(link, { shot = null, moments = null, quality = "l
       whole.height = found.height;
       whole.getContext("2d").putImageData(new ImageData(found.built, found.width, found.height), 0, 0);
       canvas.getContext("2d").drawImage(whole, 0, 0, canvas.width, canvas.height);
-      return { width: found.width, height: found.height, built: text(found.built), changed: text(found.changed), picture: canvas.toDataURL("image/jpeg", 0.82), sharp: [video.videoWidth, video.videoHeight], start: found.start, looked: found.looked };
+      return { width: found.width, height: found.height, built: text(found.built), changed: text(found.changed), picture: canvas.toDataURL("image/jpeg", 0.82), sharp: [video.videoWidth, video.videoHeight], start: found.start, looked: found.looked, lapse: found.lapse, standingAt: found.standingAt, changes: found.changes };
     `);
     return {
       width: stills.width, height: stills.height, built: Buffer.from(stills.built, "base64"), changed: Buffer.from(stills.changed, "base64"),
-      picture: stills.picture, sharp: stills.sharp, start: stills.start, looked: stills.looked, chapters, shot: where, title: opened.title,
+      picture: stills.picture, sharp: stills.sharp, start: stills.start, looked: stills.looked, lapse: stills.lapse, standingAt: stills.standingAt, changes: stills.changes, chapters, shot: where, title: opened.title,
     };
   } catch (error) {
     return { problem: `The video couldn't be read: ${error.message}` };

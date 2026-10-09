@@ -2,6 +2,11 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.13.1 (9 October 2026)
+
+- Reading a track from its video finds its own way round the video. It works out where the parts lists fade and the build starts, and where anything is laid over the picture afterwards, and looks at the track in between. On RaceGOW6 Track 1 it now finds all 14 sections without being told how many there are. A video that shows a track straight on, as Track 2's does, hides the sections that run away from the camera, and it finds only some of them there: check what it finds against the picture it shows you, and put the rest in by hand.
+- RaceGOW6 Track 2 has its parts list and its start gate, from the series' video. Its pipes were right already: they add up to the video's parts lists, part by part.
+
 ## v0.13.0 (9 October 2026)
 
 - FPV Hangar for Windows. The app now runs on Windows 10 and 11 as well as on a Mac, and it is the same app on both: the same screens, the same videos, the same library folder. On Windows it comes as a folder you unzip and open, and it updates itself from there.
