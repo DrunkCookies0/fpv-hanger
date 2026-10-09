@@ -9,13 +9,14 @@
 # The release workflow on GitHub runs this and attaches the first three to the release. On your own
 # Mac it is a way to try a package first. ./publish.sh is what starts a release.
 #
-# It runs on an Apple silicon Mac, and needs `npm ci` to have been run in Hangar/ first.
+# It runs on an Apple silicon Mac, and needs `npm ci` and `npx install-electron` to have been run
+# in Hangar/ first.
 set -e
 cd "${0:A:h}"
 VERSION="$(< VERSION)"
 grep -q "^## v$VERSION " CHANGELOG.md || { echo "CHANGELOG.md has no entry for v$VERSION."; exit 1 }
 [[ "$(uname -m)" == arm64 ]] || { echo "The Mac app is built for Apple silicon, on Apple silicon."; exit 1 }
-[[ -d Hangar/node_modules/electron/dist/Electron.app ]] || { echo "Electron isn't here yet. Run npm ci in Hangar first."; exit 1 }
+[[ -d Hangar/node_modules/electron/dist/Electron.app ]] || { echo "Electron isn't here yet. Run npm ci and then npx install-electron in Hangar first."; exit 1 }
 Hangar/tools/fetch.sh
 
 WORK="$(mktemp -d)"

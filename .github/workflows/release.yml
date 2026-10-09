@@ -26,8 +26,10 @@ jobs:
 
       - name: Fetch what the app is built on
         working-directory: Hangar
+        # Electron's own program isn't fetched by npm ci: it comes the first time it is asked for.
         run: |
           npm ci
+          npx install-electron
           tools/fetch.sh
 
       - name: Test

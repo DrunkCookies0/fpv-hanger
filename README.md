@@ -35,7 +35,8 @@ The app is in `Hangar/`. It is [Electron](https://www.electronjs.org) with plain
 
 ```sh
 cd Hangar
-npm ci              # Electron, for the computer you are on
+npm ci              # Electron's package
+npx install-electron  # and its program, for the computer you are on
 tools/fetch.sh      # Electron for Windows, and FFmpeg for both: fetched and checked, not kept here
 npx electron .      # the app, run from its source
 npm test            # its tests
