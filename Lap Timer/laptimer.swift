@@ -12,7 +12,7 @@ import CoreImage
 import Foundation
 
 /// The same number as the VERSION file and the app. package.sh refuses to package if they differ.
-let toolVersion = "0.12.0"
+let toolVersion = "0.12.1"
 
 // MARK: - Utilities
 
@@ -279,10 +279,10 @@ final class Panel {
     // laps, known from the start because the run is over by the time its video is made.
     /// The judged laps. All of them, when the run has no more laps than are judged.
     private let judged: Range<Int>
-    /// The rest, shown small underneath, how many of them go across, and how many there is room for.
+    /// The rest, shown small underneath, three to a row, and how many there is room for.
     /// When there are more than that, the ones shown follow the lap being flown, as the corner box's list does.
     private let others: [Int]
-    private let otherColumns: Int
+    private static let otherColumns = 3
     private let otherPlaces: Int
     /// How far the wide box is squeezed or stretched from its natural height to suit the room it has.
     private let fit: CGFloat
@@ -294,11 +294,9 @@ final class Panel {
     private let otherValueFont: CTFont
     /// The wide box's parts at their natural height: the judged laps' time, those laps, and a row of the others.
     private static let wideHead: CGFloat = 132, wideJudged: CGFloat = 96, wideOtherRow: CGFloat = 42, wideOtherPad: CGFloat = 8
-    /// How wide the wide box is, in reference points, and how far in from each side of an upright
-    /// video's frame it sits, in pixels: the same as the heading above the picture. Its scale is the
-    /// width that leaves over this.
-    static let wideWidth: CGFloat = 688
-    static let wideMargin: CGFloat = 40
+    /// How wide the wide box is, in reference points. Its scale is whatever makes that the width
+    /// `Upright` gives it.
+    static let wideWidth: CGFloat = 600
 
     /// `title` (pilot name) and `badge` (such as an ID) share a heading row, under the event and track strip.
     /// `room` is for the wide box: the height there is for it, in reference points. It grows a little
@@ -321,7 +319,6 @@ final class Panel {
             ? CGColor(srgbRed: 0.05, green: 0.05, blue: 0.06, alpha: 1)
             : CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
         var squeeze: CGFloat = 1
-        var across = 3
         var places = 0
         switch layout {
         case .stack:
@@ -348,8 +345,7 @@ final class Panel {
             let window = first..<(first + min(race.window, laps))
             judged = window
             let rest = (0..<laps).filter { !window.contains($0) }
-            across = rest.count > 6 ? 4 : 3
-            var otherRows = (rest.count + across - 1) / across
+            var otherRows = (rest.count + Panel.otherColumns - 1) / Panel.otherColumns
             func natural(_ rows: Int) -> CGFloat {
                 Panel.wideHead + Panel.wideJudged + (rows > 0 ? CGFloat(rows) * Panel.wideOtherRow + 2 * Panel.wideOtherPad : 0)
             }
@@ -358,12 +354,11 @@ final class Panel {
                 squeeze = min(1.1, max(0.8, room / natural(otherRows)))
             }
             others = rest
-            places = min(rest.count, otherRows * across)
+            places = min(rest.count, otherRows * Panel.otherColumns)
             rows = window.count
             height = natural(otherRows) * squeeze
         }
         fit = squeeze
-        otherColumns = across
         otherPlaces = places
         wideLabelFont = NSFont.systemFont(ofSize: 17 * squeeze, weight: .heavy) as CTFont
         wideBigFont = NSFont.monospacedDigitSystemFont(ofSize: 88 * squeeze, weight: .heavy) as CTFont
@@ -371,7 +366,7 @@ final class Panel {
         // Three times side by side are as big as they get. More than three share the same width.
         judgedValueFont = NSFont.monospacedDigitSystemFont(ofSize: 40 * squeeze * min(1, 3 / CGFloat(max(judged.count, 1))), weight: .bold) as CTFont
         otherLabelFont = NSFont.systemFont(ofSize: 13 * squeeze, weight: .bold) as CTFont
-        otherValueFont = NSFont.monospacedDigitSystemFont(ofSize: 22 * squeeze * (across > 3 ? 0.85 : 1), weight: .bold) as CTFont
+        otherValueFont = NSFont.monospacedDigitSystemFont(ofSize: 22 * squeeze, weight: .bold) as CTFont
         pixelWidth = Int((width * scale).rounded(.up))
         pixelHeight = Int((height * scale).rounded(.up))
         guard let context = CGContext(
@@ -628,13 +623,13 @@ final class Panel {
         // The other laps, smaller. With more of them than places, the places follow the lap being flown.
         guard otherPlaces > 0 else { return }
         hairline(at: y)
-        let otherCell = width / CGFloat(otherColumns)
+        let otherCell = width / CGFloat(Panel.otherColumns)
         let rowHeight = Panel.wideOtherRow * fit
         y += Panel.wideOtherPad * fit
         let reached = others.filter { $0 <= done }.count
         let from = min(max(reached - otherPlaces, 0), others.count - otherPlaces)
         for (index, lap) in others[from..<(from + otherPlaces)].enumerated() {
-            let x = CGFloat(index % otherColumns) * otherCell, top = y + CGFloat(index / otherColumns) * rowHeight
+            let x = CGFloat(index % Panel.otherColumns) * otherCell, top = y + CGFloat(index / Panel.otherColumns) * rowHeight
             let complete = lap < done, current = lap == done && started
             let flash = complete ? 1 - age(ofBound: lap + 1) : 0
             if flash > 0 {
@@ -661,9 +656,36 @@ final class Panel {
     func image() -> CGImage { context.makeImage()! }
 }
 
+/// Where things go in an upright video, in pixels of its 1080 by 1920 frame.
+///
+/// The apps it is watched in fill a tall phone's screen with it, which cuts a strip off each side,
+/// and they lay their own buttons over it: a bar across the top, a column down the right-hand side
+/// from the foot of the picture, and the caption across the bottom. Everything written on the video
+/// keeps clear of all of those. Measured on YouTube Shorts on a large iPhone: 54 pixels cut from
+/// each side, the top bar down to 209, the column from 918 across and 1130 down, the caption from 1572.
+/// A smaller iPhone shows the same buttons bigger against the video: its bar comes down to about 232,
+/// its column starts at about 912 and higher up, and its caption at about 1536.
+enum Upright {
+    /// How far in from each side the words, the logo and the box stay.
+    static let side: CGFloat = 90
+    /// Where the box ends at the right, short of the apps' column of buttons.
+    static let boxRight: CGFloat = 900
+    /// The top of the picture. The heading grows upwards from `headingGap` above it, and with
+    /// everything in it still starts below the apps' bar.
+    static let pictureTop: CGFloat = 468
+    static let headingGap: CGFloat = 24
+    /// Between the foot of the picture and the box.
+    static let boxGap: CGFloat = 26
+    /// The bottom fifth is left clear for the apps' captions.
+    static let captionsFrom: CGFloat = 1536
+    /// The box runs from the left margin to the column of buttons.
+    static let boxScale = (boxRight - side) / Panel.wideWidth
+}
+
 /// Pilot name and ID as a banner for the top of an upright video, `width` pixels wide, with an
 /// optional line above them for the event and track. A logo, when there is one, sits at the right
-/// of it, as big as the banner's height and the room beside the words allow.
+/// of it, as big as the banner's height and the room beside the words allow. Both keep
+/// `Upright.side` in from the edges.
 func uprightHeading(title: String?, badge: String?, eyebrow: String?, accent: [CGFloat], width: Int, logo: CGImage? = nil) -> CGImage? {
     guard title != nil || badge != nil || eyebrow != nil || logo != nil else { return nil }
     let lift = eyebrow == nil ? 0 : 50
@@ -692,21 +714,22 @@ func uprightHeading(title: String?, badge: String?, eyebrow: String?, accent: [C
     context.setShadow(offset: CGSize(width: 0, height: -3), blur: 14, color: CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.6))
     if let eyebrow {
         put(eyebrow.uppercased(), font: NSFont.systemFont(ofSize: 30, weight: .heavy) as CTFont,
-            color: CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.85), kern: 4, x: 43, centerY: 24)
+            color: CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.85), kern: 4, x: Upright.side + 3, centerY: 24)
     }
     if let title {
         put(title, font: NSFont.systemFont(ofSize: 76, weight: .heavy) as CTFont,
-            color: CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1), kern: 0, x: 40, centerY: CGFloat(lift) + (badge == nil ? 75 : 46))
+            color: CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1), kern: 0, x: Upright.side, centerY: CGFloat(lift) + (badge == nil ? 75 : 46))
     }
     if let badge {
         put(badge.uppercased(), font: NSFont.systemFont(ofSize: 30, weight: .heavy) as CTFont,
-            color: CGColor(srgbRed: accent[0], green: accent[1], blue: accent[2], alpha: 1), kern: 3, x: 43, centerY: CGFloat(lift) + (title == nil ? 75 : 120))
+            color: CGColor(srgbRed: accent[0], green: accent[1], blue: accent[2], alpha: 1), kern: 3, x: Upright.side + 3, centerY: CGFloat(lift) + (title == nil ? 75 : 120))
     }
     if let logo, logo.width > 0, logo.height > 0 {
         // At the right, the same distance in from the edge as the words are from theirs. It is left out
         // when a long name leaves too little room for it to be made out.
-        let margin: CGFloat = 40
-        let room = CGSize(width: min(420, CGFloat(width) - margin - (wordsEnd > 0 ? wordsEnd + 36 : margin)), height: CGFloat(height) - 6)
+        let margin = Upright.side
+        // No taller than the words beside it, so its top is no nearer the apps' bar than theirs.
+        let room = CGSize(width: min(420, CGFloat(width) - margin - (wordsEnd > 0 ? wordsEnd + 36 : margin)), height: CGFloat(height) - 24)
         let fit = min(room.width / CGFloat(logo.width), room.height / CGFloat(logo.height))
         let size = CGSize(width: CGFloat(logo.width) * fit, height: CGFloat(logo.height) * fit)
         if size.width >= 120 {
@@ -1614,20 +1637,18 @@ func writeFinishedVideo(shape: VideoShape, clip: ReadableClip, race: Race, from 
     }
     guard let pool = adaptor.pixelBufferPool else { return "could not allocate video frames" }
 
-    // Upright, top-down: heading, picture, timer. The bottom fifth is left clear for the apps' own captions.
-    // The timer's box is nearly the width of the frame, so the apps' buttons sit over its right-hand end.
+    // Upright, top-down: heading, picture, timer, each where `Upright` puts it, clear of the apps' buttons.
     // Landscape: the whole frame with the timer box in its corner, the way the Premiere overlay sits.
     // The banner grows upwards, so the picture stays put whatever is in it.
-    let pictureTop: CGFloat = 409
-    let captionsFrom = canvas.height * 0.8
-    // The box sits in the middle, as far in from each side as the heading's words and logo are.
-    let boxScale = (canvas.width - 2 * Panel.wideMargin) / Panel.wideWidth
+    let pictureTop = Upright.pictureTop
+    let captionsFrom = Upright.captionsFrom
+    let boxScale = Upright.boxScale
     let eyebrow = [event, track].compactMap { $0 }.joined(separator: "  ·  ")
     let banner = shape == .landscape ? nil
         : uprightHeading(title: title, badge: badge, eyebrow: eyebrow.isEmpty ? nil : eyebrow, accent: accent, width: Int(canvas.width),
                          logo: loadPicture(options.logoPath))
     let heading = banner.map { image in
-        CIImage(cgImage: image).transformed(by: CGAffineTransform(translationX: 0, y: canvas.height - pictureTop + 24))
+        CIImage(cgImage: image).transformed(by: CGAffineTransform(translationX: 0, y: canvas.height - pictureTop + Upright.headingGap))
     }
     // The upright video's box is made when the first frame shows how tall the picture is: it takes
     // the room between the picture and the captions.
@@ -1683,14 +1704,14 @@ func writeFinishedVideo(shape: VideoShape, clip: ReadableClip, race: Race, from 
                 .transformed(by: CGAffineTransform(scaleX: 4, y: 4))
                 .applyingFilter("CIColorMatrix", parameters: dim)
 
-            let panelTop = pictureTop + pictureHeight + 26
+            let panelTop = pictureTop + pictureHeight + Upright.boxGap
             let box = panel ?? Panel(race: race, scale: boxScale, accent: accent, title: nil, maxRows: 3, layout: .wide,
                                      room: (captionsFrom - panelTop) / boxScale)
             panel = box
             box.draw(at: time.seconds + clip.offset)
             image = foreground.composited(over: background)
             image = CIImage(cgImage: box.image())
-                .transformed(by: CGAffineTransform(translationX: Panel.wideMargin, y: canvas.height - panelTop - CGFloat(box.pixelHeight)))
+                .transformed(by: CGAffineTransform(translationX: Upright.side, y: canvas.height - panelTop - CGFloat(box.pixelHeight)))
                 .composited(over: image)
             if let heading { image = heading.composited(over: image) }
             }
@@ -3301,7 +3322,7 @@ func commandLine() {
         guard let seconds = markerSeconds(stillTime, fps: jobs[0].run.fps) else { fail("--still needs a time.") }
         let background = options.stillBackground.flatMap(parseHexColor)
         if options.makeUpright {
-            let box = Panel(race: jobs[0].run.race, scale: (1080 - 2 * Panel.wideMargin) / Panel.wideWidth, accent: accentRGB, title: nil, maxRows: 3, layout: .wide,
+            let box = Panel(race: jobs[0].run.race, scale: Upright.boxScale, accent: accentRGB, title: nil, maxRows: 3, layout: .wide,
                             room: options.stillRoom.map { CGFloat($0) })
             writeStill(to: URL(fileURLWithPath: stillPath), panel: box,
                        placement: Placement(frameWidth: box.pixelWidth, frameHeight: box.pixelHeight, x: 0, y: 0), seconds: seconds, background: background)
