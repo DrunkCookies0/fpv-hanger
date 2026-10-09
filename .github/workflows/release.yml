@@ -44,6 +44,8 @@ jobs:
           fi
           ./package.sh > package.log 2>&1 || {
             # Show the end of the log as the error, so it can be read without opening the run.
+            # The whole of it is in the step's own log, for when the end isn't where it went wrong.
+            cat package.log
             echo "::error::$(tail -n 60 package.log | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
             exit 1
           }
