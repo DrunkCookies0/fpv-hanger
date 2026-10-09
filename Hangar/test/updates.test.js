@@ -4,10 +4,10 @@ import assert from "node:assert/strict";
 import { releaseFor, isNewer, windowsSwap } from "../shared/updates.js";
 
 const sum = "0123456789abcdef".repeat(4);
-const told = { version: "0.13.0", file: "FPV-Hangar-v0.13.0.zip", sha256: sum.toUpperCase(), notes: "- Something new", windows: { file: "FPV-Hangar-v0.13.0-win64.zip", sha256: sum } };
+const told = { version: "0.13.0", file: "FPV-Hangar-v0.13.0-mac.zip", sha256: sum.toUpperCase(), notes: "- Something new", windows: { file: "FPV-Hangar-v0.13.0-win64.zip", sha256: sum } };
 
 test("each kind of computer has its own archive in the one file", () => {
-  assert.deepEqual(releaseFor(told, "darwin"), { version: "0.13.0", file: "FPV-Hangar-v0.13.0.zip", sha256: sum, notes: "- Something new" });
+  assert.deepEqual(releaseFor(told, "darwin"), { version: "0.13.0", file: "FPV-Hangar-v0.13.0-mac.zip", sha256: sum, notes: "- Something new" });
   assert.deepEqual(releaseFor(told, "win32"), { version: "0.13.0", file: "FPV-Hangar-v0.13.0-win64.zip", sha256: sum, notes: "- Something new" });
   assert.equal(releaseFor(told, "linux"), null);
   // A release from before there was a Windows app has nothing for Windows, and says so by having nothing.

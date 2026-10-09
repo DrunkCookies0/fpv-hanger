@@ -3,7 +3,7 @@
 // The file is latest.json. The Mac app before this one reads `version`, `file`, `sha256` and
 // `notes` from it, so those stay what they were: the Mac's archive. Windows has its own beside them.
 //
-//   { "version": "0.13.0", "file": "FPV-Hangar-v0.13.0.zip", "sha256": "…", "notes": "…",
+//   { "version": "0.13.0", "file": "FPV-Hangar-v0.13.0-mac.zip", "sha256": "…", "notes": "…",
 //     "windows": { "file": "FPV-Hangar-v0.13.0-win64.zip", "sha256": "…" } }
 
 const isVersion = (text) => typeof text === "string" && /^\d+(\.\d+){1,3}$/.test(text);

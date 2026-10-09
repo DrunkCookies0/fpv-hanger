@@ -63,5 +63,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="$(cat VERSION)"
-          gh release create "v$VERSION" "Releases/FPV-Hangar-v$VERSION.zip" "Releases/FPV-Hangar-v$VERSION-win64.zip" Releases/latest.json \
+          gh release create "v$VERSION" "Releases/FPV-Hangar-v$VERSION-mac.zip" "Releases/FPV-Hangar-v$VERSION-win64.zip" Releases/latest.json \
             --title "FPV Hangar v$VERSION" --notes-file Releases/notes.md

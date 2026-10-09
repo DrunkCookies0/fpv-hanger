@@ -2,7 +2,7 @@
 # Packages the app for sending to someone: for a Mac and for Windows.
 #
 # Checks both, and writes into Releases/:
-#   FPV-Hangar-v<version>.zip         the Mac app and its read-me
+#   FPV-Hangar-v<version>-mac.zip     the Mac app and its read-me
 #   FPV-Hangar-v<version>-win64.zip   the Windows app and its read-me
 #   latest.json                       what the app's update check reads
 #   notes.md                          the release's description
@@ -62,7 +62,8 @@ if [[ -z "$PACKAGE_UNTRIED" ]]; then
 fi
 
 mkdir -p Releases
-MAC="FPV-Hangar-v$VERSION.zip"
+# Each says in its name which computer it is for. The app finds its own by the name latest.json gives.
+MAC="FPV-Hangar-v$VERSION-mac.zip"
 WINDOWS="FPV-Hangar-v$VERSION-win64.zip"
 rm -f "Releases/$MAC" "Releases/$WINDOWS"
 ditto -c -k --sequesterRsrc --keepParent "$STAGE" "Releases/$MAC"
