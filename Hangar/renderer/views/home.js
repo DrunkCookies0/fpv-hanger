@@ -5,6 +5,7 @@ import { h, icon, label, secondary, plain, comingSoonBadge, testCopyBadge } from
 import { suites, tools } from "../words.js";
 import { openLink } from "../actions.js";
 import { showNote } from "./notes.js";
+import { openTool, showProgram, programStatus } from "./tool.js";
 
 /** Says a newer version is ready. Pressing it goes to where it is installed. */
 export function updatePill() {
@@ -17,6 +18,9 @@ export function updatePill() {
 function actionFor(tool) {
   if (tool === "videoCreator") return openVideoCreator;
   if (tool === "leaderboards") return () => open({ name: "leaderboard" });
+  // Another project's own app, shown in the window, or its program, which the app fetches.
+  if (tool === "betaflight" || tool === "elrsFlasher") return () => openTool(tool);
+  if (tool === "elrsConfigurator") return () => showProgram(tool);
   return null;
 }
 
@@ -40,6 +44,8 @@ function statusOf(tool) {
     const sent = tracks.filter((track) => track.submissions > 0).length;
     return sent === 0 ? "Nothing submitted yet" : `${sent} track${sent === 1 ? "" : "s"} submitted`;
   }
+  if (tool === "betaflight" || tool === "elrsFlasher") return "Always their newest";
+  if (tool === "elrsConfigurator") return programStatus(tool);
   return null;
 }
 

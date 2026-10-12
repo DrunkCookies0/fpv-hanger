@@ -19,6 +19,8 @@ import { readTrack } from "../shared/trackview.js";
 import { readBoards } from "../shared/leaderboard.js";
 import { stillsOf, pipesIn } from "./trackvideo.js";
 import { latest, install, checkIsDue } from "./updates.js";
+import { makeTools } from "./tools.js";
+import { makePrograms } from "./components.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const mac = process.platform === "darwin";
@@ -103,6 +105,10 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
   const isTestCopy = () => Boolean(process.defaultApp) || /test/i.test(app.getName());
   /** The entry form, while it is open in the window to be checked and sent. */
   let formView = null;
+  /** Other projects' tools: the ones shown inside the window, and the program that is fetched and kept up to date. */
+  // A copy that shows no window is trying itself out: it opens a tool's place without calling on
+  // the project's site, unless it was asked to (`--live`).
+  const outside = makeTools({ window, tell, still: quiet && !process.argv.includes("--live") }), kept = makePrograms({ tell, quiet });
   let greeted = false;
   const vlc = findVLC();
   /** Each track's runs as last timed, so the lists and tiles have their times without timing again. */
@@ -244,6 +250,7 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
         showsTimer: config().showsTimer !== false,
         update,
         automaticUpdates: config().noAutomaticUpdates !== true,
+        programs: kept.programsNow(),
         job,
         events: library.events.map((event) => {
           const next = library.nextSeasonTrack(event.folder);
@@ -756,7 +763,15 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
     /** The check as the app opens: once a day at most, and not at all when it has been switched off. */
     checkForUpdatesIfDue() {
       if (!quiet && !isTestCopy() && checkIsDue()) api.checkForUpdates({ quietly: true });
+      // The programs the app keeps up to date are looked for on the same round, a test copy's too:
+      // they are other projects' programs, not this app.
+      for (const id of kept.programsAreDue()) kept.checkProgram(id).then(() => tell("changed"));
     },
+
+    // Other projects' tools.
+
+    ...outside,
+    ...kept,
 
     /** Replaces this copy of the app with the newer one, and starts it. */
     async installUpdate() {

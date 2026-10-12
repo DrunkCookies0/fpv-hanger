@@ -2,6 +2,14 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.15.0 (12 October 2026)
+
+- Betaflight, in the Hangar. Under **Firmware & setup** on the first screen, **Betaflight** opens Betaflight's own app inside FPV Hangar: plug a flight controller in to set it up, tune it and flash it. It comes from Betaflight's own site, so it is always their newest release, and it works without a connection once it has been opened.
+- The ExpressLRS Web Flasher, in the Hangar. ExpressLRS's own flasher, the same way: update a transmitter module, a receiver or a backpack over USB or through the flight controller.
+- The ExpressLRS Configurator, kept up to date for you. Its tile says which version is on your computer and tells you when ExpressLRS brings out a newer one. **Update** fetches it from ExpressLRS's own Releases page and checks it against the checksum published there. On a Mac it then swaps it in, and the copy you had goes to the Trash. On Windows it starts ExpressLRS's own installer. **Open** starts the Configurator, which stays a program with a window of its own.
+- Choosing a device. When one of these tools asks which serial port, USB device or Bluetooth device to use, FPV Hangar shows you the list, and anything you plug in while it is up joins it. On a Mac, the first time one of them looks for devices, macOS asks whether FPV Hangar may use Bluetooth.
+- These three tools are Betaflight's and ExpressLRS's, not FPV Hangar's. A link out of one of them, to its documentation or its community, opens in your own browser.
+
 ## v0.14.0 (12 October 2026)
 
 - RaceGOW6 Track 2 has its lap. Open **Track in 3D** on Track 2 and it is flown as the series' video flies it: through the start gate and round the back, back through the bottom of the cube, up and sideways through the top, round the pole and in through the roof, sideways through the bottom, up and back through the top, then round and over the start gate into the next lap.

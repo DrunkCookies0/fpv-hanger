@@ -54,6 +54,18 @@ export const tools = {
     title: "Upload", icon: "upload", soon: comingSoon.upload,
     summary: "Send a finished video to YouTube, TikTok and Instagram from here.",
   },
+  betaflight: {
+    title: "Betaflight", icon: "chip", soon: null,
+    summary: "Betaflight's own app, here in the Hangar: plug a flight controller in to set it up, tune it and flash it. It is always their newest release.",
+  },
+  elrsFlasher: {
+    title: "ExpressLRS Web Flasher", icon: "bolt", soon: null,
+    summary: "ExpressLRS's own flasher, here in the Hangar: update a transmitter module, a receiver or a backpack over USB or through the flight controller.",
+  },
+  elrsConfigurator: {
+    title: "ExpressLRS Configurator", icon: "antenna", soon: null,
+    summary: "The full Configurator, fetched and kept up to date for you: flashing over WiFi, and building firmware yourself. It opens in a window of its own.",
+  },
 };
 
 /** The first screen lays the tools out by suite: what a set of tools is for. */
@@ -63,6 +75,12 @@ export const suites = [
     summary: "The whoop racing series judged from video. One entry for each track: your fastest three laps in a row.",
     tools: ["videoCreator", "leaderboards"],
     links: [["racegow.com", "home"], ["Tracks", "tracks"], ["Submissions", "submissions"], ["Leaderboards", "leaderboards"]].map(([title, page]) => ({ title, address: `https://www.racegow.com/${page}` })),
+  },
+  {
+    title: "Firmware & setup",
+    summary: "The flight controller's and the radio link's own tools. They are Betaflight's and ExpressLRS's, not FPV Hangar's: open source projects, each kept current from its own site.",
+    tools: ["betaflight", "elrsFlasher", "elrsConfigurator"],
+    links: [{ title: "betaflight.com", address: "https://betaflight.com/" }, { title: "expresslrs.org", address: "https://www.expresslrs.org/" }],
   },
   { title: "Any footage", summary: "For flying that isn't part of a series.", tools: ["anyFootage", "upload"], links: [] },
 ];
@@ -91,6 +109,16 @@ export const readMeFor = (mac) => ({
       ],
     },
     {
+      title: "Betaflight and ExpressLRS",
+      items: [
+        ["paragraph", "Under Firmware & setup on the first screen are three tools that are not FPV Hangar's own. They belong to the Betaflight and ExpressLRS projects, which are open source, and FPV Hangar only brings them to you."],
+        ["point", "Betaflight and the ExpressLRS Web Flasher open inside the app, from each project's own site. They are always that project's newest release, and they work without a connection once they have been opened."],
+        ["point", "When one of them asks which serial port, USB device or Bluetooth device to use, the app shows you the list to choose from."],
+        ["point", `The ExpressLRS Configurator is a program of its own. The app fetches it from ExpressLRS's Releases page, checks it against the checksum published there, opens it, and tells you when a newer one is out.${mac ? " It goes in your Applications folder, and updating it sends the copy you had to the Trash." : " On Windows the app starts ExpressLRS's own installer, and you follow that through."}`],
+        ...(mac ? [["point", "The first time one of them looks for devices, macOS asks whether FPV Hangar may use Bluetooth. Say yes if you connect to anything that way. USB works either way."]] : []),
+      ],
+    },
+    {
       title: "Coming soon", soon: true,
       items: [["paragraph", 'These are marked "Coming soon" in the app and do nothing yet:'], ...Object.values(comingSoon).map((one) => ["point", one.title])],
     },
@@ -101,7 +129,7 @@ export const readMeFor = (mac) => ({
         ["point", "Lap times are as exact as your markers: one video frame, which is about 0.017 seconds at 60 frames a second."],
         ["point", "It has been used most with HDZero recordings (.ts). An .mp4 recording has been tested once. Other formats have not been tried."],
         ["point", `If you fly ${season}, its tracks appear by themselves: each one on the day it opens, with its deadline and, once the series posts it, its entry form. Every track has a form of its own.`],
-        ["point", `The app goes online for these things only: to read your Google Form, to check for a newer version, to read what the series publishes if you say you fly ${season} (its pilot list, its schedule, its entry forms and its leaderboards), and to watch a track's video on YouTube when you ask it to read the track out of it.`],
+        ["point", `The app goes online for these things only: to read your Google Form, to check for a newer version, to read what the series publishes if you say you fly ${season} (its pilot list, its schedule, its entry forms and its leaderboards), to watch a track's video on YouTube when you ask it to read the track out of it, to open Betaflight's app and the ExpressLRS flasher from their own sites when you open them (what those tools then send is theirs to say), and to look at ExpressLRS's Releases page for a newer Configurator, once a day if you have it and whenever you open its tile.`],
         ["point", "It never sends your entry for you. Nothing goes to RaceGOW until you press Submit on the form."],
         ["paragraph", "Something not working? Tell whoever sent you this."],
       ],

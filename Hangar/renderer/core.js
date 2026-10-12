@@ -45,6 +45,8 @@ export const app = {
   dropping: false,
   /** The marker editor, while a clip is open in it. */
   editor: null,
+  /** Another project's own tool, while one is open in the window. */
+  tool: null,
   /** The season's leaderboards as last read: { read, tabs, problem, me }. Null until they have been asked for. */
   boards: null,
   /** True once they have been asked for, and while they are being read. */

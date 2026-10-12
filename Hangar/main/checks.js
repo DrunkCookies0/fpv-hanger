@@ -9,15 +9,20 @@
 //   form     opens the first track's real entry form, filled in with made-up answers, and reads
 //            back what it then holds. Nothing is sent. This is how to tell whether Google has
 //            changed its page.
+//   outside  other projects' tools: one opens over its place in the window, a list of devices is
+//            chosen from, and a made-up release of the program the app keeps up to date is fetched,
+//            checked and put in place, all in a folder of its own. With `--live` it also opens
+//            Betaflight's app and the ExpressLRS flasher from their own sites, which needs the
+//            network, and reads that each arrived. No device is asked for or touched.
 
 import { app } from "electron";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync, appendFileSync, copyFileSync, cpSync, createReadStream, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync, appendFileSync, copyFileSync, cpSync, createReadStream, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { EOL, arch, cpus, release, tmpdir, totalmem, version as systemVersion } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { argument, logFile, version } from "./paths.js";
+import { argument, config, setConfig, logFile, version } from "./paths.js";
 import { install, thisCopy, whatTheOldAppKept } from "./updates.js";
 import { markerFile, FrameRate } from "../shared/timing.js";
 
@@ -40,7 +45,7 @@ function say(ok, what, detail = "") {
 }
 
 export async function run(which, tools) {
-  const checks = { editor, video, pages, form, bookends, trackview, trackvideo, update, updating, carryover, everything };
+  const checks = { editor, video, pages, form, bookends, trackview, trackvideo, outside, update, updating, carryover, everything };
   if (report) writeFileSync(report, "");
   if (!checks[which]) {
     console.error(`There is no check called ${which}. There are: ${Object.keys(checks).join(", ")}.`);
@@ -423,6 +428,152 @@ async function trackview(tools) {
 }
 
 /**
+ * Other projects' tools. The ones shown inside the window: that one opens where the page says, and
+ * that a list of devices is put up, kept up to date, chosen from and cancelled. No device is asked
+ * for: the lists are made up, and put up the way a page asking would put them up. Then the program
+ * the app fetches and keeps up to date, on a Mac: a made-up release in a folder of its own.
+ */
+async function outside(tools) {
+  const { api } = tools;
+  const { js, errors } = await page(tools);
+  const mac = process.platform === "darwin";
+  await js(`window.hangar_.app.editor?.close(); await window.hangar_.app.trackView?.close({ sure: true }); await window.hangar_.app.tool?.close(); await window.showForSnapshot("home")`);
+  const tiles = await js(`return ["betaflight", "elrsFlasher", "elrsConfigurator"].map((name) => { const tile = document.querySelector('[data-probe="tile ' + name + '"]'); return tile ? !tile.disabled : null; })`);
+  say(tiles.every((there) => there === true), "the first screen has Betaflight, the ExpressLRS flasher and the ExpressLRS Configurator to open", JSON.stringify(tiles));
+
+  // A tool opens over its place on the page. Where it is put is what is looked at, not what it loads.
+  try {
+    await js(`document.querySelector('[data-probe="tile betaflight"]').click()`);
+    await pause(500);
+    const frame = await js(`return (() => { const at = document.querySelector(".tool-frame")?.getBoundingClientRect(); return at && { x: Math.round(at.left), y: Math.round(at.top), width: Math.round(at.width), height: Math.round(at.height) }; })()`);
+    let open = api.toolIsOpen();
+    say(open?.id === "betaflight" && Boolean(frame) && JSON.stringify(open.place) === JSON.stringify(frame) && open.shown && frame.width > 600 && frame.height > 400, "Betaflight opens over its place in the window", JSON.stringify(open?.place));
+
+    // Its page asks for a serial port: the list goes up, with the tool's page out of its way.
+    const ports = [{ portId: "a1", portName: "cu.usbmodem0x80000001", displayName: "Made-up Flight Controller", vendorId: "1155", productId: "22336" }, { portId: "b2", portName: "cu.Bluetooth-Incoming-Port" }];
+    let answer = api.pretendToolAsks("serial", ports);
+    await pause(300);
+    const list = () => js(`return { title: document.querySelector("#sheets .alert-title")?.textContent ?? null, devices: [...document.querySelectorAll("#sheets .device")].map((one) => one.textContent), none: document.querySelector("#sheets .device-none")?.textContent ?? null }`);
+    let up = await list();
+    say(up.title === "Betaflight is asking for a serial port" && up.devices.length === 2 && up.devices[0].includes("Made-up Flight Controller") && up.devices[0].includes("0x0483:0x5740") && api.toolIsOpen().shown === false, "a list of serial ports is put up for the pilot to choose from", up.devices.join(" | "));
+    // Something is plugged in while the list is up.
+    api.pretendToolDevice("serial", { portId: "c3", portName: "cu.usbserial-0001", displayName: "Made-up Radio" }, true);
+    await pause(200);
+    up = await list();
+    say(up.devices.length === 3 && up.devices[2].includes("Made-up Radio"), "what is plugged in while it is up joins the list", `${up.devices.length} in the list`);
+    await js(`document.querySelector('[data-probe="device c3"]').click()`);
+    const chosen = await answer;
+    await pause(200);
+    up = await list();
+    say(chosen === "c3" && up.title === null && api.toolIsOpen().shown === true && api.toolIsOpen().choosing === null, "the one clicked is the one the tool is given, and its page comes back", String(chosen));
+
+    // Nothing plugged in yet, and then cancelled.
+    answer = api.pretendToolAsks("usb", []);
+    await pause(300);
+    up = await list();
+    say(up.title === "Betaflight is asking for a USB device" && up.devices.length === 0 && Boolean(up.none), "with nothing plugged in the list says what to do", up.none ?? "");
+    await js(`document.querySelector('[data-probe="device cancel"]').click()`);
+    const none = await answer;
+    say(none === null && api.toolIsOpen().shown === true, "Cancel gives the tool nothing");
+
+    // A second kind of asking while a list is up lets the first go.
+    const first = api.pretendToolAsks("serial", ports);
+    await pause(150);
+    const second = api.pretendToolAsks("bluetooth", [{ deviceId: "AA:BB", deviceName: "Made-up Adapter" }]);
+    await pause(250);
+    up = await list();
+    say((await first) === null && up.title === "Betaflight is asking for a Bluetooth device" && up.devices.length === 1, "a page that asks for something else lets its first asking go");
+    // Leaving the tool while a list is up answers it with nothing and takes the tool's page away.
+    await js(`document.querySelector('[data-probe="tool back"]').click()`);
+    const left = await second;
+    await pause(300);
+    open = api.toolIsOpen();
+    const cleared = await js(`return { layer: document.getElementById("tool").childElementCount, sheets: document.querySelectorAll("#sheets .alert").length, inert: document.getElementById("stage").hasAttribute("inert") }`);
+    say(left === null && open === null && cleared.layer === 0 && cleared.sheets === 0 && !cleared.inert, "Hangar goes back to the first screen and nothing of the tool is left", JSON.stringify(cleared));
+    say((await api.openTool("somethingElse", { x: 0, y: 0, width: 10, height: 10 })).problem !== null && api.toolIsOpen() === null, "only the tools the app knows can be opened");
+  } finally {
+    api.closeTool();
+    await js(`await window.hangar_.app.tool?.close()`);
+  }
+
+  // The tools themselves, from their own sites. Only when asked for: it needs the network.
+  if (process.argv.includes("--live")) {
+    for (const [id, title] of [["betaflight", "Betaflight"], ["elrsFlasher", "ExpressLRS Web Flasher"]]) {
+      await js(`await window.showForSnapshot(${JSON.stringify(`tool:${id}`)})`);
+      await pause(9000);
+      const read = await api.toolReads?.();
+      say(Boolean(read) && read.title.includes(title.split(" ")[0]) && read.serial && read.usb, `${title} arrives from its own site, and can reach serial ports and USB devices`, read ? `"${read.title}" at ${read.at}` : "nothing read");
+      await js(`await window.hangar_.app.tool?.close()`);
+    }
+  }
+
+  // The program the app fetches and keeps up to date. A made-up one, on a Mac, where the app does
+  // the putting in place itself: an older copy in a folder of its own, and a release beside it.
+  if (mac) {
+    const work = mkdtempSync(join(tmpdir(), "fpv-hangar-programs-")), place = join(work, "Programs"), feed = join(work, "Releases");
+    const bundle = (folder, version) => {
+      const contents = join(folder, "ExpressLRS Configurator.app", "Contents");
+      mkdirSync(join(contents, "Resources", "app"), { recursive: true });
+      writeFileSync(join(contents, "Resources", "app", "package.json"), JSON.stringify({ name: "made-up-configurator", version }));
+      writeFileSync(join(contents, "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>${version}</string></dict></plist>\n`);
+    };
+    const argv = process.argv.length, known = config().programs ?? {};
+    try {
+      bundle(place, "1.0.0");
+      bundle(join(work, "fresh"), "9.9.9");
+      mkdirSync(feed, { recursive: true });
+      const name = `ExpressLRS-Configurator-9.9.9-${process.arch === "arm64" ? "arm64" : "x64"}.dmg`;
+      const made = spawnSync("/usr/bin/hdiutil", ["create", "-quiet", "-srcfolder", join(work, "fresh"), "-volname", "Made-up Configurator", "-format", "UDZO", join(feed, name)], { encoding: "utf8" });
+      if (!say(made.status === 0, "a made-up release is put together to fetch", made.stderr.trim())) return;
+      const sum = createHash("sha512").update(readFileSync(join(feed, name))).digest("base64");
+      const at = (file) => `https://github.com/ExpressLRS/ExpressLRS-Configurator/releases/download/v9.9.9/${file}`;
+      const release = { tag_name: "v9.9.9", draft: false, prerelease: false, html_url: "https://github.com/ExpressLRS/ExpressLRS-Configurator/releases/tag/v9.9.9", published_at: "2026-01-02T03:04:05Z", body: "## What's Changed\n* A made-up change\n",
+        assets: [{ name, size: statSync(join(feed, name)).size, browser_download_url: at(name) }, { name: "latest-mac.yml", size: 1, browser_download_url: at("latest-mac.yml") }] };
+      writeFileSync(join(feed, "release.json"), JSON.stringify(release));
+      const sums = (value) => writeFileSync(join(feed, "latest-mac.yml"), `version: 9.9.9\nfiles:\n  - url: ${name}\n    sha512: ${value}\n    size: 1\n`);
+      process.argv.push("--programs", place, "--program-feed", feed);
+
+      let now = api.programsNow().elrsConfigurator;
+      say(now.installed === "1.0.0", "the copy on this computer is found, and which version it is", `v${now.installed}`);
+      now = (await api.checkProgram("elrsConfigurator")).elrsConfigurator;
+      say(now.latest?.version === "9.9.9" && now.newer && now.problem === null, "its newest release is read, and is later", `v${now.latest?.version}`);
+
+      // The sheet says so, and offers it.
+      await js(`await window.showForSnapshot("program:elrsConfigurator")`);
+      await pause(400);
+      const sheet = await js(`return { words: document.querySelector("#sheets .program-now")?.textContent ?? "", notes: [...document.querySelectorAll("#sheets .program-notes p")].map((p) => p.textContent), get: document.querySelector('[data-probe="program get"]')?.textContent ?? null, open: Boolean(document.querySelector('[data-probe="program open"]')) }`);
+      say(sheet.words.includes("Version 1.0.0 is on this computer") && sheet.words.includes("Version 9.9.9 came out on") && sheet.get === "Update to 9.9.9" && sheet.open && sheet.notes.includes("- A made-up change"), "its sheet says which is here, which is the newest and what is new, and offers the update", `${sheet.words} [${sheet.get}]`);
+
+      // A download that isn't what the project published is turned away and nothing is changed.
+      sums(createHash("sha512").update("something else").digest("base64"));
+      let done = await api.installProgram("elrsConfigurator");
+      now = done.state.elrsConfigurator;
+      say(now.installed === "1.0.0" && /didn't arrive in one piece/.test(now.problem ?? ""), "a download that doesn't add up to the published checksum is turned away, and the old copy is left alone", now.problem ?? "");
+      // The real thing: fetched from the sheet's own button, checked, put in place, the old copy set aside.
+      sums(sum);
+      await pause(300);
+      await js(`document.querySelector('[data-probe="program get"]').click()`);
+      for (let tries = 0; tries < 200 && (api.programsNow().elrsConfigurator.busy || api.programsNow().elrsConfigurator.installed !== "9.9.9"); tries += 1) await pause(100);
+      now = api.programsNow().elrsConfigurator;
+      const aside = existsSync(join(place, "Replaced")) ? readdirSync(join(place, "Replaced")) : [];
+      say(now.installed === "9.9.9" && !now.newer && now.problem === null && aside.length === 1, "the newer one is fetched, checked and put in its place, and the copy that was there is kept aside", `v${now.installed}, ${aside.length} set aside${now.problem ? `: ${now.problem}` : ""}`);
+      await pause(400);
+      const after = await js(`return { words: document.querySelector("#sheets .program-now")?.textContent ?? "", get: Boolean(document.querySelector('[data-probe="program get"]')) }`);
+      say(after.words.includes("Version 9.9.9 is on this computer") && after.words.includes("That is the newest") && !after.get, "and its sheet then says it is the newest", after.words);
+      const mounted = spawnSync("/usr/bin/hdiutil", ["info"], { encoding: "utf8" }).stdout.includes("fpv-hangar-program-");
+      say(!mounted, "the download is put away afterwards");
+    } finally {
+      process.argv.length = argv;
+      // What this copy knew of the real program's releases before is what it knows again.
+      setConfig({ programs: known });
+      await js(`document.querySelectorAll("#sheets .backdrop").forEach((one) => one.remove())`);
+      rmSync(work, { recursive: true, force: true });
+    }
+  }
+  say(errors.length === 0, "nothing went wrong on the page", errors.join(" | "));
+}
+
+/**
  * Reads a track out of its video: the one a track that comes with the app was made from, so that
  * what is found can be set against it. `--track <number>` picks which (the first unless told).
  * It plays the video from YouTube in a window nobody sees, so it needs the network.
@@ -672,7 +823,7 @@ async function everything(tools) {
 
   const steps = [
     ["The marker editor", editor], ["Making the videos", video], ["Before and after a video", bookends],
-    ["The track in 3D, and building one", trackview], ["Every page", pages], ["Updating itself", updating],
+    ["The track in 3D, and building one", trackview], ["Other projects' tools", outside], ["Every page", pages], ["Updating itself", updating],
   ];
   for (const [title, step] of steps) {
     note(`-- ${title}`);

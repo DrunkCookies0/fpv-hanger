@@ -52,6 +52,10 @@ if [[ "$PLATFORM" == mac ]]; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleName $NAME" -c "Set :CFBundleDisplayName $NAME" -c "Set :CFBundleIdentifier $ID" \
     -c "Set :CFBundleShortVersionString $VERSION" -c "Set :CFBundleVersion $VERSION" "$PLIST"
   /usr/libexec/PlistBuddy -c "Delete :ElectronAsarIntegrity" "$PLIST" 2>/dev/null || true
+  # What macOS shows when Betaflight's app or the ExpressLRS flasher first looks for devices.
+  for KEY in NSBluetoothAlwaysUsageDescription NSBluetoothPeripheralUsageDescription; do
+    /usr/libexec/PlistBuddy -c "Set :$KEY Betaflight and ExpressLRS tools in FPV Hangar look for flight controllers and radios over Bluetooth as well as USB." "$PLIST"
+  done
   codesign --force --deep --sign - "$APP" 2>/dev/null
   echo "Made $APP (v$VERSION, $(du -sh "$APP" | cut -f1 | tr -d ' '))"
 elif [[ "$PLATFORM" == win ]]; then

@@ -109,7 +109,7 @@ const started = (async () => {
  *
  *   home, creator, track, track:<path>, files (a track with its first run's files showing),
  *   settings, guide, leaderboard, welcome, whatsnew, setup, setup:<pilot name> (the second
- *   question, looked up), trackview, notice:<words>
+ *   question, looked up), trackview, tool:<which>, program:<which>, notice:<words>
  */
 /** For the mode that writes the read-me a download goes out with (`--read-me`). */
 window.readMeText = async (platform) => {
@@ -177,6 +177,13 @@ window.showForSnapshot = async (which) => {
       // "#lap1" shows the lap being drawn with the plan at one height: the second section up.
       if (lap?.[1]) app.trackView?.showStorey(Number(lap[1]));
     }
+  } else if (name === "tool" || name === "program") {
+    // Another project's own tool in the window ("tool:betaflight", "tool:elrsFlasher"), or the
+    // sheet for the program the app fetches ("program:elrsConfigurator").
+    go({ name: "home" });
+    const { openTool, showProgram } = await import("./views/tool.js");
+    if (name === "tool") await openTool(detail);
+    else showProgram(detail);
   } else if (name === "notice") app.notice = detail;
   else go({ name: "home" });
   render();
