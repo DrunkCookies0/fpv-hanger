@@ -14,7 +14,7 @@ import { dirname, join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { argument, config, setConfig, log } from "./paths.js";
 import { bytes } from "./library.js";
-import { belongs, copyRoot, driveAccount, isWithin, kindOf, myDrive, plan, whyNot } from "../shared/drive.js";
+import { belongs, copyRoot, driveAccount, driveHolding, isLibraryInDrive, isWithin, kindOf, libraryName, myDrive, plan, whyNot } from "../shared/drive.js";
 
 const mac = process.platform === "darwin";
 
@@ -123,8 +123,12 @@ export function makeDriveCopy({ library, tell, quiet = false, busy = () => false
   function now() {
     const folder = chosen();
     const kind = !folder ? "off" : round ? "copying" : last?.problem ? "problem" : last ? "kept" : "waiting";
+    const holding = driveHolding(library.root, found);
     return {
       kind, found, folder,
+      /** Whether the library is the one kept in Google Drive, whose Drive (`account`, on a Mac),
+       *  and whether its folder isn't there just now, as when Drive isn't open (`away`). */
+      library: { inDrive: isLibraryInDrive(library.root), account: holding?.account ?? "", away: library.away, name: libraryName },
       root: folder ? copyRoot(folder, join) : null,
       /** True when the copy is somewhere Drive shows, so far as can be told. */
       inDrive: folder ? place() === "Google Drive" : false,
@@ -183,7 +187,9 @@ export function makeDriveCopy({ library, tell, quiet = false, busy = () => false
     const folder = chosen();
     if (!folder) return;
     const root = copyRoot(folder, join), from = library.root;
-    const refused = whyNot(folder, from, join);
+    const refused = whyNot(folder, from, join) ?? (driveHolding(from, found) && found.some((one) => isWithin(folder, one.folder))
+      ? "Your library is kept in Google Drive itself, so a copy there would only be a second one. Stop keeping this copy, or keep it in another folder."
+      : null);
     if (refused) {
       last = { at: Date.now(), held: 0, heldBytes: 0, kinds: {}, failed: [], problem: refused };
       return;
@@ -290,6 +296,9 @@ export function makeDriveCopy({ library, tell, quiet = false, busy = () => false
 
   return {
     now, look,
+
+    /** True when a copy is being kept, and kept in Google Drive. */
+    copiesToDrive: () => Boolean(chosen()) && place() === "Google Drive",
 
     /** A round in a moment: after recordings are added, a video is made, or markers are saved.
      *  Long enough that what was just written counts as finished. */

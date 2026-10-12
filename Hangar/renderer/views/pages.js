@@ -308,6 +308,7 @@ export function settings() {
       label("LIBRARY"),
       h("div.path.dim", state.library),
       h("p.dim.small", state.libraryIsFixed ? "This copy of the app was started on this folder, and keeps its tracks in it." : "Your tracks, markers, music and finished videos are kept here."),
+      state.libraryAway && !state.drive?.library?.inDrive && h("p.small.warn", state.libraryAway),
       h("div.row.tight",
         secondary(`Show in ${fileBrowser}`, () => act.openFolder(state.library)),
         !state.libraryIsFixed && secondary("Use another folder…", act.chooseLibrary, { disabled: Boolean(state.job), help: "Keep your tracks somewhere else. Nothing is moved for you." }),

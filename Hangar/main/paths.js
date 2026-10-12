@@ -4,6 +4,7 @@ import { app } from "electron";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { pointerName } from "../shared/drive.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -46,10 +47,30 @@ export function setConfig(patch) {
   return all;
 }
 
-/** The library: the folder given on the command line, or the one the pilot chose, which starts out
- *  as "FPV Hangar" in the Movies folder on a Mac and the Videos folder on Windows. */
+/** Where a library is kept unless the pilot chooses another folder: "FPV Hangar" in the Movies
+ *  folder on a Mac and the Videos folder on Windows. */
+export const usualLibrary = () => join(app.getPath("videos"), "FPV Hangar");
+
+/** The library: the folder given on the command line, or the one the pilot chose, or the usual
+ *  one. When the usual folder says the library is in Google Drive, it is there: that is how every
+ *  copy of the app on a computer finds it, whoever moved it. */
 export function libraryPath() {
-  return argument("--root") ? resolve(argument("--root")) : config().library ?? join(app.getPath("videos"), "FPV Hangar");
+  if (argument("--root")) return resolve(argument("--root"));
+  if (config().library) return config().library;
+  try {
+    const pointed = JSON.parse(readFileSync(join(usualLibrary(), pointerName), "utf8")).library;
+    if (typeof pointed === "string" && pointed !== "") return pointed;
+  } catch {}
+  return usualLibrary();
+}
+
+/** Leaves word in the usual library folder that the library is in another folder. */
+export function pointTo(folder) {
+  mkdirSync(usualLibrary(), { recursive: true });
+  writeFileSync(join(usualLibrary(), pointerName), JSON.stringify({
+    library: folder,
+    about: "FPV Hangar keeps this computer's library in Google Drive, in the folder above, and this file tells it where to look. Delete this file to go back to the library in this folder.",
+  }, null, 2) + "\n");
 }
 
 /** Where the app writes down anything that goes wrong, so it can be sent to whoever is fixing it. */

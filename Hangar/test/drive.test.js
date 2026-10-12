@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { belongs, copyRoot, driveAccount, isDue, isWithin, kindOf, plan, whyNot } from "../shared/drive.js";
+import { belongs, copyRoot, copyName, driveAccount, driveHolding, isDue, isInDrive, isLibraryInDrive, isWithin, kindOf, libraryName, plan, whyNot } from "../shared/drive.js";
 
 test("drive: the copy goes in a folder of the app's name inside the one chosen", () => {
   assert.equal(copyRoot("/Users/pilot/Library/CloudStorage/GoogleDrive-pilot@example.com/My Drive"), "/Users/pilot/Library/CloudStorage/GoogleDrive-pilot@example.com/My Drive/FPV Hangar");
@@ -87,4 +87,28 @@ test("drive: what a file is, for saying what the copy holds", () => {
   assert.equal(kindOf("dashboard.json"), "the rest");
   // An event's clip for before its videos isn't one of its finished videos.
   assert.equal(kindOf("E/Before.mp4"), "the rest");
+});
+
+test("drive: the library in Drive is kept apart from the copy older versions keep there", () => {
+  // A computer still on v0.16.0, keeping a copy in Drive, copies into its own folder, never into the library.
+  assert.notEqual(libraryName.toLowerCase(), copyName.toLowerCase());
+  assert.equal(whyNot("/Drive/My Drive", `/Drive/My Drive/${libraryName}`), null);
+});
+
+test("drive: whether a library is in Drive, by where Drive was found or by its path alone", () => {
+  const mac = { folder: "/Users/pilot/Library/CloudStorage/GoogleDrive-pilot@example.com/My Drive", account: "pilot@example.com" };
+  const pc = { folder: "G:\\My Drive", account: "" };
+  assert.equal(driveHolding(`${mac.folder}/FPV Hangar Library`, [pc, mac]), mac);
+  assert.equal(driveHolding("G:\\My Drive\\FPV Hangar Library", [mac, pc]), pc);
+  assert.equal(driveHolding("/Users/pilot/Movies/FPV Hangar", [mac]), null);
+  // With Drive not open nothing is found, and the path is all there is to go by.
+  assert.ok(isInDrive("G:\\My Drive\\FPV Hangar Library"));
+  assert.ok(isInDrive(`${mac.folder}/FPV Hangar Library`));
+  assert.ok(!isInDrive("/Users/pilot/Movies/FPV Hangar"));
+  assert.ok(!isInDrive("D:\\Drives\\FPV Hangar"));
+  // The library in Drive is the folder of its own name there, and no other: not the old copy.
+  assert.ok(isLibraryInDrive("G:\\My Drive\\FPV Hangar Library"));
+  assert.ok(isLibraryInDrive(`${mac.folder}/FPV Hangar Library/`));
+  assert.ok(!isLibraryInDrive("G:\\My Drive\\FPV Hangar"));
+  assert.ok(!isLibraryInDrive("/Users/pilot/Movies/FPV Hangar Library"));
 });

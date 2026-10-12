@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { eventFolder, trackName, trackNumber, videoExtensions, audioExtensions, pictureExtensions, bookendPictures, removalPhrase, bytes } from "./library.js";
 import { analysisOf, soundOf } from "./songs.js";
 import { pictureRect } from "./ffmpeg.js";
-import { config, setConfig, version, log, logFile } from "./paths.js";
+import { config, setConfig, version, log, logFile, pointTo } from "./paths.js";
 import { shapes, stretch } from "../shared/video.js";
 import { FrameRate } from "../shared/timing.js";
 import * as series from "../shared/series.js";
@@ -22,6 +22,8 @@ import { latest, install, checkIsDue } from "./updates.js";
 import { makeTools } from "./tools.js";
 import { makePrograms } from "./components.js";
 import { makeDriveCopy } from "./drive.js";
+import { measure, moveFolder } from "./move.js";
+import { driveHolding, isInDrive, libraryName } from "../shared/drive.js";
 import { findCards } from "./cards.js";
 import { marked } from "../shared/cards.js";
 
@@ -244,6 +246,8 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
         testCopy: isTestCopy(),
         library: library.root,
         libraryIsFixed: fixed,
+        /** Why the library's folder isn't there just now, or null when it is. */
+        libraryAway: library.away ? library.whyAway() : null,
         settings: library.settings,
         email: library.store.email ?? "",
         answers: library.store.answers ?? {},
@@ -1116,7 +1120,93 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
       await drive.pass();
       return drive.now();
     },
+
+    // The library in Google Drive.
+
+    /** What there is in Google Drive for the library, for the pilot to decide on: whether another
+     *  computer keeps its library there already (`there`), and whether Drive has brought enough of
+     *  it down to open (`ready`). `mine` is what this computer's own library holds. On a Mac, this
+     *  is the first look inside Drive's folder, which macOS may ask the pilot about. */
+    async lookInDrive(folder) {
+      if (!drive.now().found.some((one) => one.folder === folder)) return { problem: "That isn't where Google Drive is on this computer." };
+      if (driveHolds()) return { problem: "Your library is in Google Drive already." };
+      const place = join(folder, libraryName), there = existsSync(place);
+      if (!there && insideDrive()) return { problem: insideDriveProblem() };
+      let mine = { files: 0, recordings: 0, bytes: 0 };
+      try {
+        if (!library.away) mine = await measure(library.root);
+      } catch {}
+      return { place, there, ready: there && existsSync(join(place, "dashboard.json")), mine: { ...mine, size: bytes(mine.bytes), tracks: library.tracks.length } };
+    },
+
+    /** Moves the library into a folder of its own in Google Drive and uses it from there. */
+    async moveLibraryToDrive(folder) {
+      if (!drive.now().found.some((one) => one.folder === folder)) return { problem: "That isn't where Google Drive is on this computer." };
+      if (job) return { problem: "Wait for what is being made to finish first." };
+      if (library.away) return { problem: library.whyAway() };
+      if (driveHolds()) return { problem: "Your library is in Google Drive already." };
+      const place = join(folder, libraryName), from = library.root;
+      if (existsSync(place)) return { problem: "Another computer keeps its library in your Google Drive already. Use that one instead.", state: api.state() };
+      if (insideDrive()) return { problem: insideDriveProblem(), state: api.state() };
+      const usual = !fixed && !config().library;
+      if (drive.copiesToDrive()) await drive.stop();
+      let moved;
+      try {
+        moved = await working("Moving your library into Google Drive", (progress) => moveFolder(from, place, { progress, trash: (path) => library.trash(path) }));
+      } catch (error) {
+        log(`Moving the library into Google Drive: ${error.stack ?? error.message}`);
+        return { problem: `Your library couldn't be moved into Google Drive: ${error.message}. Nothing was changed, and it is still in ${from}.`, state: api.state() };
+      }
+      if (moved.problem) return { ...moved, state: api.state() };
+      await useLibrary(place, usual);
+      const left = moved.how === "copied" ? (moved.trashed ? ` The library as it was on this ${mac ? "Mac" : "PC"} is in ${bin}, in case it is wanted.` : ` The library as it was on this ${mac ? "Mac" : "PC"} couldn't be sent to ${bin}, and is still in ${from}.`) : "";
+      return { notice: `Your library is in Google Drive now. Drive for desktop uploads it by itself.${left}`, state: api.state(), moved: true };
+    },
+
+    /** Uses the library another computer keeps in Google Drive. This computer's own library stays
+     *  where it is. */
+    async useLibraryInDrive(folder) {
+      if (!drive.now().found.some((one) => one.folder === folder)) return { problem: "That isn't where Google Drive is on this computer." };
+      if (job) return { problem: "Wait for what is being made to finish first." };
+      const place = join(folder, libraryName);
+      if (!existsSync(join(place, "dashboard.json"))) return { problem: "Google Drive hasn't brought the library down from your other computer yet. Give it a few minutes and try again.", state: api.state() };
+      const usual = !fixed && !config().library;
+      if (drive.copiesToDrive()) await drive.stop();
+      await useLibrary(place, usual);
+      return { notice: "This computer uses the library in Google Drive now.", state: api.state(), moved: true };
+    },
   };
+
+  /** True when the library is the one kept in Google Drive, and is there. */
+  function driveHolds() {
+    return drive.now().library.inDrive && !library.away;
+  }
+
+  /** True when the library is some other folder in Google Drive: the copy an older version kept
+   *  there, chosen with Use another folder, say. That isn't moved: it could be a copy, and the
+   *  computer with the tracks has to go first. */
+  function insideDrive() {
+    return !drive.now().library.inDrive && (isInDrive(library.root) || driveHolding(library.root, drive.now().found) !== null);
+  }
+
+  const insideDriveProblem = () => `Your library here is a folder in Google Drive already (${library.root}), so it isn't moved. Press Keep my library in Google Drive on the computer that has your tracks first, then here, to open that library.`;
+
+  /** Turns to the library in a folder from now on. A copy started on a folder (`--root`) remembers
+   *  nothing of it. Otherwise this copy remembers it, and when the library was in the usual place,
+   *  word is left there, so the other copies of the app on this computer find it as well. */
+  async function useLibrary(place, usual) {
+    if (!fixed) {
+      setConfig({ library: place });
+      try {
+        if (usual) pointTo(place);
+      } catch (error) {
+        log(`Leaving word of where the library is: ${error.message}`);
+      }
+    }
+    library.use(place);
+    summaries.clear();
+    await api.refresh();
+  }
 
   summariseAll();
   drive.start();

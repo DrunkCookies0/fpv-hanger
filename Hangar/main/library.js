@@ -21,6 +21,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSy
 import { join, basename, extname, dirname } from "node:path";
 import { decodeText, crossingsIn, markersAreInClipTime, Race, FrameRate, coarseStep, formatTime, markerFile, Unusable } from "../shared/timing.js";
 import * as series from "../shared/series.js";
+import { merge, same } from "../shared/merge.js";
+import { isInDrive } from "../shared/drive.js";
 
 export const videoExtensions = new Set(["ts", "mts", "m2ts", "mp4", "m4v", "mov", "mkv", "avi", "mxf"]);
 export const audioExtensions = new Set(["mp3", "m4a", "aac", "wav", "aif", "aiff", "caf", "flac", "ogg", "opus"]);
@@ -55,6 +57,8 @@ export function bytes(count) {
   return `${Number(value.toFixed(places))} ${units[unit]}`;
 }
 const sameName = (a, b) => a.localeCompare(b, undefined, { sensitivity: "accent" }) === 0;
+/** A value as it would read back from its file. */
+const copyOf = (value) => JSON.parse(JSON.stringify(value));
 const list = (folder) => {
   try {
     return readdirSync(folder);
@@ -137,16 +141,65 @@ export class Library {
     renameSync(part, file);
   }
 
-  /** Reads the files, making the library's folder first when it is a new one. */
+  // Every field the Mac app expects is always there, so a file written here always loads there.
+  #withSettings = (kept) => ({ pilot: "", id: "", idLabel: series.idLabel, corner: "tr", ...(kept ?? { event: series.season }) });
+  #withStore = (kept) => ({ email: "", answers: {}, tracks: {}, ...(kept ?? {}) });
+  #withExtras = (kept) => ({ events: {}, ...(kept ?? {}) });
+
+  /** Each file as this computer last read or saved it. A library in Google Drive is open on two
+   *  computers, and what is in the file when this one saves is measured against it. */
+  #seen = {};
+
+  /** True while the library's folder isn't there: on a disk that isn't plugged in, or in Google
+   *  Drive on a computer where Drive isn't open. Nothing is made or saved in it meanwhile. */
+  away = false;
+
+  /** The files that were there but couldn't be read when the library was read, as when Drive
+   *  hasn't brought one down yet. None of them is written over until it can be read. */
+  #unread = new Set();
+
+  /** Reads the files, making the library's folder first when it is a new one. The folders above it
+   *  aren't made: those not being there means the disk, or Drive, isn't. */
   load() {
-    mkdirSync(this.root, { recursive: true });
-    // Every field the Mac app expects is always there, so a file written here always loads there.
-    this.settings = { pilot: "", id: "", idLabel: series.idLabel, corner: "tr", ...(this.#read(this.settingsFile) ?? { event: series.season }) };
-    this.store = { email: "", answers: {}, tracks: {}, ...(this.#read(this.storeFile) ?? {}) };
-    this.extras = { events: {}, ...(this.#read(this.extrasFile) ?? {}) };
+    if (!isFolder(this.root) && isFolder(dirname(this.root))) mkdirSync(this.root);
+    this.away = !isFolder(this.root);
+    const read = (which, file, withDefaults) => {
+      const kept = this.#read(file);
+      if (kept === null && existsSync(file)) this.#unread.add(which);
+      else this.#unread.delete(which);
+      return withDefaults(kept);
+    };
+    this.settings = read("settings", this.settingsFile, this.#withSettings);
+    this.store = read("store", this.storeFile, this.#withStore);
+    this.extras = read("extras", this.extrasFile, this.#withExtras);
+    this.#seen = { settings: copyOf(this.settings), store: copyOf(this.store), extras: copyOf(this.extras) };
     this.#stamps = this.#fileStamps();
+    if (this.away) {
+      this.events = [];
+      this.tracks = [];
+      return;
+    }
     this.gatherSongMarks();
     this.findTracks();
+  }
+
+  /** Saves one of the files. If the other computer saved it since this one read it, what each
+   *  changed is put together first (shared/merge.js), so neither undoes the other. A file that
+   *  can't be read just now has nothing to put together and is written whole, unless it couldn't
+   *  be read when the library was read either: then what this computer holds is only what it
+   *  started with, and it waits. */
+  #save(which, file, withDefaults) {
+    if (this.away) return;
+    const there = this.#read(file);
+    if (there === null && this.#unread.has(which) && existsSync(file)) return;
+    if (there !== null) {
+      const theirs = withDefaults(there);
+      if (!same(theirs, this.#seen[which])) this[which] = merge(this.#seen[which], this[which], theirs);
+    }
+    this.#unread.delete(which);
+    this.#write(file, this[which]);
+    this.#seen[which] = copyOf(this[which]);
+    this.#stamps = this.#fileStamps();
   }
 
   #stamps = "";
@@ -161,6 +214,13 @@ export class Library {
     }).join("|");
   }
 
+  /** What to say while the library's folder isn't there. */
+  whyAway() {
+    return isInDrive(this.root)
+      ? `Your library is in Google Drive, and Drive isn't open on this ${process.platform === "win32" ? "PC" : "Mac"} or isn't signed in. Open Drive for desktop and sign in; FPV Hangar looks again when you come back to its window.`
+      : `Your library's folder isn't there just now: ${this.root}. If it is on a disk, plug the disk in; FPV Hangar looks again when you come back to its window.`;
+  }
+
   /** Turns to another folder as the library. Nothing is moved. */
   use(root) {
     this.root = root;
@@ -169,24 +229,21 @@ export class Library {
   }
 
   saveSettings() {
-    this.#write(this.settingsFile, this.settings);
-    this.#stamps = this.#fileStamps();
+    this.#save("settings", this.settingsFile, this.#withSettings);
   }
 
   saveStore() {
-    this.#write(this.storeFile, this.store);
-    this.#stamps = this.#fileStamps();
+    this.#save("store", this.storeFile, this.#withStore);
   }
 
   saveExtras() {
-    this.#write(this.extrasFile, this.extras);
-    this.#stamps = this.#fileStamps();
+    this.#save("extras", this.extrasFile, this.#withExtras);
   }
 
   /** Another copy of the app, or the Mac app, may have saved since this one looked. Takes up what is
    *  in the files now, then looks for tracks again. Nothing of its own is lost: it saves as it goes. */
   refresh(now = new Date()) {
-    if (this.#fileStamps() !== this.#stamps) this.load();
+    if (this.away || this.#fileStamps() !== this.#stamps) this.load();
     else this.findTracks();
     this.applySeason(now);
   }
@@ -280,6 +337,7 @@ export class Library {
 
   /** Makes an event, with a first track in it. Returns what is wrong with the name, or null. */
   newEvent(raw, now = new Date()) {
+    if (this.away) return { problem: this.whyAway() };
     const name = raw.trim();
     const problem = this.#problemWithEventName(name);
     if (problem) return { problem };
@@ -295,6 +353,7 @@ export class Library {
   /** Makes a track in an event. For the season's event it is the next of the season's tracks that
    *  has opened and isn't here. Returns { track } or { notice }. */
   newTrack(event, now = new Date()) {
+    if (this.away) return { problem: this.whyAway() };
     if (event !== "" && event === this.seasonEvent && this.season(event).length > 0) {
       const have = new Set(this.#tracksOf(event).map((track) => trackNumber(trackName(track))));
       const open = this.season(event).filter((one) => new Date(one.release) <= now && !have.has(one.number)).sort((a, b) => a.number - b.number)[0];
@@ -385,7 +444,7 @@ export class Library {
    *  is not made again. It goes by what was last read, so it works with no network. */
   applySeason(now = new Date()) {
     const event = this.seasonEvent;
-    if (!event) return [];
+    if (!event || this.away) return [];
     const season = this.season(event);
     if (season.length === 0) return [];
     const skipped = new Set(this.store.events?.[event]?.skipped ?? []);
@@ -438,6 +497,7 @@ export class Library {
   /** Takes the answers to the setup questions: the pilot's name, and for a pilot flying this season
    *  of the series, an event for it carrying their registration number. */
   finishSetUp({ pilot, fliesSeries, number }) {
+    if (this.away) return;
     const name = pilot.trim();
     if (name !== "") this.settings.pilot = name;
     if (fliesSeries) {

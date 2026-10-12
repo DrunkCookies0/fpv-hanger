@@ -1,8 +1,9 @@
-// The copy of the library kept in Google Drive, as the pilot sees it: its card in Pilot &
-// settings, and the word about it at the head of a track's page.
+// The library in Google Drive, and the copy of it kept in a folder, as the pilot sees them: their
+// cards in Pilot & settings, and the word about the copy at the head of a track's page.
 
-import { app, ask, take, render, open } from "../core.js";
+import { app, ask, take, render, open, go } from "../core.js";
 import { h, icon, label, primary, secondary, fill, when } from "../ui.js";
+import { confirm } from "../sheets.js";
 import { fileBrowser, computer } from "../words.js";
 
 /** Where Google gives out its program that shows a Drive as a folder. */
@@ -44,42 +45,103 @@ async function keep(folder = null) {
   render();
 }
 
-/** The card in Pilot & settings. */
+/** What keeping the library in Drive is, in a few words. */
+const sharing = `Keep your library in Google Drive and open the same one on each of your computers: your Mac and your PC see the same tracks, recordings, markers, music and videos. Google's own Drive for desktop uploads what you do and brings down what the other computer did, so FPV Hangar never signs in to anything.`;
+
+/** The cards in Pilot & settings: the library in Google Drive, and the copy when one is kept. */
 export function driveCard() {
-  const drive = app.state.drive;
+  const drive = app.state?.drive;
   if (!drive) return null;
-  const what = "Keeps a second copy of your library in Google Drive: every recording you add and every video you make, with their markers and music, in the same folders as here (the event, then the track).";
-  if (drive.kind === "off") {
+  return [libraryCard(drive), drive.kind !== "off" && copyCard(drive)];
+}
+
+const keepElsewhere = (drive) => drive.kind === "off" && secondary("Keep a copy in another folder…", () => keep(), { probe: "drive copy", help: "Keep a second copy of your library in any folder: another disk, say. It is copied into by itself, after you add recordings or make a video." });
+
+function libraryCard(drive) {
+  const library = drive.library;
+  if (library.inDrive) {
     return h("div.card", { "data-probe": "drive card" },
       label("GOOGLE DRIVE"),
-      h("p.dim.small", `${what} Google's own app for computers, Drive for desktop, does the uploading, so FPV Hangar never signs in to anything.`),
-      drive.found.length > 0
-        ? h("div.row.tight.wrap",
-          drive.found.map((one, index) => (index === 0 ? primary : secondary)(drive.found.length > 1 && one.account ? `Keep a copy in ${one.account}'s Drive` : "Keep a copy in Google Drive", () => keep(one.folder), { icon: "cloud", probe: "drive keep" })),
-          secondary("Use another folder…", () => keep(), { help: "Keep the copy in any folder: another service's, or another disk." }),
-        )
-        : [
-          h("p.small", `Google Drive isn't on this ${computer}, or it isn't open. Get Drive for desktop from Google, sign in to it, and then look again.`),
-          h("div.row.tight.wrap",
-            secondary("Get Drive for desktop", () => ask("openLink", driveForDesktop), { icon: "arrowUpRight", help: "Opens Google's page for it in your browser." }),
-            secondary("Look again", async () => {
-              take(await ask("lookForDrive"));
-              render();
-            }, { probe: "drive look" }),
-            secondary("Use another folder…", () => keep(), { help: "Keep the copy in any folder: another service's, or another disk." }),
-          ),
-        ],
-      drive.found.length === 1 && drive.found[0].account && h("p.faint.small", `Google Drive on this ${computer} is signed in as ${drive.found[0].account}.`),
+      h("div.path.dim", app.state.library),
+      h("div.small.semibold", { id: "drive-library" }, library.away
+        ? h("span.warn.row.tight", icon("warning"), h("span", app.state.libraryAway))
+        : h("span.good.row.tight", icon("checkCircle"), h("span", `Your library is in Google Drive${library.account ? `, ${library.account}'s` : ""}.`))),
+      h("p.dim.small", "Every computer that opens it sees the same tracks, recordings, markers, music and videos. Drive for desktop uploads what you do here and brings down what you did on the other computer, by itself. What the other computer did shows here when you come back to this window."),
+      h("p.faint.small", `If both computers change the same thing before Drive has passed it across, the one saved last is kept. A recording made on the other computer comes down from Drive the first time it is opened on this one, which takes as long as downloading it.`),
+      h("div.row.tight.wrap",
+        secondary(`Show in ${fileBrowser}`, () => ask("openFolder", app.state.library)),
+        keepElsewhere(drive),
+      ),
     );
   }
-  const busy = drive.kind === "copying";
   return h("div.card", { "data-probe": "drive card" },
-    label(drive.inDrive ? "GOOGLE DRIVE" : "A SECOND COPY"),
+    label("GOOGLE DRIVE"),
+    h("p.dim.small", sharing),
+    drive.found.length > 0
+      ? h("div.row.tight.wrap",
+        drive.found.map((one, index) => (index === 0 ? primary : secondary)(drive.found.length > 1 && one.account ? `Keep my library in ${one.account}'s Drive` : "Keep my library in Google Drive", () => toDrive(one.folder), { icon: "cloud", probe: "drive library", disabled: Boolean(app.state.job) })),
+        keepElsewhere(drive),
+      )
+      : [
+        h("p.small", `Google Drive isn't on this ${computer}, or it isn't open. Get Drive for desktop from Google, sign in to it, and then look again.`),
+        h("div.row.tight.wrap",
+          secondary("Get Drive for desktop", () => ask("openLink", driveForDesktop), { icon: "arrowUpRight", help: "Opens Google's page for it in your browser." }),
+          secondary("Look again", async () => {
+            take(await ask("lookForDrive"));
+            render();
+          }, { probe: "drive look" }),
+          keepElsewhere(drive),
+        ),
+      ],
+    drive.found.length === 1 && drive.found[0].account && h("p.faint.small", `Google Drive on this ${computer} is signed in as ${drive.found[0].account}.`),
+  );
+}
+
+/** Puts the library in Google Drive: moves it there, or, when the other computer has already,
+ *  uses that one. Asks first either way. */
+async function toDrive(folder) {
+  const look = take(await ask("lookInDrive", folder));
+  if (!look || look.problem) return render();
+  const mine = look.mine;
+  let answer;
+  if (look.there) {
+    if (!await confirm({
+      title: "Use the library in Google Drive?",
+      message: `Your other computer keeps its library in your Google Drive. This ${computer} will use it from now on, so both see the same tracks.${mine.tracks > 0 ? ` The ${some(mine.tracks, "track", "tracks")} in this ${computer}'s own library stay where they are, in ${app.state.library}, and aren't added to it.` : ""}`,
+      yes: "Use it",
+    })) return;
+    answer = take(await ask("useLibraryInDrive", folder));
+  } else {
+    if (!await confirm({
+      title: "Move your library into Google Drive?",
+      message: `It goes into a folder called ${app.state.drive.library.name} in your Drive: ${some(mine.tracks, "track", "tracks")}, ${some(mine.recordings, "recording", "recordings")}, ${mine.size} in all. FPV Hangar uses it from there, and Drive for desktop uploads it, which takes a while for recordings. A free Google account holds 15 GB. Then, on your other computer, press Keep my library in Google Drive there too.`,
+      yes: "Move it",
+    })) return;
+    answer = take(await ask("moveLibraryToDrive", folder));
+  }
+  if (answer?.moved) {
+    // Another library: nothing read from the one before is any good.
+    app.tracks.clear();
+    app.forms.clear();
+    app.expanded.clear();
+    app.page = { name: "home" };
+    app.cameFrom = { name: "home" };
+    go({ name: "settings" });
+  }
+  render();
+}
+
+/** The card for the copy, while one is kept. */
+function copyCard(drive) {
+  const what = "Keeps a second copy of your library: every recording you add and every video you make, with their markers and music, in the same folders as here (the event, then the track).";
+  const busy = drive.kind === "copying";
+  return h("div.card", { "data-probe": "copy card" },
+    label(drive.inDrive ? "A COPY IN GOOGLE DRIVE" : "A SECOND COPY"),
     h("div.path.dim", drive.root),
     h("div.small.semibold", { id: "drive-status" }, status(drive)),
     h("p.dim.small", drive.inDrive
       ? `${what} Google Drive uploads it from there by itself, whether or not FPV Hangar is open, and shows how far it has got under its own icon.`
-      : `${what.replace("in Google Drive", "in this folder")}`),
+      : what),
     h("label.check", h("input", { type: "checkbox", checked: drive.recordings, "data-probe": "drive recordings", onchange: async (event) => {
       take(await ask("copyRecordings", event.target.checked));
       render();

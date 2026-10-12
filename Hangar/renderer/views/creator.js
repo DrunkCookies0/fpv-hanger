@@ -63,7 +63,7 @@ function sidebar() {
     // Events and their tracks can outgrow the window, so this part scrolls.
     h("div.side-list", { "data-scroll": "side" },
       list,
-      h("button.side-add.event", { type: "button", help: "Another race or series, with its own tracks, its own name on the timer and its own ID.", onclick: act.newEvent }, icon("folderPlus"), "New event"),
+      !app.state.libraryAway && h("button.side-add.event", { type: "button", help: "Another race or series, with its own tracks, its own name on the timer and its own ID.", onclick: act.newEvent }, icon("folderPlus"), "New event"),
     ),
     sidebarRow("Pilot & settings", null, false, () => open({ name: "settings" }), { probe: "tool settings" }),
     sidebarRow("How it works", null, false, () => open({ name: "guide" }), { probe: "tool guide" }),
@@ -85,7 +85,12 @@ function noTracks() {
   const events = app.state.events;
   return h("div.scroll", { "data-scroll": "page" }, h("div.track-page",
     h("h1.page-title", "VIDEO CREATOR"),
-    h("div.card.roomy", events.length === 0 ? [
+    h("div.card.roomy", app.state.libraryAway ? [
+      // The library is somewhere that isn't there just now, Google Drive say: nothing is made until it is.
+      h("div.card-title", "Your library isn't here just now"),
+      h("p.dim", { "data-probe": "library away" }, app.state.libraryAway),
+      h("div.row", secondary("Look again", () => refresh(), { probe: "library again" }), secondary("Pilot & settings", () => open({ name: "settings" }))),
+    ] : events.length === 0 ? [
       h("div.card-title", "No events yet"),
       h("p.dim", "An event is a race, a series, or just somewhere you fly. It has its own tracks, and its name goes on the timer of every video you make in it."),
       h("div.row", primary("New event", act.newEvent, { probe: "new event" }),

@@ -2,6 +2,15 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.17.0 (12 October 2026)
+
+- One library on both your computers. In **Pilot & settings**, under **Google Drive**, press **Keep my library in Google Drive** on the computer that has your tracks. FPV Hangar moves your library into a folder called FPV Hangar Library in your Drive and uses it from there. Then press the same button on your other computer: it finds that library and opens it. From then on your Mac and your PC see the same tracks, recordings, markers, music and videos.
+- Google's own **Drive for desktop** carries it, on both computers: it uploads what you do on one and brings it down on the other, whether or not FPV Hangar is open. What the other computer did shows when you come back to FPV Hangar's window, or press **Refresh**. A free Google account holds 15 GB, and recordings are most of a library's size.
+- Both computers can save at once. When each has changed something different, both changes are kept: a song placed on one and an email typed on the other, say. Only if both change the same thing before Drive has passed it across is the one saved last kept.
+- A recording made on the other computer comes down from Drive the first time you open it, which takes as long as downloading it.
+- If Drive isn't open or isn't signed in, the Video Creator says so instead of showing an empty library, and nothing is made in its place. It looks again when you come back to the window.
+- This takes over from the copy kept in Google Drive in v0.16.0, which only ever went one way. Moving your library stops that copy. Its folder in your Drive, called FPV Hangar, isn't needed once your library is in FPV Hangar Library, and can be deleted to free the space. **Keep a copy in another folder…** still keeps a second copy anywhere else, another disk say.
+
 ## v0.16.0 (12 October 2026)
 
 - A second copy of your library in Google Drive. In **Pilot & settings**, under **Google Drive**, press **Keep a copy in Google Drive**. From then on every recording you add and every video you make is copied into a folder called FPV Hangar in your Drive, with its markers and music, laid out as your library is: the event, then the track, then Raw files, landscape, vertical and the rest. It happens by itself after you add recordings, make a video or save markers, and **Copy now** does it when you ask.

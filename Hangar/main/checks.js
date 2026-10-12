@@ -11,7 +11,9 @@
 //            changed its page.
 //   drive    keeps a copy of the library in a folder standing in for Google Drive (`--drive
 //            <folder>`): what is copied and what isn't, a new file and a changed one following,
-//            one that is deleted staying, Drive not being open, and stopping
+//            one that is deleted staying, Drive not being open, and stopping. Then the library
+//            itself in Drive, with two libraries of its own standing in for two computers': one
+//            moved there, the other opening it, both saving at once, and Drive not being open
 //   cards    a card from the goggles, with folders standing in for cards (`--cards <folder>`): the
 //            track's page says one is plugged in, its recordings are listed with the new ones
 //            from the last day ticked, and the ones picked are copied in and the card left alone
@@ -31,6 +33,8 @@ import { basename, dirname, join, resolve } from "node:path";
 import { argument, config, setConfig, logFile, version } from "./paths.js";
 import { install, thisCopy, whatTheOldAppKept } from "./updates.js";
 import { markerFile, FrameRate } from "../shared/timing.js";
+import { Library } from "./library.js";
+import { copyName, libraryName } from "../shared/drive.js";
 
 /** With `--report <file>`, everything said is written there too, a line at a time as it happens,
  *  so a check that stops halfway still leaves what it had found. */
@@ -612,8 +616,8 @@ async function drive(tools) {
   const { js, errors } = await page(tools);
   const card = () => js(`
     await window.showForSnapshot("settings");
-    const card = document.querySelector('[data-probe="drive card"]');
-    return card && { label: card.querySelector(".label")?.textContent, says: card.querySelector("#drive-status")?.textContent ?? null, buttons: [...card.querySelectorAll("button")].map((one) => one.textContent), path: card.querySelector(".path")?.textContent ?? null };`);
+    const card = document.querySelector('[data-probe="drive card"]'), copy = document.querySelector('[data-probe="copy card"]');
+    return card && { label: card.querySelector(".label")?.textContent, says: copy?.querySelector("#drive-status")?.textContent ?? null, buttons: [...card.querySelectorAll("button"), ...(copy?.querySelectorAll("button") ?? [])].map((one) => one.textContent), path: copy?.querySelector(".path")?.textContent ?? null };`);
   const press = (probe) => js(`document.querySelector('[data-probe="${probe}"]').click()`);
   const same = (path) => {
     const here = join(library.root, ...path), there = join(root, ...path);
@@ -624,13 +628,13 @@ async function drive(tools) {
   try {
     await api.lookForDrive();
     let seen = await card();
-    say(seen?.label === "GOOGLE DRIVE" && seen.buttons.includes("Keep a copy in Google Drive") && !existsSync(root), "the card offers to keep a copy, and nothing is copied before it is asked for", seen ? seen.buttons.join(" | ") : "no card");
+    say(seen?.label === "GOOGLE DRIVE" && seen.buttons.includes("Keep my library in Google Drive") && seen.buttons.includes("Keep a copy in another folder…") && !existsSync(root), "the card offers to keep the library in Google Drive, or a copy elsewhere, and nothing is copied before it is asked for", seen ? seen.buttons.join(" | ") : "no card");
 
     const refused = await js(`return await window.hangar.ask("keepCopy", ${JSON.stringify(join(library.root, "somewhere"))})`);
     say(Boolean(refused.problem) && !config().copyTo, "a folder that isn't Drive's is refused when it is given as Drive's", refused.problem ?? "it was taken");
 
-    await press("drive keep");
-    // The press is answered in a moment, not at once.
+    // A copy can still be kept in Drive's folder, chosen as any other folder is.
+    await js(`await window.hangar.ask("keepCopy", ${JSON.stringify(myDrive)})`);
     const until = async (met) => {
       for (let tries = 0; tries < 100 && !met(); tries += 1) await pause(50);
     };
@@ -698,7 +702,7 @@ async function drive(tools) {
     write(inTrack("csv markers", "copy_check_6.csv"), "6\n");
     now = await api.whenCopied();
     seen = await card();
-    say(now.kind === "off" && !config().copyTo && !existsSync(inCopy("csv markers", "copy_check_6.csv")) && existsSync(inCopy("Raw files", "copy_check.ts")) && seen?.buttons.includes("Keep a copy in Google Drive"), "stopping stops it, and what was copied stays");
+    say(now.kind === "off" && !config().copyTo && !existsSync(inCopy("csv markers", "copy_check_6.csv")) && existsSync(inCopy("Raw files", "copy_check.ts")) && seen?.buttons.includes("Keep a copy in another folder…"), "stopping stops it, and what was copied stays");
     say(errors.length === 0, "nothing went wrong in the window", errors.slice(0, 3).join(" | "));
   } finally {
     setConfig({ copyTo: null, copyLeavesOutRecordings: false });
@@ -708,6 +712,96 @@ async function drive(tools) {
     rmSync(inTrack("landscape", "copy_check.mp4"), { force: true });
     rmSync(inTrack("landscape", "half made.mp4.part"), { force: true });
     await api.refresh();
+  }
+  await driveLibrary(tools, myDrive);
+}
+
+/** The library itself in Google Drive. Two libraries of the check's own stand in for the ones on a
+ *  pilot's two computers: the first is moved into Drive, the second opens it from there, and both
+ *  save at once. The library the check was given is turned back to at the end, as it was. */
+async function driveLibrary(tools, myDrive) {
+  const { api, library } = tools;
+  const { js, errors } = await page(tools);
+  const before = library.root, scratch = mkdtempSync(join(tmpdir(), "fpv-hangar-drive-"));
+  const mac = join(scratch, "Mac", "FPV Hangar"), pc = join(scratch, "PC", "FPV Hangar"), shared = join(myDrive, libraryName);
+  const track = "Drive Check/Track 1";
+  const inMac = (...parts) => join(mac, ...track.split("/"), ...parts);
+  const ask = (what, ...details) => js(`return await window.hangar.ask(${[what, ...details].map((one) => JSON.stringify(one)).join(", ")})`);
+  const card = () => js(`
+    await window.showForSnapshot("settings");
+    const card = document.querySelector('[data-probe="drive card"]');
+    return card && { says: card.querySelector("#drive-library")?.textContent ?? null, buttons: [...card.querySelectorAll("button")].map((one) => one.textContent) };`);
+  try {
+    // The first computer's library: a track with a recording, its markers, and its entry form.
+    mkdirSync(inMac("Raw files"), { recursive: true });
+    mkdirSync(inMac("csv markers"), { recursive: true });
+    writeFileSync(inMac("Raw files", "drive_check.ts"), Buffer.alloc(2_000_000, 6));
+    writeFileSync(inMac("csv markers", "drive_check.csv"), "1,2,3\n");
+    writeFileSync(join(mac, "dashboard.json"), JSON.stringify({ email: "", answers: {}, tracks: { [track]: { formURL: "https://example.com/form" } } }));
+    mkdirSync(join(scratch, "PC"));
+
+    // A computer whose library is some other folder in Drive, the copy an older version kept there
+    // say, doesn't move it: the computer with the tracks goes first.
+    const oldCopy = join(myDrive, copyName);
+    mkdirSync(oldCopy, { recursive: true });
+    library.use(oldCopy);
+    await api.refresh();
+    const notFirst = await ask("lookInDrive", myDrive), notMoved = await ask("moveLibraryToDrive", myDrive);
+    say(/computer that has your tracks first/.test(notFirst.problem ?? "") && Boolean(notMoved.problem) && library.root === oldCopy && !existsSync(shared), "a library that is another folder in Drive isn't moved there", notFirst.problem ?? "it was offered");
+
+    library.use(mac);
+    await api.refresh();
+    let seen = await card();
+    say(Boolean(seen?.buttons.includes("Keep my library in Google Drive")) && !existsSync(shared), "the card offers to keep the library in Google Drive", seen?.buttons.join(" | ") ?? "no card");
+
+    // A copy being kept in Drive stops when the library goes there: it would only be a second one.
+    await ask("keepCopy", myDrive);
+    let look = await ask("lookInDrive", myDrive);
+    say(look.there === false && look.mine?.tracks === 1 && look.mine.recordings === 1 && look.mine.bytes > 2_000_000, "what would be moved is counted first", JSON.stringify(look.mine ?? look));
+    const moved = await ask("moveLibraryToDrive", myDrive);
+    say(moved.moved === true && library.root === shared && !existsSync(mac) && existsSync(join(shared, ...track.split("/"), "Raw files", "drive_check.ts")) && library.tracks.includes(track) && library.state(track).formURL === "https://example.com/form", "the library is moved into a folder of its own in Drive, and used from there", moved.problem ?? library.root);
+    say(!config().copyTo && config().library === undefined, "the copy kept in Drive is stopped, and a copy started on a folder remembers nothing of the move", JSON.stringify({ copyTo: config().copyTo, library: config().library }));
+    seen = await card();
+    say(/^Your library is in Google Drive/.test(seen?.says ?? "") && !seen.buttons.includes("Keep my library in Google Drive"), "the card says the library is in Google Drive", seen?.says ?? "no card");
+    say(Boolean((await ask("moveLibraryToDrive", myDrive)).problem), "it isn't moved there twice");
+
+    // The second computer, new, with a library of its own.
+    library.use(pc);
+    await api.refresh();
+    look = await ask("lookInDrive", myDrive);
+    const overIt = await ask("moveLibraryToDrive", myDrive);
+    say(look.there === true && look.ready === true && Boolean(overIt.problem) && library.root === pc, "on the other computer the library in Drive is found, and this one's isn't moved over it", JSON.stringify({ there: look.there, ready: look.ready, problem: overIt.problem }));
+    library.use(oldCopy);
+    await api.refresh();
+    look = await ask("lookInDrive", myDrive);
+    say(look.there === true && look.ready === true, "and once the library is in Drive, it is offered to that one to open", JSON.stringify({ there: look.there, problem: look.problem }));
+    library.use(pc);
+    await api.refresh();
+    const used = await ask("useLibraryInDrive", myDrive);
+    say(used.moved === true && library.root === shared && library.tracks.includes(track) && existsSync(pc), "it opens the library in Drive, and its own stays where it was", used.problem ?? library.root);
+
+    // Both saving at once: the first computer gives the track another form while this one keeps an email.
+    const other = new Library(shared, { ffmpeg: null, cache: join(scratch, "cache"), trash: async () => {}, fetch: async () => ({ ok: false, status: 404, text: async () => "" }) });
+    other.update(track, (state) => { state.formURL = "https://example.com/form-2"; });
+    await ask("setEmail", "pilot@example.com");
+    const kept = JSON.parse(readFileSync(join(shared, "dashboard.json"), "utf8"));
+    say(kept.email === "pilot@example.com" && kept.tracks[track]?.formURL === "https://example.com/form-2" && library.state(track).formURL === "https://example.com/form-2", "two computers saving at once each keep what the other did", JSON.stringify({ email: kept.email, form: kept.tracks[track]?.formURL }));
+
+    // Drive not open: its folder isn't there.
+    const closed = `${myDrive} (closed)`;
+    renameSync(myDrive, closed);
+    await api.refresh();
+    const away = await js(`await window.showForSnapshot("creator"); return document.querySelector('[data-probe="library away"]')?.textContent ?? null;`);
+    say(/Google Drive/.test(away ?? "") && !existsSync(myDrive) && library.tracks.length === 0, "with Drive not open the Video Creator says why, and nothing is made where the library was", away ?? "nothing said");
+    renameSync(closed, myDrive);
+    await api.refresh();
+    say(library.tracks.includes(track) && !library.away, "and when Drive is back, so is the library");
+    say(errors.length === 0, "nothing went wrong in the window", errors.slice(0, 3).join(" | "));
+  } finally {
+    setConfig({ copyTo: null, copyIsInDrive: false });
+    library.use(before);
+    await api.refresh();
+    rmSync(scratch, { recursive: true, force: true });
   }
 }
 
