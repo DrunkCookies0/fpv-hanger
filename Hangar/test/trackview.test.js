@@ -89,7 +89,7 @@ test("the tracks that come with the app are tracks", () => {
 });
 
 // ---- Building one by hand.
-import { togglePipe, openSteps, edgeAt, snap, lapPoints, lapFrom, startAt, startIndex, pipeKey } from "../shared/trackview.js";
+import { togglePipe, openSteps, edgeAt, snap, lapPoints, lapFrom, startAt, startIndex, pipeKey, storeys, storeyOf } from "../shared/trackview.js";
 
 test("a track with nothing built yet can be read for building on, and has room to start in", () => {
   assert.equal(readTrack({ pipes: [] }), null);
@@ -151,4 +151,11 @@ test("the start gate is at one of the lap's points, flown the way the line goes 
   assert.deepEqual(startAt(points, 4).heading, [0, -1, 0]);
   assert.equal(startAt(points, 9), null);
   assert.equal(startIndex(points, null), -1);
+});
+
+test("a point of the lap is on the storey its height puts it on", () => {
+  // Through a gate one section high is 0.5: the first storey. On a bar between two is the upper one.
+  assert.deepEqual([0, 0.5, 0.75, 1, 1.5, 2.25, 3, 4].map(storeyOf), [0, 0, 0, 1, 1, 2, 3, 3]);
+  assert.equal(storeyOf(-0.25), 0);
+  assert.equal(storeys, 4);
 });

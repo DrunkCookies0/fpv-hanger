@@ -162,7 +162,7 @@ window.showForSnapshot = async (which) => {
   } else if (name === "trackview") {
     // The track in 3D, with the drone held a fifth of the way round. "trackview:<track>@turn,tilt,far"
     // looks from a given side, to set it beside a photo of the real thing, and "#pipes" or "#lap"
-    // on the end shows it being built.
+    // on the end shows it being built ("#lap0", "#lap1" and so on with the plan at one height).
     const [shown, work] = detail.split("#");
     const [which, from] = shown.split("@");
     const track = allTracks().includes(which) ? which : aTrack();
@@ -172,7 +172,10 @@ window.showForSnapshot = async (which) => {
       const [turn, tilt, far] = (from ?? "").split(",").map(Number);
       const { openTrackView } = await import("./views/trackview.js");
       await openTrackView(track, { still: 0.21, from: from ? { turn, tilt, far } : null });
-      if (work === "pipes" || work === "lap") app.trackView?.work(work);
+      const lap = /^lap([0-9])?$/.exec(work ?? "");
+      if (work === "pipes" || lap) app.trackView?.work(lap ? "lap" : "pipes");
+      // "#lap1" shows the lap being drawn with the plan at one height: the second section up.
+      if (lap?.[1]) app.trackView?.showStorey(Number(lap[1]));
     }
   } else if (name === "notice") app.notice = detail;
   else go({ name: "home" });

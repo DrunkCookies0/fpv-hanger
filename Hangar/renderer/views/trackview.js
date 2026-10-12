@@ -3,13 +3,14 @@
 // page under it being drawn again doesn't disturb it.
 //
 // It is also where a track is built: sections are clicked on and off in the picture, and the lap is
-// put down point by point on a plan of the track seen from above.
+// put down point by point on a plan of the track seen from above. A lap that goes through a stack
+// of gates passes over itself, so the plan can show one height at a time.
 
 import { app, ask, hangar, loadTrack, render, trackName, eventOf } from "../core.js";
 import { h, fill, label, primary, secondary, plain } from "../ui.js";
 import { confirm, sheetIsOpen } from "../sheets.js";
-import { bin } from "../words.js";
-import { camera, extent, farFor, homeView, jointsOf, lapLine, togglePipe, openSteps, edgeAt, snap, lapPoints, lapFrom, startAt, startIndex, reach } from "../../shared/trackview.js";
+import { bin, keys } from "../words.js";
+import { camera, extent, farFor, homeView, jointsOf, lapLine, togglePipe, openSteps, edgeAt, snap, lapPoints, lapFrom, startAt, startIndex, reach, storeys, storeyOf } from "../../shared/trackview.js";
 import { clock } from "../../shared/trackvideo.js";
 
 /** What the picture is drawn in. The pipes are the white plastic the gates are built of, with the
@@ -59,6 +60,8 @@ class TrackView {
     this.fingers = new Map();
     this.press = null;
     this.dragging = -1;
+    /** A press on the plan: where it went down, whether it has moved, and the points under it. */
+    this.planPress = null;
     /** The plan's room on the screen, the place on the grid at its middle, and how many sections fit across its shorter side. */
     this.plan = { w: 0, h: 0, cx: 0.5, cy: 0.5, span: 5 };
     this.onKey = (event) => this.key(event);
@@ -155,6 +158,7 @@ class TrackView {
     const reset = secondary("Reset view", () => {
       this.frameTrack();
       Object.assign(this.view, this.home);
+      if (this.edit?.mode === "lap") this.framePlan();
       this.refresh();
     });
     fill(this.controlsBox,
@@ -170,7 +174,7 @@ class TrackView {
     fill(this.hintBox, this.problem ?? (edit?.mode === "pipes"
       ? "Click a faint section to add it · click a pipe to take it away · drag to turn"
       : edit?.mode === "lap"
-        ? "Click the plan to add a point after the one picked out · drag a point to move it · Delete takes it away"
+        ? `Click the plan to add a point after the one picked out · drag a point to move it · ${keys("alt")}-click puts one on top of another · scroll to zoom the plan`
         : `Drag to turn · scroll or pinch to zoom${this.lap ? " · Space to play or pause" : ""}`));
     this.planBox.hidden = edit?.mode !== "lap";
 
@@ -197,7 +201,7 @@ class TrackView {
         this.videoField(),
       );
     } else if (edit?.mode === "lap") {
-      fill(this.sideBox, this.pointPanel(), lapList, this.videoField());
+      fill(this.sideBox, this.storeyPanel(), this.pointPanel(), lapList, this.videoField());
     } else {
       fill(this.sideBox,
         lapList,
@@ -277,6 +281,50 @@ class TrackView {
     return h("section", label("TRACK VIDEO"), input, h("p.tv-note", "A link to the video of the track, if there is one. It is only kept as a button to watch it."));
   }
 
+  /** Whether a point of the lap is among those the plan is showing. */
+  onPlan(point) {
+    return this.edit.storey === null || storeyOf(point.at[2]) === this.edit.storey;
+  }
+
+  /** Which heights the plan shows. Through a stack of gates the lap crosses one spot on the floor
+   *  at several heights, and from above those points lie on top of one another. */
+  storeyPanel() {
+    const edit = this.edit;
+    const title = (storey) => (storey === null ? "All" : storey === storeys - 1 ? `${storey}+` : `${storey}–${storey + 1}`);
+    this.storeyTabs = [null, ...Array.from({ length: storeys }, (_, storey) => storey)].map((storey) =>
+      h("button.tv-tab", { type: "button", role: "tab", "aria-selected": String(edit.storey === storey), onclick: () => this.showStorey(storey) }, title(storey)));
+    this.storeyNote = h("p.tv-note", this.storeyWords());
+    return h("section", label("HEIGHT ON THE PLAN"),
+      h("div.tv-tabs.tv-storeys", { role: "tablist", "aria-label": "Which heights the plan shows, in sections up from the floor" }, this.storeyTabs),
+      this.storeyNote);
+  }
+
+  storeyWords() {
+    const storey = this.edit.storey;
+    if (storey === null) return "Sections up from the floor. Where the lap passes over itself, as it does through a stack of gates, pick a height: the plan then shows only the points that high.";
+    const range = storey === storeys - 1 ? `${storey} sections up and higher` : `${storey} to ${storey + 1} sections up`;
+    return `Only the points ${range} can be picked and moved. A click adds one at ${storey + 0.5}. The rest are faint and stay where they are.`;
+  }
+
+  showStorey(storey) {
+    const edit = this.edit;
+    if (!edit || edit.storey === storey) return;
+    edit.storey = storey;
+    if (edit.points[edit.picked] && !this.onPlan(edit.points[edit.picked])) edit.picked = -1;
+    this.chrome();
+    this.refresh();
+  }
+
+  /** The plan goes to the height of a point that is picked out or lifted, when it is showing one height. */
+  follow(point) {
+    const edit = this.edit;
+    if (!point || edit.storey === null || edit.storey === storeyOf(point.at[2])) return;
+    edit.storey = storeyOf(point.at[2]);
+    // Said without making the side again, which would take a slider out of the hand that is dragging it.
+    this.storeyTabs?.forEach((tab, index) => tab.setAttribute("aria-selected", String(index - 1 === edit.storey)));
+    if (this.storeyNote) this.storeyNote.textContent = this.storeyWords();
+  }
+
   /** What can be done to the point of the lap that is picked out. */
   pointPanel() {
     const edit = this.edit, point = edit.points[edit.picked] ?? null;
@@ -289,6 +337,7 @@ class TrackView {
     const height = h("input", { type: "range", min: 0, max: highest, step: 0.25, value: point.at[2], "aria-label": "How high, in sections", oninput: () => {
       point.at[2] = Number(height.value);
       up.textContent = `${point.at[2]}`;
+      this.follow(point);
       this.touched();
     } });
     const name = h("input.field", { type: "text", placeholder: edit.picked === 0 ? "What this move is called" : "It carries on the move before", value: point.name ?? "", "aria-label": "The move that starts here", oninput: () => {
@@ -329,7 +378,7 @@ class TrackView {
       const points = lapPoints(this.model.lap);
       const start = startIndex(points, this.model.start);
       if (start >= 0) points[start].start = true;
-      this.edit = { mode, before: structuredClone(this.model), points, picked: -1, hover: null, dirty: false };
+      this.edit = { mode, before: structuredClone(this.model), points, picked: -1, hover: null, dirty: false, storey: null };
       this.state.playing = false;
     }
     this.edit.mode = mode;
@@ -357,6 +406,7 @@ class TrackView {
   pick(index) {
     if (!this.edit || this.edit.picked === index) return;
     this.edit.picked = index;
+    this.follow(this.edit.points[index]);
     this.chrome();
     this.refresh();
   }
@@ -471,6 +521,7 @@ class TrackView {
       this.touched();
     } else if (point && (event.key === "[" || event.key === "]")) {
       point.at[2] = Math.max(0, Math.min(highest, snap(point.at[2] + (event.key === "]" ? 0.25 : -0.25))));
+      this.follow(point);
       this.touched();
       this.chrome();
     } else if (turns && onPicture) this.turn(...turns);
@@ -572,7 +623,7 @@ class TrackView {
     const places = [...this.model.pipes.flat(), ...this.edit.points.map((point) => point.at)];
     const all = places.length > 0 ? places : [[0, 0, 0], [1, 1, 0]];
     const low = [0, 1].map((axis) => Math.min(...all.map((place) => place[axis]))), high = [0, 1].map((axis) => Math.max(...all.map((place) => place[axis])));
-    Object.assign(this.plan, { span: Math.max(high[0] - low[0], high[1] - low[1]) + 4, cx: (low[0] + high[0]) / 2, cy: (low[1] + high[1]) / 2 });
+    Object.assign(this.plan, { span: Math.max(high[0] - low[0], high[1] - low[1]) + 3, cx: (low[0] + high[0]) / 2, cy: (low[1] + high[1]) / 2 });
   }
 
   /** How many pixels a section is on the plan. */
@@ -583,13 +634,17 @@ class TrackView {
     return { x: this.plan.w / 2 + (at[0] - this.plan.cx) * this.planScale, y: this.plan.h / 2 - (at[1] - this.plan.cy) * this.planScale };
   }
 
+  /** A place on the plan as one on the grid, exactly. */
+  planPlace(spot) {
+    const scale = this.planScale;
+    return [this.plan.cx + (spot.x - this.plan.w / 2) / scale, this.plan.cy - (spot.y - this.plan.h / 2) / scale];
+  }
+
   /** A place on the plan as one on the grid, to a quarter of a section, and kept inside what the plan shows. */
   fromPlan(spot) {
     const scale = this.planScale, inside = (value, middle, room) => Math.max(middle - room / scale / 2 + 0.25, Math.min(middle + room / scale / 2 - 0.25, value));
-    return [
-      snap(inside(this.plan.cx + (spot.x - this.plan.w / 2) / scale, this.plan.cx, this.plan.w)),
-      snap(inside(this.plan.cy - (spot.y - this.plan.h / 2) / scale, this.plan.cy, this.plan.h)),
-    ];
+    const [x, y] = this.planPlace(spot);
+    return [snap(inside(x, this.plan.cx, this.plan.w)), snap(inside(y, this.plan.cy, this.plan.h))];
   }
 
   listenToPlan() {
@@ -601,16 +656,24 @@ class TrackView {
         canvas.setPointerCapture(event.pointerId);
       } catch {}
       const spot = this.spot(canvas, event);
-      let hit = -1, hitFar = 14;
+      // The points under the pointer, of those the plan is showing, in the order they are flown.
+      const under = [];
       edit.points.forEach((point, index) => {
+        if (!this.onPlan(point)) return;
         const at = this.toPlan(point.at), far = Math.hypot(at.x - spot.x, at.y - spot.y);
-        // Of two on top of each other, the one already picked out is the one meant.
-        if (far < hitFar - (index === edit.picked ? -1 : 0)) [hit, hitFar] = [index, far];
+        if (far < 14) under.push({ index, far });
       });
+      // Of several on top of each other, the one already picked out is the one meant, and a
+      // second click on it goes on to the next. With Option or Alt held, a new one goes on top.
+      let hit = -1;
+      if (under.length > 0 && !event.altKey) hit = under.some((one) => one.index === edit.picked) ? edit.picked : under.reduce((a, b) => (b.far < a.far ? b : a)).index;
+      this.planPress = { x: event.clientX, y: event.clientY, moved: false, stack: under.map((one) => one.index), was: hit >= 0 && hit === edit.picked ? hit : -1 };
       if (hit < 0) {
         // A new point goes after the one picked out, at its height, or at the end at gate height.
-        const [x, y] = this.fromPlan(spot), after = edit.picked >= 0 ? edit.picked : edit.points.length - 1;
-        edit.points.splice(after + 1, 0, { at: [x, y, edit.points[after]?.at[2] ?? 0.5], name: edit.points.length === 0 ? "" : null });
+        // When the plan shows one height, it goes at that height.
+        const [x, y] = this.fromPlan(spot), after = edit.picked >= 0 ? edit.picked : edit.points.length - 1, before = edit.points[after];
+        const height = edit.storey === null || (before && storeyOf(before.at[2]) === edit.storey) ? before?.at[2] ?? 0.5 : edit.storey + 0.5;
+        edit.points.splice(after + 1, 0, { at: [x, y, height], name: edit.points.length === 0 ? "" : null });
         hit = after + 1;
         edit.picked = hit;
         this.touched({ list: false });
@@ -621,15 +684,39 @@ class TrackView {
       this.dragging = hit;
     });
     canvas.addEventListener("pointermove", (event) => {
-      const point = this.edit?.points[this.dragging];
+      const point = this.edit?.points[this.dragging], press = this.planPress;
       if (!point || this.edit.mode !== "lap") return;
+      // A click with a little wobble in it isn't a drag.
+      if (press && !press.moved && Math.hypot(event.clientX - press.x, event.clientY - press.y) <= 4) return;
+      if (press) press.moved = true;
       const [x, y] = this.fromPlan(this.spot(canvas, event));
       if (x === point.at[0] && y === point.at[1]) return;
       point.at[0] = x;
       point.at[1] = y;
       this.touched();
     });
-    for (const name of ["pointerup", "pointercancel"]) canvas.addEventListener(name, () => { this.dragging = -1; });
+    canvas.addEventListener("pointerup", () => {
+      const press = this.planPress, edit = this.edit;
+      this.dragging = -1;
+      this.planPress = null;
+      if (!press || press.moved || press.was < 0 || press.stack.length < 2 || edit?.mode !== "lap") return;
+      this.pick(press.stack[(press.stack.indexOf(press.was) + 1) % press.stack.length]);
+    });
+    canvas.addEventListener("pointercancel", () => {
+      this.dragging = -1;
+      this.planPress = null;
+    });
+    // The wheel, or two fingers, zooms the plan about the place under the pointer.
+    canvas.addEventListener("wheel", (event) => {
+      if (this.edit?.mode !== "lap") return;
+      event.preventDefault();
+      const spot = this.spot(canvas, event), before = this.planPlace(spot);
+      this.plan.span = Math.max(1.5, Math.min(40, this.plan.span * Math.exp(event.deltaY * 0.0012)));
+      const after = this.planPlace(spot);
+      this.plan.cx += before[0] - after[0];
+      this.plan.cy += before[1] - after[1];
+      this.refresh();
+    }, { passive: false });
   }
 
   drawPlan() {
@@ -678,10 +765,11 @@ class TrackView {
       pen.fillStyle = paint.shade;
       pen.fillText(String(a[2]), at.x + (sideways ? 0 : scale * 0.13), at.y - (sideways ? scale * 0.13 : 0));
     }
-    // The lap: its line, then its points in the order they are flown.
+    // The lap: its line, then its points in the order they are flown. When the plan shows one
+    // height, the line is faint and only its stretches at that height are bright.
     pen.strokeStyle = paint.accent;
     pen.lineWidth = 2;
-    pen.globalAlpha = 0.6;
+    pen.globalAlpha = edit.storey === null ? 0.6 : 0.16;
     pen.beginPath();
     if (this.lap) {
       this.lap.line.forEach((entry, index) => {
@@ -690,6 +778,19 @@ class TrackView {
         else pen.lineTo(at.x, at.y);
       });
       pen.closePath();
+      if (edit.storey !== null) {
+        pen.stroke();
+        pen.globalAlpha = 0.75;
+        pen.beginPath();
+        const line = this.lap.line;
+        line.forEach((entry, index) => {
+          const next = line[(index + 1) % line.length];
+          if (storeyOf(entry.point[2]) !== edit.storey || storeyOf(next.point[2]) !== edit.storey) return;
+          const a = this.toPlan(entry.point), b = this.toPlan(next.point);
+          pen.moveTo(a.x, a.y);
+          pen.lineTo(b.x, b.y);
+        });
+      }
     } else {
       edit.points.forEach((point, index) => {
         const at = this.toPlan(point.at);
@@ -702,6 +803,14 @@ class TrackView {
     const radius = Math.max(8, Math.min(11, scale * 0.16));
     edit.points.forEach((point, index) => {
       const at = this.toPlan(point.at), picked = index === edit.picked;
+      if (!this.onPlan(point)) {
+        // A point at another height: there, but out of the way.
+        pen.fillStyle = "rgba(255, 214, 10, 0.3)";
+        pen.beginPath();
+        pen.arc(at.x, at.y, 2.5, 0, 7);
+        pen.fill();
+        return;
+      }
       if (point.start) {
         pen.strokeStyle = paint.text;
         pen.lineWidth = 1.5;
@@ -939,6 +1048,13 @@ class TrackView {
       edit.points.forEach((point, index) => {
         const at = see(point.at);
         if (!at) return;
+        if (!this.onPlan(point)) {
+          pen.fillStyle = "rgba(255, 214, 10, 0.35)";
+          pen.beginPath();
+          pen.arc(at.x, at.y, 2.5, 0, 7);
+          pen.fill();
+          return;
+        }
         const picked = index === edit.picked, radius = picked ? 8 : 6;
         pen.fillStyle = picked ? paint.accent : "#16191e";
         pen.strokeStyle = paint.accent;

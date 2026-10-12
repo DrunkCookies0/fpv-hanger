@@ -305,9 +305,9 @@ async function trackview(tools) {
   rmSync(file, { force: true });
   const view = "window.hangar_.app.trackView";
   // A click, or a drag, on one of the view's two canvases, at places given in its own pixels.
-  const press = (canvas, places) => js(`(() => {
+  const press = (canvas, places, { altKey = false } = {}) => js(`(() => {
     const canvas = ${view}.${canvas}, box = canvas.getBoundingClientRect(), places = ${JSON.stringify(places)};
-    const send = (kind, place, buttons) => canvas.dispatchEvent(new PointerEvent(kind, { clientX: box.left + place.x, clientY: box.top + place.y, pointerId: 7, buttons, bubbles: true }));
+    const send = (kind, place, buttons) => canvas.dispatchEvent(new PointerEvent(kind, { clientX: box.left + place.x, clientY: box.top + place.y, pointerId: 7, buttons, bubbles: true, altKey: ${altKey} }));
     send("pointermove", places[0], 0);
     send("pointerdown", places[0], 1);
     for (const place of places.slice(1)) send("pointermove", place, 1);
@@ -367,6 +367,42 @@ async function trackview(tools) {
     await js(`${view}.sideBox.querySelector('input[type="checkbox"]').click()`);
     lap = await js(`return (() => { const v = ${view}; return { points: v.edit.points.length, moved: v.edit.points.at(-1).at, start: v.model.start, moves: v.model.lap.map((move) => [move.move, move.by.length]) }; })()`);
     say(lap.points === plan.had + 4 && lap.moved[0] === last.at[0] + 0.5 && lap.moved[2] === 1.5 && lap.start?.at[2] === 1.5 && lap.moves.at(-1)[0] === "Over the top", "a point is dragged, lifted, named and made the start", JSON.stringify(lap.moves));
+
+    // A lap through a stack of gates passes over itself. A point goes on top of another with Option
+    // or Alt held, a second click on the two goes from one to the other, and the plan can show one
+    // height at a time, where a click adds a point at that height and leaves the others alone.
+    const [low, other, third] = plan.corners, at = (corner) => `p.at[0] === ${corner.at[0]} && p.at[1] === ${corner.at[1]}`;
+    await press("planCanvas", [low], { altKey: true });
+    let stack = await js(`return (() => { const e = ${view}.edit; return { points: e.points.length, picked: e.picked, under: e.points.filter((p) => ${at(low)}).length }; })()`);
+    say(stack.points === plan.had + 5 && stack.under === 2 && stack.picked === plan.had + 4, "with Option or Alt held, a click puts a point on top of another", JSON.stringify(stack));
+    await press("planCanvas", [low]);
+    const turn = await js(`return ${view}.edit.picked`);
+    await press("planCanvas", [low]);
+    const back = await js(`return ${view}.edit.picked`);
+    say(turn === plan.had && back === plan.had + 4, "a second click on two points goes from one to the other", `${stack.picked + 1} to ${turn + 1} and back to ${back + 1}`);
+    await js(`(() => {
+      const side = ${view}.sideBox, height = side.querySelector('input[type="range"]');
+      height.value = "1.5";
+      height.dispatchEvent(new Event("input", { bubbles: true }));
+      ${view}.storeyTabs[2].click();
+    })()`);
+    await press("planCanvas", [other]);
+    stack = await js(`return (() => { const v = ${view}, e = v.edit; return { storey: e.storey, points: e.points.length, there: e.points.filter((p) => ${at(other)}).map((p) => p.at[2]), picked: e.points[e.picked]?.at, shown: e.points.filter((p) => v.onPlan(p)).length, words: v.storeyNote.textContent }; })()`);
+    say(stack.storey === 1 && stack.points === plan.had + 6 && JSON.stringify(stack.there) === "[0.5,1.5]" && stack.picked?.[2] === 1.5, "with the plan showing one height, a click over a point lower down adds one at that height", JSON.stringify(stack.there));
+    // The wheel zooms the plan about the place under the pointer.
+    const zoomed = await js(`return (() => {
+      const v = ${view}, canvas = v.planCanvas, box = canvas.getBoundingClientRect(), spot = ${JSON.stringify({ x: third.x, y: third.y })};
+      const before = v.planPlace(spot), span = v.plan.span;
+      canvas.dispatchEvent(new WheelEvent("wheel", { clientX: box.left + spot.x, clientY: box.top + spot.y, deltaY: -300, bubbles: true, cancelable: true }));
+      const after = v.planPlace(spot);
+      return { closer: v.plan.span < span * 0.8, slipped: Math.hypot(after[0] - before[0], after[1] - before[1]) };
+    })()`);
+    // (A wheel says where it is to the whole pixel, so the place may slip by a part of one.)
+    say(zoomed.closer && zoomed.slipped < 0.02, "the wheel zooms the plan about the place under the pointer", JSON.stringify(zoomed));
+    // A click on a point in the picture brings the plan to that point's height.
+    await js(`(() => { const v = ${view}; v.pick(${plan.had}); })()`);
+    const followed = await js(`return ${view}.edit.storey`);
+    say(followed === 0, "picking out a point at another height brings the plan to it", `showing ${followed}`);
 
     // Done keeps it as the pilot's own, in the track's folder, and it opens again as theirs.
     await js(`${view}.finishEdit()`);

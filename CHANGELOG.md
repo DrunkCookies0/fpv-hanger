@@ -2,6 +2,12 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.14.0 (12 October 2026)
+
+- RaceGOW6 Track 2 has its lap. Open **Track in 3D** on Track 2 and it is flown as the series' video flies it: through the start gate and round the back, back through the bottom of the cube, up and sideways through the top, round the pole and in through the roof, sideways through the bottom, up and back through the top, then round and over the start gate into the next lap.
+- A lap that passes over itself can be drawn. Through a stack of gates the lap crosses one spot on the floor at several heights, and on the plan from above those points lay on top of each other, where they couldn't be told apart or added to. **Height on the plan** now shows one height at a time: pick 0–1, 1–2 and so on, and only the points that high can be picked and moved, and a click adds one at that height. Picking out a point in the 3D picture brings the plan to its height.
+- More ways round a crowded plan. Hold Option (Alt on Windows) and click to put a point right on top of another. Click twice on a pile of points to go from one to the next. Scroll over the plan to zoom in on a tight corner, and **Reset view** brings it back.
+
 ## v0.13.1 (9 October 2026)
 
 - Reading a track from its video finds its own way round the video. It works out where the parts lists fade and the build starts, and where anything is laid over the picture afterwards, and looks at the track in between. On RaceGOW6 Track 1 it now finds all 14 sections without being told how many there are. A video that shows a track straight on, as Track 2's does, hides the sections that run away from the camera, and it finds only some of them there: check what it finds against the picture it shows you, and put the rest in by hand.

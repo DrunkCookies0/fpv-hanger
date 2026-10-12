@@ -183,6 +183,12 @@ export function edgeAt(edges, see, x, y, within = 9) {
 /** A number brought to the nearest step, a quarter of a section unless told otherwise. */
 export const snap = (value, step = 0.25) => Math.round(value / step) * step;
 
+/** A lap through a stack of gates crosses the same spot on the floor at one height after another,
+ *  so its points are told apart by storey: the first section up from the floor is 0, the next 1,
+ *  and everything from the last one up counts as that one. */
+export const storeys = 4;
+export const storeyOf = (height) => Math.min(storeys - 1, Math.max(0, Math.floor(height)));
+
 /** A lap as one list of points, each with the name of the move it starts, or null when it carries
  *  on the move before. */
 export function lapPoints(lap) {

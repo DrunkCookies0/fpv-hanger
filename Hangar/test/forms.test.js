@@ -1,5 +1,5 @@
 // Reading an entry form and knowing what the app can fill in. The form here is made up; a second
-// test reads the season's real Track 1 form when the network answers.
+// test reads the season's real form when the network answers and a track is taking entries.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseForm, parseDeadline, roleOf, fillScript, looksLikeEmail, looksLikeYouTube, isFormAddress } from "../shared/forms.js";
@@ -48,17 +48,22 @@ test("the script that fills the form carries the answers, and small checks on wh
   assert.ok(isFormAddress("https://docs.google.com/forms/d/e/abc/viewform") && isFormAddress("https://forms.gle/abc") && !isFormAddress("http://docs.google.com/forms/x") && !isFormAddress("nonsense"));
 });
 
-test("the season's real Track 1 form reads as a form", { skip: process.env.HANGAR_OFFLINE ? "offline" : false }, async (context) => {
-  let form;
+test("the season's real entry form reads as a form, while one is taking entries", { skip: process.env.HANGAR_OFFLINE ? "offline" : false }, async (context) => {
+  let form = null;
   try {
-    const season = await readSeason();
-    const address = season.find((track) => track.form)?.form;
-    if (!address) return context.skip("no form is posted at the moment");
-    form = parseForm(await (await fetch(address, { signal: AbortSignal.timeout(20000) })).text());
+    const posted = (await readSeason()).filter((track) => track.form).reverse();
+    if (posted.length === 0) return context.skip("no form is posted at the moment");
+    // A track's form closes at its deadline, and a closed form has no questions to read. The
+    // newest one posted is the one that is open, when any is.
+    for (const track of posted) {
+      form = parseForm(await (await fetch(track.form, { signal: AbortSignal.timeout(20000) })).text());
+      if (form && form.questions.length > 0) break;
+    }
   } catch (error) {
     return context.skip(`the network didn't answer: ${error.message}`);
   }
-  assert.ok(form && form.questions.length >= 4);
+  if (!form || form.questions.length === 0) return context.skip("no form is taking entries at the moment");
+  assert.ok(form.questions.length >= 4);
   const roles = form.questions.map((question) => question.role).filter(Boolean).sort();
   assert.deepEqual(roles, ["handle", "link", "number", "time"]);
 });

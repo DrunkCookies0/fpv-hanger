@@ -565,6 +565,8 @@ textarea.field { resize: vertical; line-height: 1.38; }
 .tv-tabs { display: inline-flex; padding: 3px; border-radius: 999px; background: var(--card); box-shadow: inset 0 0 0 1px var(--stroke); -webkit-app-region: no-drag; }
 .tv-tab { border: 0; border-radius: 999px; padding: 6px 14px; background: none; font: 700 12px var(--face); color: var(--dim); }
 .tv-tab[aria-selected="true"] { background: var(--raised); color: #fff; }
+.tv-side .tv-storeys { display: flex; }
+.tv-side .tv-storeys .tv-tab { flex: 1; padding: 6px 2px; font-variant-numeric: tabular-nums; }
 .tv-hint.warn { color: #ff9f0a; }
 .tv-field { display: flex; flex-direction: column; gap: 6px; font: 600 12px var(--face); color: var(--dim); }
 .tv-check { display: flex; align-items: center; gap: 8px; font: 600 12px var(--face); color: rgba(255, 255, 255, 0.92); }
