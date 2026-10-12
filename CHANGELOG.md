@@ -2,6 +2,14 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.16.0 (12 October 2026)
+
+- A second copy of your library in Google Drive. In **Pilot & settings**, under **Google Drive**, press **Keep a copy in Google Drive**. From then on every recording you add and every video you make is copied into a folder called FPV Hangar in your Drive, with its markers and music, laid out as your library is: the event, then the track, then Raw files, landscape, vertical and the rest. It happens by itself after you add recordings, make a video or save markers, and **Copy now** does it when you ask.
+- It needs Google's own **Drive for desktop** on your computer, signed in. That program does the uploading, whether or not FPV Hangar is open, so FPV Hangar never signs in to Google and never sees a password. If Drive isn't on the computer the card says so and links to Google's page for it. **Use another folder…** keeps the copy anywhere else instead: another service's folder, or another disk.
+- The copy only grows. A file that is new or has changed is copied; one you delete from your library stays in the copy until you delete it there. Recordings are most of a library's size, and a free Google account holds 15 GB, so **Copy the recordings too** can be unticked to leave them out.
+- A track's page says how the copy is doing beside its buttons: copying, all copied, or not copied and why, such as Drive not being open.
+- Recordings straight from the card. With the card from your goggles or a camera plugged in, a track's page says so, and **Add from the card…** lists the recordings on it, the newest first. The ones you haven't got from your last day of flying are ticked already; one that is in your library already says which track it is in. **Add clips…** offers the card as well as choosing files. The card is only read, never changed.
+
 ## v0.15.0 (12 October 2026)
 
 - Betaflight, in the Hangar. Under **Firmware & setup** on the first screen, **Betaflight** opens Betaflight's own app inside FPV Hangar: plug a flight controller in to set it up, tune it and flash it. It comes from Betaflight's own site, so it is always their newest release, and it works without a connection once it has been opened.

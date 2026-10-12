@@ -52,6 +52,8 @@ export const app = {
   /** True once they have been asked for, and while they are being read. */
   boardsAsked: false,
   boardsReading: false,
+  /** The cards plugged in, as seen from the track that is showing: { track, cards }. */
+  cards: null,
 };
 
 /** Reads the season's leaderboards, again if told to, and draws the page when they arrive. */
@@ -126,6 +128,17 @@ export async function loadForm(track, again = false) {
   if (app.page.name === "track" && app.page.track === track) render();
 }
 
+/** Looks for a card from the goggles, for the track that is showing. The page is drawn again
+ *  when what is plugged in, or what is new on it, has changed. */
+export async function loadCards(track, again = false) {
+  const found = await ask("cards", track, { again });
+  if (app.page.name !== "track" || app.page.track !== track) return;
+  const sum = (cards) => JSON.stringify((cards ?? []).map((card) => [card.folder, card.recordings.map((recording) => [recording.path, recording.in])]));
+  const changed = app.cards?.track !== track || sum(app.cards.cards) !== sum(found.cards);
+  app.cards = { track, cards: found.cards };
+  if (changed) render();
+}
+
 /** Goes to a page. */
 export function go(page) {
   app.page = page;
@@ -134,6 +147,16 @@ export function go(page) {
     ask("remember", { lastTrack: page.track });
     if (app.state) app.state.lastTrack = page.track;
     loadTrack(page.track).then(() => loadForm(page.track));
+    loadCards(page.track);
+  }
+  // Drive may have been set up since the app was opened.
+  if (page.name === "settings" && app.state?.drive?.kind === "off") {
+    ask("lookForDrive").then((answer) => {
+      if (answer?.state && app.page.name === "settings") {
+        app.state = answer.state;
+        render();
+      }
+    });
   }
   render();
 }
@@ -181,6 +204,8 @@ export async function refresh({ quietly = false } = {}) {
   if (app.page.name === "track") {
     await loadTrack(app.page.track);
     loadForm(app.page.track);
+    // A card may have been plugged in while the pilot was elsewhere.
+    loadCards(app.page.track, true);
   }
   render();
 }

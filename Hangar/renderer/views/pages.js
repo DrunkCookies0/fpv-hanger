@@ -6,6 +6,7 @@ import { placeOf, ordinal, sheet as boardSheet } from "../../shared/leaderboard.
 import { bin, fileBrowser, season, comingSoon, guide } from "../words.js";
 import * as act from "../actions.js";
 import { showNote, showSetUp } from "./notes.js";
+import { driveCard } from "./drive.js";
 import { lookFor, drawCornerTimer, picture, typefaceReady } from "../timer.js";
 import { Race } from "../../shared/timing.js";
 
@@ -312,6 +313,7 @@ export function settings() {
         !state.libraryIsFixed && secondary("Use another folder…", act.chooseLibrary, { disabled: Boolean(state.job), help: "Keep your tracks somewhere else. Nothing is moved for you." }),
       ),
     ),
+    driveCard(),
     versionCard(),
   );
 }

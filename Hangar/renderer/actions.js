@@ -1,6 +1,6 @@
 // What the buttons do: the things that change the library, each asking first where that is called for.
 
-import { app, ask, take, say, render, go, settle, loadTrack, loadForm, trackName, hangar } from "./core.js";
+import { app, ask, take, say, render, go, settle, loadTrack, loadForm, loadCards, trackName, hangar } from "./core.js";
 import { question, confirm, showSheet } from "./sheets.js";
 import { h, icon, primary, secondary } from "./ui.js";
 import { bin, Bin } from "./words.js";
@@ -94,6 +94,12 @@ async function added(answer, track) {
 /** Asks which recordings to add to a track. */
 export async function chooseClips(track) {
   added(await ask("chooseClips", track), track);
+}
+
+/** Adds recordings picked from a card. */
+export async function addFromCard(track, paths) {
+  if (paths.length > 0) added(await ask("addClips", track, paths), track);
+  loadCards(track, true);
 }
 
 /** Adds recordings dropped onto a track's page. */

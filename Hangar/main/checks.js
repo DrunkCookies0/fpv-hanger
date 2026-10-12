@@ -9,6 +9,12 @@
 //   form     opens the first track's real entry form, filled in with made-up answers, and reads
 //            back what it then holds. Nothing is sent. This is how to tell whether Google has
 //            changed its page.
+//   drive    keeps a copy of the library in a folder standing in for Google Drive (`--drive
+//            <folder>`): what is copied and what isn't, a new file and a changed one following,
+//            one that is deleted staying, Drive not being open, and stopping
+//   cards    a card from the goggles, with folders standing in for cards (`--cards <folder>`): the
+//            track's page says one is plugged in, its recordings are listed with the new ones
+//            from the last day ticked, and the ones picked are copied in and the card left alone
 //   outside  other projects' tools: one opens over its place in the window, a list of devices is
 //            chosen from, and a made-up release of the program the app keeps up to date is fetched,
 //            checked and put in place, all in a folder of its own. With `--live` it also opens
@@ -18,7 +24,7 @@
 import { app } from "electron";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, writeFileSync, appendFileSync, copyFileSync, cpSync, createReadStream, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync, appendFileSync, copyFileSync, cpSync, createReadStream, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, utimesSync } from "node:fs";
 import { createServer } from "node:http";
 import { EOL, arch, cpus, release, tmpdir, totalmem, version as systemVersion } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -45,7 +51,7 @@ function say(ok, what, detail = "") {
 }
 
 export async function run(which, tools) {
-  const checks = { editor, video, pages, form, bookends, trackview, trackvideo, outside, update, updating, carryover, everything };
+  const checks = { editor, video, pages, form, bookends, trackview, trackvideo, outside, drive, cards, update, updating, carryover, everything };
   if (report) writeFileSync(report, "");
   if (!checks[which]) {
     console.error(`There is no check called ${which}. There are: ${Object.keys(checks).join(", ")}.`);
@@ -578,6 +584,215 @@ async function outside(tools) {
  * what is found can be set against it. `--track <number>` picks which (the first unless told).
  * It plays the video from YouTube in a window nobody sees, so it needs the network.
  */
+/** The copy of the library in Google Drive, with a folder standing in for where Drive shows a
+ *  pilot's files. Nothing of Google's is called on, and no Drive on this computer is looked for. */
+async function drive(tools) {
+  const { api, library } = tools;
+  const place = argument("--drive");
+  if (!place) return note("   (give a folder to stand in for Google Drive with --drive, and this is tried)");
+  const myDrive = resolve(place), root = join(myDrive, "FPV Hangar");
+  mkdirSync(myDrive, { recursive: true });
+  const track = library.tracks[0];
+  if (!say(Boolean(track), "there is a track to copy")) return;
+  // What the library is given to copy: a recording, a finished video, markers, and a hidden file.
+  const inTrack = (...parts) => join(library.root, ...track.split("/"), ...parts);
+  // A file written to a moment ago is taken to be unfinished and left for the next round, so
+  // these are given a time a while back.
+  const write = (file, text, secondsAgo = 60) => {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, text);
+    const then = new Date(Date.now() - secondsAgo * 1000);
+    utimesSync(file, then, then);
+  };
+  write(inTrack("Raw files", "copy_check.ts"), Buffer.alloc(6_500_000, 7));
+  write(inTrack("landscape", "copy_check.mp4"), Buffer.alloc(900_000, 3));
+  write(inTrack("csv markers", "copy_check.csv"), "1,2,3\n");
+  write(inTrack("Raw files", ".hidden"), "not this");
+  write(inTrack("landscape", "half made.mp4.part"), "nor this");
+  const { js, errors } = await page(tools);
+  const card = () => js(`
+    await window.showForSnapshot("settings");
+    const card = document.querySelector('[data-probe="drive card"]');
+    return card && { label: card.querySelector(".label")?.textContent, says: card.querySelector("#drive-status")?.textContent ?? null, buttons: [...card.querySelectorAll("button")].map((one) => one.textContent), path: card.querySelector(".path")?.textContent ?? null };`);
+  const press = (probe) => js(`document.querySelector('[data-probe="${probe}"]').click()`);
+  const same = (path) => {
+    const here = join(library.root, ...path), there = join(root, ...path);
+    return existsSync(there) && statSync(there).size === statSync(here).size && Math.abs(statSync(there).mtimeMs - statSync(here).mtimeMs) < 2000 && readFileSync(there).equals(readFileSync(here));
+  };
+  const inCopy = (...parts) => join(root, ...track.split("/"), ...parts);
+  const of = (...parts) => [...track.split("/"), ...parts];
+  try {
+    await api.lookForDrive();
+    let seen = await card();
+    say(seen?.label === "GOOGLE DRIVE" && seen.buttons.includes("Keep a copy in Google Drive") && !existsSync(root), "the card offers to keep a copy, and nothing is copied before it is asked for", seen ? seen.buttons.join(" | ") : "no card");
+
+    const refused = await js(`return await window.hangar.ask("keepCopy", ${JSON.stringify(join(library.root, "somewhere"))})`);
+    say(Boolean(refused.problem) && !config().copyTo, "a folder that isn't Drive's is refused when it is given as Drive's", refused.problem ?? "it was taken");
+
+    await press("drive keep");
+    // The press is answered in a moment, not at once.
+    const until = async (met) => {
+      for (let tries = 0; tries < 100 && !met(); tries += 1) await pause(50);
+    };
+    await until(() => Boolean(config().copyTo));
+    let now = await api.whenCopied();
+    seen = await card();
+    const all = [of("Raw files", "copy_check.ts"), of("landscape", "copy_check.mp4"), of("csv markers", "copy_check.csv"), ["dashboard.json"]];
+    say(now.kind === "kept" && all.every(same), "the library is copied into a folder of its own in Drive, laid out the same", now.last?.problem ?? all.filter((path) => !same(path)).map((path) => path.join("/")).join(", "));
+    say(!existsSync(inCopy("Raw files", ".hidden")) && !existsSync(inCopy("landscape", "half made.mp4.part")) && readdirSync(inCopy("Raw files")).every((name) => !name.endsWith(".part")), "hidden files and half-made ones are left out, and nothing half-copied is left behind");
+    say(seen?.path === root && /^Everything has been handed to Google Drive: \d+ recordings?, \d+ finished videos? and \d+ other files?, [\d.]+ (KB|MB|GB)\. Looked today at /.test(seen.says ?? ""), "the card says what the copy holds", seen?.says ?? "nothing said");
+
+    // Only what is new or has changed goes across after that.
+    const first = statSync(inCopy("Raw files", "copy_check.ts"));
+    write(inTrack("Raw files", "copy_check_2.ts"), Buffer.alloc(1_200_000, 9));
+    write(inTrack("csv markers", "copy_check.csv"), "9,8,7\n", 20);
+    await press("drive now");
+    now = await api.whenCopied();
+    const again = statSync(inCopy("Raw files", "copy_check.ts"));
+    say(same(of("Raw files", "copy_check_2.ts")) && same(of("csv markers", "copy_check.csv")) && again.ino === first.ino && again.mtimeMs === first.mtimeMs, "a new recording and changed markers follow, and what was already there is left alone", now.last?.problem ?? "");
+
+    // The copy only grows.
+    rmSync(inTrack("landscape", "copy_check.mp4"));
+    now = await api.whenCopied();
+    say(now.kind === "kept" && existsSync(inCopy("landscape", "copy_check.mp4")), "a video deleted from the library stays in the copy");
+
+    // Recordings can be left out.
+    await js(`await window.showForSnapshot("settings"); document.querySelector('[data-probe="drive recordings"]').click()`);
+    await until(() => config().copyLeavesOutRecordings === true);
+    write(inTrack("Raw files", "copy_check_3.ts"), Buffer.alloc(300_000, 5));
+    write(inTrack("csv markers", "copy_check_3.csv"), "9,9\n");
+    now = await api.whenCopied();
+    say(now.recordings === false && !existsSync(inCopy("Raw files", "copy_check_3.ts")) && same(of("csv markers", "copy_check_3.csv")) && existsSync(inCopy("Raw files", "copy_check.ts")), "with recordings left out a new one isn't copied, its markers are, and one copied before stays");
+    api.copyRecordings(true);
+    now = await api.whenCopied();
+    say(same(of("Raw files", "copy_check_3.ts")), "and it follows when recordings are wanted again");
+
+    // Drive not being open: its folder isn't there.
+    const away = `${myDrive} (away)`;
+    renameSync(myDrive, away);
+    write(inTrack("csv markers", "copy_check_4.csv"), "4\n");
+    now = await api.whenCopied();
+    seen = await card();
+    say(now.kind === "problem" && /Google Drive isn't open/.test(now.last.problem) && /Google Drive isn't open/.test(seen?.says ?? "") && !existsSync(myDrive), "with Drive not open nothing is copied, no folder is made in its place, and the card says why", now.last?.problem ?? now.kind);
+    const word = await js(`await window.showForSnapshot("track"); const word = document.querySelector('[data-probe="drive word"]'); return word && { says: word.textContent, why: word.title };`);
+    say(word?.says === "Google Drive: not copied" && /isn't open/.test(word.why), "a track's page says so too", word ? word.says : "no word");
+    renameSync(away, myDrive);
+    now = await api.whenCopied();
+    say(now.kind === "kept" && same(of("csv markers", "copy_check_4.csv")), "and when Drive is back the copy catches up", now.last?.problem ?? "");
+
+    // A job being finished is what sets a round going by itself.
+    const recording = join(tmpdir(), "copy_check_5.ts");
+    writeFileSync(recording, Buffer.alloc(700_000, 4));
+    await api.addClips(track, [recording]);
+    rmSync(recording, { force: true });
+    let arrived = false;
+    for (let tries = 0; tries < 250 && !arrived; tries += 1) {
+      await pause(100);
+      arrived = existsSync(inCopy("Raw files", "copy_check_5.ts"));
+    }
+    say(arrived, "a recording added to a track goes into the copy by itself");
+
+    await js(`await window.showForSnapshot("settings")`);
+    await press("drive stop");
+    await until(() => !config().copyTo);
+    write(inTrack("csv markers", "copy_check_6.csv"), "6\n");
+    now = await api.whenCopied();
+    seen = await card();
+    say(now.kind === "off" && !config().copyTo && !existsSync(inCopy("csv markers", "copy_check_6.csv")) && existsSync(inCopy("Raw files", "copy_check.ts")) && seen?.buttons.includes("Keep a copy in Google Drive"), "stopping stops it, and what was copied stays");
+    say(errors.length === 0, "nothing went wrong in the window", errors.slice(0, 3).join(" | "));
+  } finally {
+    setConfig({ copyTo: null, copyLeavesOutRecordings: false });
+    // What the check added to the library goes, so the checks after it find it as it was.
+    for (const name of readdirSync(inTrack("Raw files"))) if (/^(copy_check|\.hidden)/.test(name)) rmSync(inTrack("Raw files", name), { force: true });
+    for (const name of readdirSync(inTrack("csv markers"))) if (name.startsWith("copy_check")) rmSync(inTrack("csv markers", name), { force: true });
+    rmSync(inTrack("landscape", "copy_check.mp4"), { force: true });
+    rmSync(inTrack("landscape", "half made.mp4.part"), { force: true });
+    await api.refresh();
+  }
+}
+
+/** A card from the goggles, with folders standing in for the disks that are plugged in. */
+async function cards(tools) {
+  const { api, library } = tools;
+  const place = argument("--cards");
+  if (!place) return note("   (give a folder of folders to stand in for cards with --cards, and this is tried)");
+  const track = library.tracks[0];
+  if (!say(Boolean(track), "there is a track to add to")) return;
+  const card = join(resolve(place), "GOGGLES"), raw = join(library.root, ...track.split("/"), "Raw files");
+  const write = (file, size, daysAgo) => {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, Buffer.alloc(size, size % 251));
+    const then = new Date(Date.now() - daysAgo * 86400000 - 60000);
+    utimesSync(file, then, then);
+  };
+  rmSync(resolve(place), { recursive: true, force: true });
+  // Two flights from last week and two from an hour ago, among what else a card has on it.
+  write(join(card, "movies", "rec_0001.ts"), 410_000, 7);
+  write(join(card, "movies", "rec_0002.ts"), 420_000, 7);
+  write(join(card, "movies", "rec_0003.ts"), 430_000, 0);
+  write(join(card, "movies", "rec_0004.ts"), 440_000, 0);
+  write(join(card, "movies", "._rec_0004.ts"), 4096, 0);
+  write(join(card, "movies", "notes.txt"), 20, 0);
+  write(join(card, "System Volume Information", "old.mp4"), 5000, 0);
+  write(join(card, "a", "b", "c", "too deep.mp4"), 5000, 0);
+  // A disk with no recordings on it is not a card.
+  write(join(resolve(place), "PHOTOS", "DCIM", "picture.jpg"), 9000, 0);
+  const before = readdirSync(join(card, "movies")).sort().join(" ");
+  const { js, errors } = await page(tools);
+  const until = async (met) => {
+    for (let tries = 0; tries < 100 && !(await met()); tries += 1) await pause(50);
+  };
+  const look = () => js(`
+    await window.showForSnapshot("track:${track}");
+    await window.hangar_.loadCards(${JSON.stringify(track)}, true);
+    return [...document.querySelectorAll('[data-probe="card note"]')].map((one) => one.textContent);`);
+  const sheet = () => js(`return { title: document.querySelector(".card-sheet-title")?.textContent ?? null, rows: [...document.querySelectorAll('[data-probe="card recording"]')].map((row) => ({ name: row.querySelector(".file-name").textContent, ticked: row.querySelector("input").checked, off: row.querySelector("input").disabled, says: row.querySelector(".faint")?.textContent ?? "" })), add: document.querySelector('[data-probe="card add"]')?.textContent ?? null, addOff: document.querySelector('[data-probe="card add"]')?.disabled ?? null };`);
+  try {
+    let notes = await look();
+    say(notes.length === 1 && /^GOGGLES is plugged in, with 4 recordings that aren't in your library yet\./.test(notes[0]), "a track's page says a card is plugged in, and how much on it is new", notes.join(" | ") || "nothing said");
+
+    await js(`document.querySelector('[data-probe="card open"]').click()`);
+    let seen = await sheet();
+    say(seen.rows.map((row) => row.name).join(" ") === "rec_0004.ts rec_0003.ts rec_0002.ts rec_0001.ts", "its recordings are listed, the newest first, and nothing else on it is", seen.rows.map((row) => row.name).join(" "));
+    say(seen.rows.map((row) => row.ticked).join() === "true,true,false,false" && seen.add === "Add 2 recordings", "the new ones from the last day of flying are ticked", `${seen.rows.map((row) => (row.ticked ? "✓" : "–")).join("")} ${seen.add}`);
+
+    // One more is ticked, and they are added.
+    await js(`document.querySelectorAll('[data-probe="card recording"] input')[2].click()`);
+    seen = await sheet();
+    say(seen.add === "Add 3 recordings", "ticking another counts it", seen.add ?? "");
+    await js(`document.querySelector('[data-probe="card add"]').click()`);
+    await until(() => ["rec_0002.ts", "rec_0003.ts", "rec_0004.ts"].every((name) => existsSync(join(raw, name)) && statSync(join(raw, name)).size === statSync(join(card, "movies", name)).size));
+    await until(async () => !(await js(`return Boolean(window.hangar_.app.state.job)`)));
+    await pause(300);
+    const have = readdirSync(raw).filter((name) => name.startsWith("rec_")).sort().join(" ");
+    say(have === "rec_0002.ts rec_0003.ts rec_0004.ts" && readdirSync(join(card, "movies")).sort().join(" ") === before, "the ones ticked are copied into the track, and the card is left as it was", have);
+    say((await js(`return document.querySelector(".card-sheet") === null && window.hangar_.app.editor === null`)) === true, "the sheet closes, and several recordings are left on the page to pick from");
+
+    notes = await look();
+    say(notes.length === 1 && /with 1 recording that isn't in your library yet/.test(notes[0]), "the page then says what is still new on the card", notes.join(" | ") || "nothing said");
+    await js(`document.querySelector('[data-probe="card open"]').click()`);
+    seen = await sheet();
+    say(seen.rows.filter((row) => row.off && /^Already in /.test(row.says)).length === 3 && seen.rows.at(-1).ticked && seen.add === "Add 1 recording", "and the sheet says which it has already, and won't add those twice", seen.rows.map((row) => `${row.name}${row.off ? " (here)" : ""}`).join(", "));
+    await js(`document.querySelector(".card-sheet .button.secondary").click()`);
+
+    // With a card in, Add clips asks where from.
+    await js(`document.querySelector('[data-probe="add clips"]').click()`);
+    const items = await js(`const items = [...document.querySelectorAll(".menu .menu-item")].map((one) => one.textContent); document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return items;`);
+    say(items.join(" | ") === "From GOGGLES: 4 recordings, 1 new… | Choose files…", "Add clips offers the card, and choosing files as before", items.join(" | "));
+
+    // The card is taken out.
+    rmSync(card, { recursive: true, force: true });
+    notes = await look();
+    say(notes.length === 0, "with the card taken out the page says nothing of it");
+    say(errors.length === 0, "nothing went wrong in the window", errors.slice(0, 3).join(" | "));
+  } finally {
+    await js(`document.querySelector(".card-sheet .button.secondary")?.click()`).catch(() => {});
+    for (const name of existsSync(raw) ? readdirSync(raw) : []) if (name.startsWith("rec_")) rmSync(join(raw, name), { force: true });
+    rmSync(resolve(place), { recursive: true, force: true });
+    await api.refresh();
+  }
+}
+
 async function trackvideo(tools) {
   const { api } = tools;
   // The app's own window is open, as it always is when a pilot does this: the window the video
@@ -823,7 +1038,7 @@ async function everything(tools) {
 
   const steps = [
     ["The marker editor", editor], ["Making the videos", video], ["Before and after a video", bookends],
-    ["The track in 3D, and building one", trackview], ["Other projects' tools", outside], ["Every page", pages], ["Updating itself", updating],
+    ["The track in 3D, and building one", trackview], ["Other projects' tools", outside], ["A card from the goggles", cards], ["The copy in Google Drive", drive], ["Every page", pages], ["Updating itself", updating],
   ];
   for (const [title, step] of steps) {
     note(`-- ${title}`);

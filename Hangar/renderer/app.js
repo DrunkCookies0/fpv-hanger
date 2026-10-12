@@ -1,13 +1,14 @@
 // The app's window: which page is showing, what is at its foot, and what the main process says
 // has changed.
 
-import { app, ask, hangar, setDraw, render, refresh, update, go, open, loadTrack, loadForm, allTracks, whenQuiet } from "./core.js";
+import { app, ask, hangar, setDraw, render, refresh, update, go, open, loadTrack, loadForm, loadCards, allTracks, whenQuiet } from "./core.js";
 import { h, fill, redraw, icon } from "./ui.js";
 import { mac } from "./words.js";
 import { home } from "./views/home.js";
 import { videoCreator } from "./views/creator.js";
 import { leaderboard, settings, guidePage } from "./views/pages.js";
 import { showNote, showSetUp } from "./views/notes.js";
+import { heardDrive } from "./views/drive.js";
 import { closeSheets } from "./sheets.js";
 import { typefaceReady } from "./timer.js";
 import { SongSound } from "./sound.js";
@@ -68,6 +69,7 @@ hangar.hear("job", (job) => {
   else drawStatus();
 });
 hangar.hear("changed", () => update());
+hangar.hear("drive", heardDrive);
 hangar.hear("front", () => refresh({ quietly: true }));
 hangar.hear("menu", (what) => app.editor?.menu?.(what));
 
@@ -88,7 +90,7 @@ document.body.classList.add(mac ? "mac" : "windows");
 setDraw(draw);
 
 // For the app's checks of itself, which work it from outside.
-window.hangar_ = { app };
+window.hangar_ = { app, loadCards };
 
 const started = (async () => {
   app.state = await ask("refresh");

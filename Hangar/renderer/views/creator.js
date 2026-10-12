@@ -8,6 +8,8 @@ import { bin, Bin, fileBrowser, season, comingSoon } from "../words.js";
 import * as act from "../actions.js";
 import { updatePill } from "./home.js";
 import { showSetUp } from "./notes.js";
+import { driveWord } from "./drive.js";
+import { addClips, cardNote } from "./cards.js";
 
 const busy = () => Boolean(app.state.job);
 
@@ -259,7 +261,7 @@ function runs(track, data) {
       h("p.dim", data.hasClips
         ? "Press Mark laps on a clip below, step to each start/finish gate crossing and press M. Press Done, and the run shows up here, ranked."
         : "Add your recordings: press Add clips, or drop them onto this page. Each one then gets a Mark laps button."),
-      !data.hasClips && h("div.row", primary("Add clips…", () => act.chooseClips(track), { disabled: busy() })),
+      !data.hasClips && h("div.row", primary("Add clips…", (event) => addClips(track, event.currentTarget), { disabled: busy() })),
     );
   }
   return h("div.group", label("RUNS, FASTEST FIRST"), list.map((run, index) => runCard(track, data, run, run.best ? index + 1 : null)));
@@ -295,14 +297,16 @@ function trackPage(track) {
     h("div", event?.name && label(event.name.toUpperCase()), h("h1.page-title", name.toUpperCase())),
     deadline && deadlinePill(deadline),
     h("span.spacer"),
+    driveWord(),
     secondary(data.hasView ? "Track in 3D" : "Build the track in 3D", () => act.openTrackView(track), { icon: "cube", help: data.hasView ? "The track drawn in 3D, with the lap flown round it. Drag it to look from any side." : "Build this track in 3D: click its sections into place, then draw the line the lap is flown along." }),
-    secondary("Add clips…", () => act.chooseClips(track), { disabled: busy(), help: "Copy recordings into this track. You can also drop them onto this page." }),
+    secondary("Add clips…", (event) => addClips(track, event.currentTarget), { disabled: busy(), probe: "add clips", help: "Copy recordings into this track, from a card or from anywhere else. You can also drop them onto this page." }),
     secondary("Refresh", () => refresh()),
     secondary("Open folder", () => act.openFolder(data.folder)),
     secondary("", () => act.removeTrack(track), { icon: "trash", disabled: busy(), "aria-label": `Move this track to ${bin}`, help: `Move this track to ${bin}. If there is anything in it, you are asked to type I UNDERSTAND first.` }),
   );
   const page = h("div.track-page",
     h("div.track-top", head, data.season && seasonLine(data.season)),
+    cardNote(track),
     h("div.stats",
       statCard(`BEST ${summary.window} LAPS IN A ROW`, summary.best?.best?.seconds ?? "–", summary.best ? `${summary.best.name}, laps ${summary.best.best.firstLap}–${summary.best.best.lastLap}` : "No timed runs yet", true),
       statCard("BEST LAP", bestLap, `${summary.runs.length} run${summary.runs.length === 1 ? "" : "s"} marked`),

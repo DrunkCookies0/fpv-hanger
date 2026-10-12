@@ -21,6 +21,9 @@ import { stillsOf, pipesIn } from "./trackvideo.js";
 import { latest, install, checkIsDue } from "./updates.js";
 import { makeTools } from "./tools.js";
 import { makePrograms } from "./components.js";
+import { makeDriveCopy } from "./drive.js";
+import { findCards } from "./cards.js";
+import { marked } from "../shared/cards.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const mac = process.platform === "darwin";
@@ -109,6 +112,8 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
   // A copy that shows no window is trying itself out: it opens a tool's place without calling on
   // the project's site, unless it was asked to (`--live`).
   const outside = makeTools({ window, tell, still: quiet && !process.argv.includes("--live") }), kept = makePrograms({ tell, quiet });
+  /** The copy of the library kept in Google Drive, when the pilot has asked for one. */
+  const drive = makeDriveCopy({ library, tell, quiet, busy: () => job !== null });
   let greeted = false;
   const vlc = findVLC();
   /** Each track's runs as last timed, so the lists and tiles have their times without timing again. */
@@ -129,6 +134,8 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
     } finally {
       job = null;
       tell("job", null);
+      // Whatever was made or added goes into the copy in Google Drive.
+      drive.soon();
     }
   }
 
@@ -251,6 +258,7 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
         update,
         automaticUpdates: config().noAutomaticUpdates !== true,
         programs: kept.programsNow(),
+        drive: drive.now(),
         job,
         events: library.events.map((event) => {
           const next = library.nextSeasonTrack(event.folder);
@@ -498,6 +506,24 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
       return picked.canceled ? {} : api.addClips(track, picked.filePaths);
     },
 
+    /** The cards from the goggles or a camera that are plugged in, with the recordings on each and
+     *  where the library has one already, as seen from a track. */
+    async cards(track, { again = false } = {}) {
+      const cards = await findCards({ quiet, again });
+      if (cards.length === 0) return { cards: [] };
+      // Every recording the library holds, by name.
+      const held = new Map();
+      for (const one of library.tracks) {
+        for (const clip of library.clips(one)) {
+          try {
+            const name = basename(clip).toLowerCase();
+            held.set(name, [...(held.get(name) ?? []), { size: statSync(clip).size, track: one }]);
+          } catch {}
+        }
+      }
+      return { cards: cards.map((card) => ({ name: card.name, folder: card.folder, recordings: marked(card.recordings, held, track).map((recording) => ({ ...recording, size: bytes(recording.bytes) })) })) };
+    },
+
     /** Copies recordings into a track. The originals are left alone. */
     async addClips(track, paths) {
       if (job) return { notice: "Wait for what is being made to finish, then add the clips." };
@@ -538,6 +564,7 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
     },
 
     async saveRun(track, run, what) {
+      drive.soon(5000);
       const saved = await library.saveRun(track, run, { ...what, fps: new FrameRate(what.fps.num, what.fps.den) });
       summaries.delete(track);
       return saved;
@@ -1037,8 +1064,61 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
     recordSubmission(track, run, time, link) {
       library.recordSubmission(track, { run, time, link });
     },
+
+    // The copy in Google Drive.
+
+    /** Looks again for where Google Drive is on this computer. */
+    async lookForDrive() {
+      await drive.look();
+      return { state: api.state() };
+    },
+
+    /** Keeps a copy of the library in a folder from now on: the one given, which is one Drive was
+     *  found at, or one the pilot picks. */
+    async keepCopy(folder = null) {
+      let place = folder;
+      if (!place) {
+        const picked = await dialog.showOpenDialog(window(), {
+          title: "Keep a copy in another folder",
+          message: `Choose where to keep a copy of your library. It goes in a folder called FPV Hangar inside the one you choose.`,
+          buttonLabel: "Keep a copy here",
+          properties: ["openDirectory", "createDirectory"],
+        });
+        if (picked.canceled) return { state: api.state() };
+        place = picked.filePaths[0];
+      } else if (!drive.now().found.some((one) => one.folder === place)) {
+        return { problem: "That isn't where Google Drive is on this computer." };
+      }
+      const problem = await drive.use(place, Boolean(folder));
+      return problem ? { problem, state: api.state() } : { state: api.state() };
+    },
+
+    /** Stops keeping the copy. What is in it stays. */
+    async stopCopy() {
+      await drive.stop();
+      return { notice: "No copy is kept from now on. What was copied is still where it was.", state: api.state() };
+    },
+
+    /** Copies now whatever the copy hasn't got. */
+    copyNow() {
+      drive.pass();
+      return { state: api.state() };
+    },
+
+    /** Whether recordings go in the copy. */
+    copyRecordings(wanted) {
+      drive.setRecordings(Boolean(wanted));
+      return { state: api.state() };
+    },
+
+    /** Comes back when the copy has everything, for the app's checks of itself. */
+    async whenCopied() {
+      await drive.pass();
+      return drive.now();
+    },
   };
 
   summariseAll();
+  drive.start();
   return api;
 }
