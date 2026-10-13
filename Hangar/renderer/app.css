@@ -224,6 +224,7 @@ code { font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace; backgroun
 .track-head > .button { margin-left: -4px; }
 .season-line { font: 500 12px/1.38 var(--face); color: var(--dim); }
 .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.stats.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .stat { gap: 6px; min-height: 140px; }
 .stat-value { font: 900 34px/1.15 var(--face); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
 .stat.highlight .stat-value { font-size: 46px; color: var(--accent); }

@@ -135,6 +135,10 @@ function statCard(title, value, detail, highlight = false) {
   return h(`div.card.stat${highlight ? ".highlight" : ""}`, label(title), h("div.stat-value", value), h("div.stat-detail", detail));
 }
 
+/** Whether a track is entered through a form: the series' tracks are. A track in any other event
+ *  has nothing to send, unless a form link was put in or an entry sent before. */
+const takesEntries = (track, data) => Boolean(eventOf(track)?.isSeason) || data.state.formURL !== "" || data.state.submissions.length > 0;
+
 function formCard(track, data) {
   const saved = data.state.formURL;
   const key = `form ${track}`;
@@ -251,7 +255,7 @@ function runCard(track, data, run, rank) {
         secondary("Markers & music", () => act.editRun(run, track), { disabled: busy() || !run.clip, help: run.clip ? "Move the lap markers, choose the stretch the videos show, and place a song." : "There's no race clip with this run's name to open." }),
         h("div.row.tight", { help: run.clip ? "A finished video with the timer drawn in, ready to upload." : "There's no race clip with this run's name to make a video from." },
           fileButton(track, run, "landscape", "16:9 video", run.landscapes), fileButton(track, run, "upright", "9:16 video", run.uprights)),
-        primary("Submit this run", () => act.submitRun(track, run), { disabled: busy() || !run.best }),
+        takesEntries(track, data) && primary("Submit this run", () => act.submitRun(track, run), { disabled: busy() || !run.best }),
       ),
     ),
     isOpen && runFiles(track, run),
@@ -309,15 +313,16 @@ function trackPage(track) {
     secondary("Open folder", () => act.openFolder(data.folder)),
     secondary("", () => act.removeTrack(track), { icon: "trash", disabled: busy(), "aria-label": `Move this track to ${bin}`, help: `Move this track to ${bin}. If there is anything in it, you are asked to type I UNDERSTAND first.` }),
   );
+  const entries = takesEntries(track, data);
   const page = h("div.track-page",
     h("div.track-top", head, data.season && seasonLine(data.season)),
     cardNote(track),
-    h("div.stats",
+    h(`div.stats${entries ? "" : ".two"}`,
       statCard(`BEST ${summary.window} LAPS IN A ROW`, summary.best?.best?.seconds ?? "–", summary.best ? `${summary.best.name}, laps ${summary.best.best.firstLap}–${summary.best.best.lastLap}` : "No timed runs yet", true),
       statCard("BEST LAP", bestLap, `${summary.runs.length} run${summary.runs.length === 1 ? "" : "s"} marked`),
-      statCard("SUBMITTED", sent?.time ?? "–", sent ? `${sent.run}, ${new Date(sent.date).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}` : "Nothing sent yet"),
+      entries && statCard("SUBMITTED", sent?.time ?? "–", sent ? `${sent.run}, ${new Date(sent.date).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}` : "Nothing sent yet"),
     ),
-    formCard(track, data),
+    entries && formCard(track, data),
     runs(track, data),
     clips(track, data),
     summary.skipped.length > 0 && h("div.group.tight", label("LEFT OUT"), summary.skipped.map((item) => h("div.dim.small", `${item.file}: ${item.reason}`))),

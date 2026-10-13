@@ -2,6 +2,10 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.17.2 (13 October 2026)
+
+- A track that isn't in RaceGOW6 no longer shows the submission form, the Submitted box or Submit this run: a race or a day's flying of your own has no form to send. A track that already has a form link or an entry sent keeps them.
+
 ## v0.17.1 (13 October 2026)
 
 - Recordings go into a library in Google Drive. Adding clips to a track that had just been made could fail with "couldn't be added: ENOENT", because Drive was still taking in the new folders while the recordings were being copied into them. A recording is now copied into a folder of FPV Hangar's own first and moved into your library whole, and if Drive has a folder away for a moment, it tries again by itself. A clip that failed before can just be added again: the ones already in the track are skipped.
