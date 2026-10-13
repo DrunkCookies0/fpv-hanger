@@ -355,9 +355,11 @@ export class Library {
     const problem = this.#problemWithName(name, "group");
     if (problem) return { problem };
     if (sameName(name, songsFolder)) return { problem: `${songsFolder} is the folder your song library is kept in. Give the group another name.` };
+    // Two groups with one name would be two headings nobody can tell apart. This is asked before
+    // the folder is looked for: a Mac's disk takes "circle city fpv" for "Circle City FPV" too.
+    const twin = this.events.find((event) => sameName(this.details(event.folder).name, name));
+    if (twin) return { problem: `You already have a group called ${this.details(twin.folder).name}. New race under it adds a race.` };
     if (existsSync(join(this.root, name))) return { problem: `There is already a folder called ${name} in your library.` };
-    // Two groups with one name would be two headings nobody can tell apart.
-    if (this.events.some((event) => sameName(this.details(event.folder).name, name))) return { problem: `You already have a group called ${name}. New race under it adds a race.` };
     this.store.events = { ...(this.store.events ?? {}), [name]: {} };
     this.saveStore();
     if (sameName(name, series.season)) return this.newTrack(name, now);
