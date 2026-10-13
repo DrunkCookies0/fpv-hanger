@@ -47,6 +47,15 @@ export function thisCopy() {
 }
 
 const run = (program, parts) => spawnSync(program, parts, { encoding: "utf8", windowsHide: true });
+
+/** Starts a script on Windows, out of sight, to carry on after the app has gone (see hiddenStart). */
+export function startScript(script) {
+  const [starter, parts] = hiddenStart(script);
+  const hidden = spawn(starter, parts, { detached: true, stdio: "ignore", windowsHide: true, cwd: tmpdir() });
+  // Without PowerShell it is started as it always was, which works, with a window or two showing.
+  hidden.once("error", () => spawn("cmd.exe", ["/c", script], { detached: true, stdio: "ignore", windowsHide: true, cwd: tmpdir() }).unref());
+  hidden.unref();
+}
 const plist = (bundle, key) => run("/usr/libexec/PlistBuddy", ["-c", `Print :${key}`, join(bundle, "Contents", "Info.plist")]).stdout.trim();
 
 /** Downloads a release's archive into a folder, and says whether it arrived whole. */
@@ -145,11 +154,7 @@ export async function install(release, { heard = () => {}, after = [], aside = n
     if (theirs && theirs !== program) renameSync(join(fresh, theirs), join(fresh, program));
     const script = join(work, "swap.cmd");
     writeFileSync(script, windowsSwap({ app: here, fresh, old: aside ? join(aside, basename(here)) : `${here} (before update)`, program, pid: process.pid, after }));
-    const [starter, parts] = hiddenStart(script);
-    const hidden = spawn(starter, parts, { detached: true, stdio: "ignore", windowsHide: true, cwd: tmpdir() });
-    // Without PowerShell it is started as it always was, which works, with a window or two showing.
-    hidden.once("error", () => spawn("cmd.exe", ["/c", script], { detached: true, stdio: "ignore", windowsHide: true, cwd: tmpdir() }).unref());
-    hidden.unref();
+    startScript(script);
     // The script works from this folder after the app has closed, so it is left for it.
     keep = true;
     return null;

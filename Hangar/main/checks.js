@@ -40,7 +40,7 @@ import { EOL, arch, cpus, release, tmpdir, totalmem, version as systemVersion } 
 import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { argument, config, setConfig, logFile, version } from "./paths.js";
-import { install, thisCopy, whatTheOldAppKept } from "./updates.js";
+import { install, thisCopy, whatTheOldAppKept, startScript } from "./updates.js";
 import { markerFile, FrameRate } from "../shared/timing.js";
 import { Library } from "./library.js";
 import { copyName, libraryName } from "../shared/drive.js";
@@ -1209,6 +1209,22 @@ async function update(tools) {
  * This copy of the app, and where it is, are not touched.
  */
 async function updating() {
+  // On Windows the update's helper is started out of sight, through PowerShell. A script started
+  // that way, from a folder with a space and a quote in its name, has to run.
+  if (process.platform === "win32") {
+    const folder = mkdtempSync(join(tmpdir(), "fpv-hangar-helper-")), inside = join(folder, "A Pilot's folder");
+    try {
+      mkdirSync(inside, { recursive: true });
+      const done = join(inside, "done.txt");
+      writeFileSync(join(inside, "helper.cmd"), `@echo off\r\necho it ran> "%~dp0done.txt"\r\n`);
+      startScript(join(inside, "helper.cmd"));
+      for (let tries = 0; tries < 60 && !existsSync(done); tries += 1) await pause(500);
+      say(existsSync(done), "the update's helper is started out of sight, and runs", existsSync(done) ? readFileSync(done, "utf8").trim() : "it never ran");
+    } finally {
+      await pause(500);
+      rmSync(folder, { recursive: true, force: true });
+    }
+  }
   const here = thisCopy();
   if (!here) return note("   (a copy run from its source can't update itself, so there is nothing to try)");
   const mac = process.platform === "darwin", name = "FPV Hangar", later = "99.0.0";
@@ -1303,12 +1319,20 @@ async function updating() {
       const lines = [...output.split(/\r?\n/), ...(existsSync(wrong) ? readFileSync(wrong, "utf8").split(/\r?\n/) : [])].filter((line) => line.trim() !== "" && !/dbus|Fontconfig/i.test(line));
       for (const line of lines.slice(-25)) note(`   the copy said: ${line.slice(0, 400)}`);
       note(`   the copy was ${program}${existsSync(program) ? "" : ", which isn't there"}`);
-      // Whether it starts at all, asked only to say its version: the copy, and this app itself.
+      // Whether it gets going at all, for a check that needs nothing else: the copy here and this
+      // app where it is, each with what this app would hand on to it and with only what Windows itself
+      // provides. Which of the four don't tells where the trouble is.
+      const plain = Object.fromEntries(["SystemRoot", "SystemDrive", "windir", "ComSpec", "PATHEXT", "PATH", "TEMP", "TMP", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "HOMEDRIVE", "HOMEPATH", "USERNAME", "ProgramData", "ProgramFiles", "ProgramFiles(x86)", "CommonProgramFiles", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "OS"]
+        .filter((name) => process.env[name] !== undefined).map((name) => [name, process.env[name]]));
       for (const [who, exe] of [["the copy", program], ["this app", process.execPath]]) {
-        const file = join(drill, `${who.replace(" ", "-")}.txt`);
-        const tried = spawnSync(exe, ["--say-version", file], { encoding: "utf8", windowsHide: true, timeout: 60000 });
-        note(`   ${who}, asked its version: left with ${tried.status ?? tried.error?.message ?? tried.signal}, ${existsSync(file) ? `said v${readFileSync(file, "utf8").trim()}` : "said nothing"}${(tried.stderr ?? "").trim() ? `: ${tried.stderr.trim().slice(-300)}` : ""}`);
+        for (const [how, env] of [["as this app starts it", process.env], ["with a plain environment", plain]]) {
+          const place = mkdtempSync(join(drill, "start-")), told = join(place, "report.txt");
+          const tried = spawnSync(exe, ["--check", "carryover", "--root", join(place, "library"), "--user-data", join(place, "memory"), "--report", told], { encoding: "utf8", windowsHide: true, timeout: 90000, env });
+          const going = existsSync(told) && readFileSync(told, "utf8").includes("Everything passed");
+          note(`   ${who}, ${how}: left with ${tried.status ?? tried.error?.message ?? tried.signal}, ${going ? "and got going" : "and didn't get going"}`);
+        }
       }
+      note(`   handed on by this app: ${Object.keys(process.env).filter((name) => /^(ELECTRON|CHROME|NODE|GOOGLE|CR_|GPU|ORIGINAL_XDG)/i.test(name)).join(", ") || "nothing of Electron's or Chrome's"}`);
       return;
     }
     // The later copy starts where the first one was, and says which version it is.
