@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dayInWords, fileName, googleSaysNo, hashtag, linkAlone, mayTakeVideo, sites, sitesFor, videoLinkIn, videoLinksIn, words } from "../shared/uploads.js";
+import { dayInWords, fileName, googleSaysNo, hashtag, linkAlone, linkFor, mayTakeVideo, sites, sitesFor, uploadsOf, videoLinkIn, videoLinksIn, words } from "../shared/uploads.js";
 
 test("uploads: each site takes the video of its shape, and YouTube's page is in the pilot's own browser", () => {
   assert.equal(sites.youtube.shape, "landscape");
@@ -79,13 +79,43 @@ test("uploads: a YouTube link is found, whichever way it is written", () => {
 });
 
 test("uploads: only a link copied by itself is taken from the clipboard, not one in among words", () => {
-  assert.equal(linkAlone("https://youtu.be/NewVideo_12"), "https://youtu.be/NewVideo_12");
-  assert.equal(linkAlone("  https://youtube.com/shorts/NewVideo_12\n"), "https://youtu.be/NewVideo_12");
+  assert.equal(linkAlone("youtube", "https://youtu.be/NewVideo_12"), "https://youtu.be/NewVideo_12");
+  assert.equal(linkAlone("shorts", "  https://youtube.com/shorts/NewVideo_12\n"), "https://youtu.be/NewVideo_12");
   // A description with a link of the pilot's own in it, or the title, isn't the video's link.
-  assert.equal(linkAlone("Spring Cup\n\nMy last race: https://youtu.be/OlderVideo1"), null);
-  assert.equal(linkAlone("Spring Cup · 31.002 best 3 laps | Test Pilot"), null);
-  assert.equal(linkAlone("https://studio.youtube.com/video/NewVideo_12/edit"), null);
-  assert.equal(linkAlone(""), null);
+  assert.equal(linkAlone("youtube", "Spring Cup\n\nMy last race: https://youtu.be/OlderVideo1"), null);
+  assert.equal(linkAlone("youtube", "Spring Cup · 31.002 best 3 laps | Test Pilot"), null);
+  assert.equal(linkAlone("youtube", "https://studio.youtube.com/video/NewVideo_12/edit"), null);
+  assert.equal(linkAlone("youtube", ""), null);
+  // Nor is another site's.
+  assert.equal(linkAlone("youtube", "https://www.tiktok.com/@test.pilot/video/7400000000000000001"), null);
+});
+
+test("uploads: a video's link on TikTok and on Instagram is found, and written one way", () => {
+  assert.equal(linkFor("tiktok", "https://www.tiktok.com/@test.pilot/video/7400000000000000001?is_from_webapp=1&sender_device=pc"), "https://www.tiktok.com/@test.pilot/video/7400000000000000001");
+  assert.equal(linkFor("tiktok", "Look: https://vm.tiktok.com/ZMmadeUp1/ !"), "https://vm.tiktok.com/ZMmadeUp1");
+  assert.equal(linkFor("tiktok", "tiktok.com/t/ZTmadeUp2/"), "https://tiktok.com/t/ZTmadeUp2");
+  assert.equal(linkFor("tiktok", "https://www.tiktok.com/@test.pilot"), null);
+  assert.equal(linkFor("instagram", "https://www.instagram.com/reel/CmadeUp3_x/?igsh=abc"), "https://www.instagram.com/reel/CmadeUp3_x");
+  assert.equal(linkFor("instagram", "https://www.instagram.com/test.pilot/p/CmadeUp4/"), "https://www.instagram.com/test.pilot/p/CmadeUp4");
+  assert.equal(linkFor("instagram", "https://www.instagram.com/test.pilot/"), null);
+  assert.equal(linkFor("youtube", "https://www.youtube.com/watch?v=AbC_dEf-123"), "https://youtu.be/AbC_dEf-123");
+  assert.equal(linkFor("elsewhere", "https://youtu.be/AbC_dEf-123"), null);
+});
+
+test("uploads: a run's log of where it went up has YouTube's from its entry form link", () => {
+  const at = "2026-10-13T15:00:00.000Z";
+  const state = {
+    links: { "Run 1": "https://www.youtube.com/watch?v=AbC_dEf-123", "Run 2": "not a link" },
+    uploads: { "Run 1": { tiktok: { link: "https://vm.tiktok.com/ZMmadeUp1", at }, youtube: { link: "https://youtu.be/AbC_dEf-123", at } }, "Run 2": { youtube: { link: "https://youtu.be/Gone_______", at } } },
+  };
+  // In the order the sites are offered, YouTube's written the short way.
+  assert.deepEqual(Object.keys(uploadsOf(state, "Run 1")), ["youtube", "tiktok"]);
+  assert.deepEqual(uploadsOf(state, "Run 1").youtube, { link: "https://youtu.be/AbC_dEf-123", at });
+  // The entry form's link is what counts for YouTube: one taken out there is gone here too.
+  assert.deepEqual(uploadsOf(state, "Run 2"), {});
+  // One put in only in the entry form shows, with no time.
+  assert.deepEqual(uploadsOf({ links: { "Run 3": "https://youtu.be/AbC_dEf-123" } }, "Run 3"), { youtube: { link: "https://youtu.be/AbC_dEf-123", at: null } });
+  assert.deepEqual(uploadsOf({}, "Run 4"), {});
 });
 
 test("uploads: Google turning away a sign-in is told apart from signing in", () => {

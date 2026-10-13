@@ -2,6 +2,12 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.22.0 (13 October 2026)
+
+- A run keeps a log of where its videos went up. Under **Uploaded**, at the bottom of a run's files, each site the run is on has its link, with when it was kept, and **Open**, **Copy link**, change and take off. The run itself says **on YouTube**, **on TikTok** and so on under its laps; click one to open the video.
+- Links get there by themselves when you upload from FPV Hangar: YouTube's and YouTube Shorts' when you copy the link on YouTube and come back, and TikTok's and Instagram's when you paste the link into the new **Its link** box beside their page, once the video is posted. A YouTube link put into Submit this run counts too, and so does one caught by v0.21.0.
+- **Add a link…** keeps the link to a video you uploaded some other way, or before this version: choose the site and paste it. A link that is on the clipboard is put in for you.
+
 ## v0.21.0 (13 October 2026)
 
 - Uploading to YouTube and YouTube Shorts happens in your own browser now. Google doesn't let anyone sign in inside an app ("This browser or app may not be secure"), so YouTube's upload page opens in your browser, and FPV Hangar shows the steps beside the words it wrote for you: press **Open YouTube**, drag your video onto YouTube's page from the column on the left (or press **Show in Finder**, or Explorer, and drag it from there), paste the title and the description, and press Publish. The video still goes up named for what it is.

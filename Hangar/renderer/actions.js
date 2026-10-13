@@ -4,6 +4,7 @@ import { app, ask, take, say, render, go, settle, loadTrack, loadForm, loadCards
 import { question, confirm, showSheet } from "./sheets.js";
 import { h, icon, primary, secondary } from "./ui.js";
 import { bin, Bin } from "./words.js";
+import { sites, linkFor } from "../shared/uploads.js";
 
 const busy = () => Boolean(app.state?.job);
 
@@ -342,5 +343,36 @@ export async function gatherLooseTracks() {
 }
 
 export const openLink = (address) => ask("openLink", address);
+
+/** Asks for the link to one of a run's videos on a site, and keeps it with the run. A link of
+ *  that site's on the clipboard is put in to start with. */
+export async function keepUploadLink(track, run, site) {
+  let text = linkFor(site, await ask("clipboardText")) ?? "";
+  let problem = null;
+  for (;;) {
+    const answer = await question({
+      title: `Its link on ${sites[site].title}`,
+      message: problem ?? `Paste the link to ${run}'s video on ${sites[site].title}. It's kept with the run.`,
+      field: { placeholder: sites[site].example, value: text },
+      buttons: [{ title: "Cancel", value: false, kind: "secondary", cancel: true }, { title: "Keep", value: true, kind: "primary", default: true }],
+    });
+    if (!answer.value) return;
+    const kept = await ask("keepUpload", track, run, site, answer.text);
+    if (!kept?.problem) break;
+    problem = kept.problem;
+    text = answer.text;
+  }
+  await loadTrack(track);
+  render();
+}
+
+/** Takes a site's link off a run, asking first. */
+export async function forgetUpload(track, run, site) {
+  const sure = await confirm({ title: `Take the ${sites[site].title} link off ${run}?`, message: `The video stays up on ${sites[site].title}: only its link here goes.`, yes: "Take it off", destructive: true });
+  if (!sure) return;
+  await ask("keepUpload", track, run, site, "");
+  await loadTrack(track);
+  render();
+}
 export const openFolder = (path) => ask("openFolder", path);
 export { trackName };

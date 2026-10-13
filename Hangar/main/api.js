@@ -21,6 +21,7 @@ import { stillsOf, pipesIn } from "./trackvideo.js";
 import { latest, install, checkIsDue } from "./updates.js";
 import { makeTools } from "./tools.js";
 import { makeUploads } from "./uploads.js";
+import { sites, linkFor, uploadsOf, videoLinkIn } from "../shared/uploads.js";
 import { makePrograms } from "./components.js";
 import { makeDriveCopy } from "./drive.js";
 import { measure, moveFolder } from "./move.js";
@@ -83,6 +84,17 @@ function findVLC() {
   return places.find((place) => existsSync(place)) ?? null;
 }
 
+/** Logs a run's video as up on a site, with its link there, when it was, or takes it off with
+ *  none. A link kept again keeps the time it was first kept. */
+function logUpload(state, run, site, link) {
+  const ofRun = { ...(state.uploads?.[run] ?? {}) };
+  if (link) ofRun[site] = { link, at: ofRun[site]?.link === link ? ofRun[site].at : new Date().toISOString() };
+  else delete ofRun[site];
+  const all = { ...(state.uploads ?? {}), [run]: ofRun };
+  if (Object.keys(ofRun).length === 0) delete all[run];
+  state.uploads = all;
+}
+
 /**
  * @param {object} with_
  * @param {import("./library.js").Library} with_.library
@@ -115,10 +127,8 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
   // A copy that shows no window is trying itself out: it opens a tool's place without calling on
   // the project's site, unless it was asked to (`--live`).
   const outside = makeTools({ window, tell, still: quiet && !process.argv.includes("--live") }), kept = makePrograms({ tell, quiet });
-  /** A finished video going up through a site's own upload page. YouTube's link is kept with its run. */
-  const uploads = makeUploads({ window, tell, quiet, staging: join(cache, "Uploading"), still: quiet && !process.argv.includes("--live"), keepLink: (track, run, link) => {
-    if (library.tracks.includes(track)) api.setLink(track, run, link);
-  } });
+  /** A finished video going up through a site's own upload page. Its link there is kept with its run. */
+  const uploads = makeUploads({ window, tell, quiet, staging: join(cache, "Uploading"), still: quiet && !process.argv.includes("--live"), keepLink: (track, run, site, link) => api.keepUpload(track, run, site, link ?? "") });
   /** A video from anywhere that the pilot chose to upload. Any other has to be in the library. */
   let chosenToUpload = null;
   /** The copy of the library kept in Google Drive, when the pilot has asked for one. */
@@ -847,7 +857,7 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
       if (!videoExtensions.has(extname(path).slice(1).toLowerCase())) return { problem: "That isn't a video." };
       if (copy) await clipboard.writeText(copy);
       const ofRun = inLibrary && library.tracks.includes(track) && typeof run === "string";
-      const link = ofRun ? library.state(track).links?.[run] || null : null;
+      const link = ofRun ? uploadsOf(library.state(track), run)[site]?.link ?? null : null;
       return uploads.openUpload(site, place, { file: path, name, track: ofRun ? track : null, run: ofRun ? run : null, link });
     },
 
@@ -1050,9 +1060,30 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
       };
     },
 
-    /** Keeps the video's link as it is typed, so closing the window doesn't lose it. */
+    /** Keeps the video's link as it is typed, so closing the window doesn't lose it. A YouTube
+     *  video's link is the run's YouTube upload too. */
     setLink(track, run, link) {
-      library.update(track, (state) => { state.links = { ...(state.links ?? {}), [run]: link.trim() }; });
+      library.update(track, (state) => {
+        state.links = { ...(state.links ?? {}), [run]: link.trim() };
+        logUpload(state, run, "youtube", videoLinkIn(link));
+      });
+    },
+
+    /**
+     * Keeps a run's video's link on a site, as the run's log of where it went up, or takes it off
+     * with an empty one. YouTube's is the link the run's entry form gets too. `{ link }`, or
+     * `{ problem }` when what was given isn't a link to a video on that site.
+     */
+    keepUpload(track, run, site, text) {
+      if (!library.tracks.includes(track) || typeof run !== "string" || run === "" || !Object.hasOwn(sites, site)) return { problem: "There is no such run." };
+      const typed = String(text ?? "").trim();
+      const link = linkFor(site, typed);
+      if (typed !== "" && !link) return { problem: `That isn't a link to a video on ${sites[site].title}.` };
+      library.update(track, (state) => {
+        logUpload(state, run, site, link);
+        if (sites[site].keepsLink) state.links = { ...(state.links ?? {}), [run]: link ?? "" };
+      });
+      return { link };
     },
 
     /** Keeps what was answered, for the next entry: the email, and each answer under its question's words. */

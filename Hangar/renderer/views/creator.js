@@ -1,7 +1,7 @@
 // The Video Creator: its sidebar of events and tracks, and a track's page with its runs, its clips
 // and its entry form.
 
-import { app, go, open, refresh, render, eventFolder, eventOf, trackName, loadForm } from "../core.js";
+import { app, ask, go, open, refresh, render, eventFolder, eventOf, trackName, loadForm } from "../core.js";
 import { h, icon, label, primary, secondary, plain, testCopyBadge, when } from "../ui.js";
 import { menu } from "../sheets.js";
 import { bin, Bin, fileBrowser, season } from "../words.js";
@@ -11,6 +11,7 @@ import { showSetUp } from "./notes.js";
 import { driveWord } from "./drive.js";
 import { addClips, cardNote } from "./cards.js";
 import { uploadItems, uploadMenu, aboutRun } from "./upload.js";
+import { sites, uploadsOf } from "../../shared/uploads.js";
 
 const busy = () => Boolean(app.state.job);
 
@@ -230,6 +231,33 @@ function runFiles(track, data, run) {
       );
     }),
     files.length === 0 && h("p.dim.small", "No files for this run yet."),
+    runUploads(track, data, run),
+  );
+}
+
+/** Where the run's videos went up: the link on each site, kept when it was uploaded from here or
+ *  added by hand, with a way to add, change or take off one. */
+function runUploads(track, data, run) {
+  const done = uploadsOf(data.state, run.name);
+  const left = Object.keys(sites).filter((site) => !done[site]);
+  return h("div.run-uploads",
+    h("div.run-uploads-head",
+      label("UPLOADED"),
+      h("span.spacer"),
+      left.length > 0 && secondary("Add a link…", (event) => menu(event.currentTarget, left.map((site) => ({ title: `On ${sites[site].title}…`, action: () => act.keepUploadLink(track, run.name, site) }))), {
+        icon: "plus", probe: `add link ${run.name}`, help: "Keep the link to one of this run's videos on a site, uploaded from here or another way.",
+      }),
+    ),
+    Object.entries(done).map(([site, { link, at }]) => h("div.file",
+      icon("upload", 14, { class: "file-icon" }),
+      h("div.file-words", h("div.file-name", sites[site].title), h("div.file-detail.run-upload-link", at ? `${link} · ${when(at)}` : link)),
+      h("span.spacer"),
+      secondary("Open", () => act.openLink(link), { icon: "arrowUpRight", help: `Open it on ${sites[site].title}, in your browser.` }),
+      secondary("Copy link", () => ask("copyText", link), { icon: "copies" }),
+      secondary("", () => act.keepUploadLink(track, run.name, site), { icon: "pencil", help: "Change the link", "aria-label": `Change the link on ${sites[site].title}` }),
+      secondary("", () => act.forgetUpload(track, run.name, site), { icon: "trash", help: "Take this link off the run. The video stays up.", "aria-label": `Take the link on ${sites[site].title} off this run` }),
+    )),
+    Object.keys(done).length === 0 && h("p.dim.small", "Nothing yet. Uploading from here keeps each video's link when you put it in, or add one you uploaded another way."),
   );
 }
 
@@ -249,6 +277,14 @@ function runCard(track, data, run, rank) {
     run.song && h("span.run-note.accent", { help: "The finished videos use this as their sound, placed where you put it in Markers & music." }, icon("music"), run.song),
     run.coarseStep > 0 && h("span.run-note.warn", { help: `Every marker sits on a ${run.coarseStep}-frame step, so these times are approximate. Open Markers & music and move each one onto the exact frame of its gate crossing.` }, icon("warning"), "markers not on exact frames"),
     submitted && h("span.run-note.good", icon("seal"), `submitted ${submitted.time}`),
+    // Where its videos went up, each opening the video in the browser.
+    ...Object.entries(uploadsOf(data.state, run.name)).map(([site, { link }]) => h("button.run-note.good.run-uploaded", {
+      type: "button", probe: `uploaded ${site} ${run.name}`, help: `Open it on ${sites[site].title}: ${link}`,
+      onclick: (event) => {
+        event.stopPropagation();
+        act.openLink(link);
+      },
+    }, icon("upload"), `on ${sites[site].title}`)),
   ].filter(Boolean);
   const toggle = () => {
     if (isOpen) app.expanded.delete(id);

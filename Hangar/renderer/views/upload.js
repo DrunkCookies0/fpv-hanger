@@ -7,9 +7,10 @@
 // column stays in the window beside the steps to take there. The column has the video, which goes
 // into an in-app page by itself and can be dragged onto any of them, and the words to paste (a
 // title and a description for YouTube, a caption for TikTok and Instagram, each written for that
-// site, with the pilot's own lines on the end). For YouTube there is the video's link too, which
-// is taken in when the pilot copies it there and comes back, and kept for the run's entry form.
-// While the upload is open it takes over the window, the way a tool does.
+// site, with the pilot's own lines on the end). For a run's video there is a place for its link
+// on the site too, kept with the run as its log of where it went up (and, for YouTube, for its
+// entry form). On YouTube, the link is taken in by itself when the pilot copies it there and comes
+// back. While the upload is open it takes over the window, the way a tool does.
 
 import { app, ask, hangar, render, loadTrack } from "../core.js";
 import { h, icon, label, primary, secondary, plain, fill } from "../ui.js";
@@ -38,9 +39,9 @@ class UploadView {
     this.own = app.state.uploadLines ?? "";
     this.words = wordsFor(id, this.about, this.own);
     this.after = after;
-    // YouTube's page is in the pilot's own browser. Its link is kept when there is a run to keep it with.
+    // YouTube's page is in the pilot's own browser. The video's link is kept when there is a run to keep it with.
     this.inBrowser = Boolean(this.site.browser);
-    this.keepsLink = this.inBrowser && this.site.keepsLink && Boolean(video.track && video.run);
+    this.keepsLink = Boolean(video.track && video.run);
     this.put = false;
     this.link = null;
     this.kept = false;
@@ -103,6 +104,10 @@ class UploadView {
             h("div.row.tight", copy(this.caption, titled ? "description" : "caption")),
             !titled && this.captionNote,
           ),
+          !this.inBrowser && this.keepsLink && h("div.upload-part",
+            label("ITS LINK"),
+            h("p.upload-note", `Once it's posted, copy its link on ${site.title} and paste it here. It's kept with this run.`),
+            ...this.linkBox()),
           h("div.upload-part",
             label("ON EVERY ONE"),
             this.mine,
@@ -154,23 +159,30 @@ class UploadView {
       ["Paste the title and the description", "The title is on the clipboard already. Copy the description from the left when YouTube asks for it."],
     ];
     if (this.keepsLink) {
-      this.linkField = h("input.field.grow", {
-        type: "text", key: "link", placeholder: "https://youtu.be/…", spellcheck: false,
-        onchange: () => this.setLink(this.linkField.value),
-      });
-      this.linkNote = h("p.upload-note");
-      steps.push(["Bring its link back here", "YouTube shows the video's link while it goes up. Press the copy button beside it and come back here: the link comes in by itself, and is kept with this run for its entry form.",
-        h("div.row.tight", this.linkField, secondary("Paste", async () => this.setLink(await ask("clipboardText")), { probe: "upload paste link", help: "Paste the link you copied from YouTube." })),
-        this.linkNote]);
+      steps.push(["Bring its link back here", "YouTube shows the video's link while it goes up. Press the copy button beside it and come back here: the link comes in by itself, and is kept with this run.",
+        ...this.linkBox()]);
     }
     steps.push(["Publish it", "Choose who can see it, then press Publish, or Save. It carries on going up in your browser, whatever you do here."]);
-    this.drawLink();
     return h("div.upload-steps",
       h("div.upload-steps-list",
         h("div.upload-steps-head",
           h("div.card-title", "On YouTube, in your own browser"),
           h("p.upload-step-text", "Google doesn't let anyone sign in to YouTube inside an app, so its upload page opens in your browser, and everything for it is ready here.")),
         steps.map(([title, words, ...more], at) => step(at + 1, title, words, ...more))));
+  }
+
+  /** The box for the video's link on the site, with Paste, and a line on how it stands. */
+  linkBox() {
+    this.linkField = h("input.field.grow", {
+      type: "text", key: "link", placeholder: this.site.example, spellcheck: false,
+      onchange: () => this.setLink(this.linkField.value),
+    });
+    this.linkNote = h("p.upload-note");
+    this.drawLink();
+    return [
+      h("div.row.tight", this.linkField, secondary("Paste", async () => this.setLink(await ask("clipboardText")), { probe: "upload paste link", help: `Paste the link you copied on ${this.site.title}.` })),
+      this.linkNote,
+    ];
   }
 
   /** The pilot's own lines changed: kept, and put on the end of the words, unless those have
@@ -243,10 +255,11 @@ class UploadView {
   drawLink() {
     if (!this.keepsLink) return;
     if (document.activeElement !== this.linkField) this.linkField.value = this.link ?? "";
+    const works = this.inBrowser ? " It works once you press Publish." : "";
     const [kind, words] = this.linkProblem
       ? ["warn", this.linkProblem]
       : this.link
-        ? ["good", this.kept ? "Kept with this run, for its entry form. It works once you press Publish." : "It works once you press Publish."]
+        ? ["good", `${this.kept ? "Kept with this run." : ""}${works}`.trim()]
         : ["", "Not here yet."];
     this.linkNote.className = `upload-note${kind ? ` ${kind}` : ""}`;
     fill(this.linkNote, kind === "good" && icon("checkCircle", 12), ` ${words}`);

@@ -9,7 +9,8 @@
 // YouTube's page opens in the pilot's own browser instead, since Google turns away anyone signing
 // in inside an app. The app's page stays open beside it, with the video to drag onto YouTube's and
 // the words to paste, and takes in the video's link when the pilot copies it on YouTube and comes
-// back to the app.
+// back to the app. On any of the sites, the video's link can be pasted in, and is kept with its
+// run, as the run's log of where it went up.
 //
 // The video goes up under a name that says what it is, which YouTube and TikTok start its title
 // and its caption from: a copy of it by that name, made in a folder of the app's own (a second
@@ -25,7 +26,7 @@ import { existsSync, linkSync, mkdirSync, rmSync, constants } from "node:fs";
 import { copyFile } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { sites, mayTakeVideo, chooserScript, fileName, googleSaysNo, linkAlone, videoLinkIn } from "../shared/uploads.js";
+import { sites, mayTakeVideo, chooserScript, fileName, googleSaysNo, linkAlone, linkFor } from "../shared/uploads.js";
 import { log } from "./paths.js";
 
 const folder = dirname(fileURLToPath(import.meta.url));
@@ -54,8 +55,8 @@ const every = 1500;
  * and `stayOnUpload` for a page in the app, and `openUploadPage`, `showUploadVideo`,
  * `lookForLink` and `setUploadLink` for one in the pilot's own browser. The pages hear "upload"
  * (how the page is getting on: loading, a problem, whether the video is in, its link) and
- * "uploadLeave" (the window is being closed: leave the page first). `keepLink(track, run, link)`
- * keeps a YouTube video's link with its run. The named copies go in `staging`. With `still`, a
+ * "uploadLeave" (the window is being closed: leave the page first). `keepLink(track, run, site,
+ * link)` keeps a video's link on a site with its run. The named copies go in `staging`. With `still`, a
  * page is given its place but its site is not called on: that is for the app drawing its pages
  * into pictures. With `quiet`, nothing is opened in the pilot's own browser or file browser.
  */
@@ -327,7 +328,7 @@ export function makeUploads({ window, tell, keepLink, staging, quiet = false, st
       file = await named(original, name);
       const site = siteOf(id);
       if (site.browser) {
-        const here = { id, site, browser: true, file, original, track, run, link: videoLinkIn(link), lent: false, went: [], finished: false };
+        const here = { id, site, browser: true, file, original, track, run, link: linkFor(id, link), lent: false, went: [], finished: false };
         // Coming back from the browser is when a link the pilot copied there is looked for.
         here.comeBack = () => api.lookForLink();
         open = here;
@@ -338,7 +339,7 @@ export function makeUploads({ window, tell, keepLink, staging, quiet = false, st
       const view = new WebContentsView({ webPreferences: { session: part, sandbox: true, contextIsolation: true, nodeIntegration: false } });
       const contents = view.webContents;
       // Kept by itself: a view no longer has its page once the page has closed.
-      const here = { id, site, view, contents, file, original, track, run, put: false, seen: 0, windows: new Set(), debugger: null, worlds: new Map(), looking: false, quitting: false, lent: false, went: [], finished: false };
+      const here = { id, site, view, contents, file, original, track, run, link: linkFor(id, link), put: false, seen: 0, windows: new Set(), debugger: null, worlds: new Map(), looking: false, quitting: false, lent: false, went: [], finished: false };
       // Closing the window while a page is open leaves the page first, which may ask the pilot.
       // Closing it again while that is going on closes it, page and all.
       here.guard = (event) => {
@@ -367,7 +368,7 @@ export function makeUploads({ window, tell, keepLink, staging, quiet = false, st
       here.timer = setInterval(() => look(here), every);
       contents.loadURL(still && !standIn ? "about:blank" : site.address).catch(() => {});
       // The name the video goes up by, for the column to show.
-      return { problem: null, name: basename(file) };
+      return { problem: null, name: basename(file), link: here.link };
     },
 
     /** Moves the page to where the app's page says it goes, when the window changes size. */
@@ -438,25 +439,26 @@ export function makeUploads({ window, tell, keepLink, staging, quiet = false, st
      *  only looked for when it has a run to be kept with. */
     async lookForLink() {
       const here = open;
-      if (!here?.browser || !here.site.keepsLink || !here.track || !here.run) return;
-      const link = linkAlone(await clipboard.readText());
+      if (!here?.browser || !here.track || !here.run) return;
+      const link = linkAlone(here.id, await clipboard.readText());
       if (link && link !== here.link && open === here) api.setUploadLink(link);
     },
 
-    /** The video's link, pasted or typed by the pilot or taken from the clipboard, kept with its
-     *  run when it is a YouTube video's. Empty takes it away. */
+    /** The video's link on the site, pasted or typed by the pilot or taken from the clipboard,
+     *  kept with its run. Empty takes it away. */
     setUploadLink(text) {
       const here = open;
-      if (!here?.browser) return null;
+      if (!here) return null;
       const typed = String(text ?? "").trim();
-      const link = videoLinkIn(typed);
+      const link = linkFor(here.id, typed);
       if (typed !== "" && !link) {
-        say({ linkProblem: "That isn't a YouTube video's link." });
-        return { problem: "That isn't a YouTube video's link." };
+        const problem = `That isn't a link to a video on ${here.site.title}.`;
+        say({ linkProblem: problem });
+        return { problem };
       }
       here.link = link;
-      const kept = Boolean(here.site.keepsLink && here.track && here.run);
-      if (kept) keepLink(here.track, here.run, link ?? "");
+      const kept = Boolean(here.track && here.run);
+      if (kept) keepLink(here.track, here.run, here.id, link ?? "");
       say({ link, kept, linkProblem: null });
       return { link, kept };
     },

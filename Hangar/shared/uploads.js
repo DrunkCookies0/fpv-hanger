@@ -5,13 +5,15 @@
 // doesn't let anyone sign in inside an app's browser; there the video is dragged in from the app,
 // and the video's link, copied from YouTube, comes back to the app for the entry form. Either way
 // the video goes up named for what it is, with the words for each site ready (a title and a
-// description for YouTube, a caption for TikTok and Instagram). Nothing here touches the disk or
-// the network, so it can be tested by itself.
+// description for YouTube, a caption for TikTok and Instagram), and its link on each site can be
+// kept with its run, as the run's log of where it went up. Nothing here touches the disk or the
+// network, so it can be tested by itself.
 
 /**
  * Where a video can go. `shape` is the finished video each takes: "landscape" (16:9) or
  * "upright" (9:16). `browser`: its upload page opens in the pilot's own browser, not in the app.
- * `keepsLink`: the video's link there is the one the run's entry form wants.
+ * `keepsLink`: the video's link there is the one the run's entry form wants. `example` is how a
+ * video's link there looks.
  *
  * A page shown in the app has a corner of the browser of its own (`partition`), kept between
  * runs. The video is only ever put into a chooser on one of the site's own `hosts`, on a page
@@ -21,22 +23,22 @@
 export const sites = {
   youtube: {
     title: "YouTube", shape: "landscape", browser: true, keepsLink: true,
-    address: "https://www.youtube.com/upload",
+    address: "https://www.youtube.com/upload", example: "https://youtu.be/…",
   },
   shorts: {
     title: "YouTube Shorts", shape: "upright", browser: true, keepsLink: false,
-    address: "https://www.youtube.com/upload",
+    address: "https://www.youtube.com/upload", example: "https://youtube.com/shorts/…",
   },
   tiktok: {
     title: "TikTok", shape: "upright", browser: false, keepsLink: false,
-    address: "https://www.tiktok.com/tiktokstudio/upload",
+    address: "https://www.tiktok.com/tiktokstudio/upload", example: "https://www.tiktok.com/@…/video/…",
     partition: "persist:upload-tiktok",
     hosts: ["www.tiktok.com"],
     pages: "^/(tiktokstudio/upload|upload|creator)",
   },
   instagram: {
     title: "Instagram", shape: "upright", browser: false, keepsLink: false,
-    address: "https://www.instagram.com/",
+    address: "https://www.instagram.com/", example: "https://www.instagram.com/reel/…",
     partition: "persist:upload-instagram",
     hosts: ["www.instagram.com"],
     inDialog: true,
@@ -163,9 +165,43 @@ export function videoLinksIn(text) {
 /** The first YouTube video's address in some text, or null. */
 export const videoLinkIn = (text) => videoLinksIn(text)[0] ?? null;
 
-/** A YouTube video's address when that is all the text is, as when it was copied with YouTube's
+/** How a video's link is written on TikTok (the long way, or the short one its Share gives) and
+ *  on Instagram (a reel, or a post), for finding one in some text. */
+const linkWays = {
+  tiktok: /(?:https?:\/\/)?(?:(?:www\.|m\.)?tiktok\.com\/(?:@[\w.-]+\/(?:video|photo)\/\d+|t\/[\w-]+)|(?:vm|vt)\.tiktok\.com\/[\w-]+)/i,
+  instagram: /(?:https?:\/\/)?(?:www\.)?instagram\.com\/(?:[\w.]+\/)?(?:reels?|p)\/[\w-]+/i,
+};
+
+/** The first link to a video on a site in some text, written one way (YouTube's the short way),
+ *  or null. */
+export function linkFor(site, text) {
+  if (site === "youtube" || site === "shorts") return videoLinkIn(text);
+  const found = linkWays[site]?.exec(String(text ?? ""));
+  return found ? `https://${found[0].replace(/^https?:\/\//i, "")}` : null;
+}
+
+/** A video's link on a site when that is all the text is, as when it was copied with the site's
  *  own copy button, or null: an address in among other words, such as a description, isn't one. */
-export const linkAlone = (text) => (/^\S+$/.test(String(text ?? "").trim()) ? videoLinkIn(text) : null);
+export const linkAlone = (site, text) => (/^\S+$/.test(String(text ?? "").trim()) ? linkFor(site, text) : null);
+
+/**
+ * Where a run's videos went up: { [site]: { link, at } }, in the order the sites are offered, from
+ * a track's state. `at` is when it was kept, or null when that isn't known. YouTube's is the link
+ * the run's entry form has, wherever it was put in.
+ */
+export function uploadsOf(state, run) {
+  const logged = state?.uploads?.[run] ?? {};
+  const all = {};
+  for (const site of Object.keys(sites)) {
+    if (site === "youtube") {
+      const link = videoLinkIn(state?.links?.[run]);
+      if (link) all.youtube = { link, at: logged.youtube?.link === link ? logged.youtube.at ?? null : null };
+    } else if (logged[site]?.link) {
+      all[site] = { link: logged[site].link, at: logged[site].at ?? null };
+    }
+  }
+  return all;
+}
 
 /**
  * The script run in a site's page to find where its video goes: the page's own file chooser, in

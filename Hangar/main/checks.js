@@ -27,12 +27,14 @@
 //            own lines are kept and go on the end, the page and the video named for what it is
 //            would be opened in the pilot's own browser and file browser (they aren't), and the
 //            video's link, copied by itself, is taken in on coming back to the window and kept
-//            for the entry form. TikTok's and Instagram's, with a made-up page of the app's own
+//            for the entry form and as the run's YouTube upload, shown on the run. TikTok's and
+//            Instagram's, with a made-up page of the app's own
 //            standing in: the page opens over its place, the video goes into its chooser by
 //            itself, named, and not into one only for pictures, a page that is still busy holds
 //            the pilot back from leaving, and from closing the window, until they say so, and
-//            Google turning away a sign-in is told. Nothing of YouTube's, TikTok's, Instagram's
-//            or Google's is called on.
+//            Google turning away a sign-in is told. A link pasted on TikTok's page, or added on
+//            the run afterwards, is kept with the run. Nothing of YouTube's, TikTok's,
+//            Instagram's or Google's is called on.
 
 import { app, clipboard, session } from "electron";
 import { spawn, spawnSync } from "node:child_process";
@@ -698,7 +700,7 @@ async function uploads(tools) {
     made.push(file);
   }
   const [landscape, upright] = made;
-  const kept = library.state(track).links?.[run.name], ownBefore = library.store.uploadLines;
+  const kept = library.state(track).links?.[run.name], logged = library.state(track).uploads?.[run.name], ownBefore = library.store.uploadLines;
   const named = [];
   const frame = () => js(`return (() => { const at = document.querySelector(".upload .tool-frame")?.getBoundingClientRect(); return at && { x: Math.round(at.left), y: Math.round(at.top), width: Math.round(at.width), height: Math.round(at.height) }; })()`);
   const until = async (test, tries = 60) => {
@@ -769,7 +771,7 @@ ${run.name}`)}); await window.showForSnapshot(${JSON.stringify(`files:${track}`)
     const link = await until(() => api.uploadIsOpen()?.link, 40);
     const linkShown = await until(() => js(`return document.querySelector('[data-key="link"]')?.value || null`), 20);
     const note = await js(`return document.querySelector(".upload-step .upload-note.good")?.textContent ?? null`);
-    say(notYet === null && link === "https://youtu.be/NewVideo_12" && library.state(track).links?.[run.name] === link && linkShown === link && Boolean(note), "the video's link is taken in on coming back, not one in the description, and kept with the run for its entry form", `${notYet} / ${link} / ${linkShown} / ${note}`);
+    say(notYet === null && link === "https://youtu.be/NewVideo_12" && library.state(track).links?.[run.name] === link && library.state(track).uploads?.[run.name]?.youtube?.link === link && linkShown === link && Boolean(note), "the video's link is taken in on coming back, not one in the description, and kept with the run for its entry form", `${notYet} / ${link} / ${linkShown} / ${note}`);
     // A link pasted by hand that isn't one isn't kept.
     await clipboard.writeText("not a link");
     await press("upload paste link");
@@ -780,6 +782,8 @@ ${run.name}`)}); await window.showForSnapshot(${JSON.stringify(`files:${track}`)
     await press("upload back");
     const left = await until(async () => api.uploadIsOpen() === null && (await js(`return document.getElementById("tool").childElementCount`)) === 0, 40);
     say(Boolean(left) && existsSync(named[0]), "leaving YouTube's steps goes back, and leaves the named video for the browser", named[0]);
+    const onRun = await until(() => js(`return document.querySelector('[data-probe="uploaded youtube ${run.name}"]')?.textContent ?? null`), 20);
+    say(onRun === "on YouTube", "the run says it is on YouTube", onRun ?? "nothing said");
 
     // TikTok's page opens in the window, with the caption on the clipboard.
     await press(probe("upright", upright));
@@ -801,6 +805,11 @@ ${run.name}`)}); await window.showForSnapshot(${JSON.stringify(`files:${track}`)
     say(Boolean(put) && putFile !== upright && reads?.chosen === basename(putFile) && reads.chosen === (await chip()) && /^[\x20-\x7e]+$/.test(reads.chosen), "the video goes into the page's own chooser by itself, named for what it is, and not into the one for pictures", reads?.chosen ?? "nothing chosen");
     const said = await js(`return document.querySelector(".upload-side .upload-note.good")?.textContent ?? null`);
     say(Boolean(said), "the column says the video is in", said ?? "");
+    // Its link, copied on TikTok once it's posted, is pasted in and kept with the run.
+    await clipboard.writeText("https://www.tiktok.com/@test.pilot/video/7400000000000000001?is_from_webapp=1");
+    await press("upload paste link");
+    const tiktokLink = await until(() => library.state(track).uploads?.[run.name]?.tiktok?.link, 20);
+    say(tiktokLink === "https://www.tiktok.com/@test.pilot/video/7400000000000000001", "a TikTok link pasted in is kept with the run", tiktokLink ?? "nothing kept");
 
     // Leaving while the video is still going up asks first, with the page out of the way.
     await api.uploadReads();
@@ -843,6 +852,23 @@ ${run.name}`)}); await window.showForSnapshot(${JSON.stringify(`files:${track}`)
     const asks = await js(`return document.querySelector("#sheets .alert-title")?.textContent ?? null`);
     say(Boolean(gone) && asks === null, "a page with nothing going up is left without asking", asks ?? "");
 
+    // The run lists where it went up, and a link uploaded another way can be added to it.
+    await until(async () => (await js(`return document.querySelectorAll(".run-uploads .file").length`)) === 2, 20);
+    await press(`add link ${run.name}`);
+    await pause(150);
+    await js(`[...document.querySelectorAll(".menu .menu-item")].find((one) => one.textContent === "On Instagram…").click()`);
+    const sheet = await until(() => js(`return document.querySelector("#sheets .alert-title")?.textContent ?? null`), 20);
+    await js(`const box = document.querySelector("#sheets .alert input"); box.value = "https://www.instagram.com/reel/CmadeUp3_x/?igsh=abc"; [...document.querySelectorAll("#sheets button")].find((one) => one.textContent === "Keep").click()`);
+    const gramLink = await until(() => library.state(track).uploads?.[run.name]?.instagram?.link, 20);
+    const listed = await until(async () => {
+      const rows = await js(`return [...document.querySelectorAll(".run-uploads .file .file-name")].map((one) => one.textContent)`);
+      return rows.length === 3 ? rows : null;
+    }, 20);
+    say(sheet === "Its link on Instagram" && gramLink === "https://www.instagram.com/reel/CmadeUp3_x" && JSON.stringify(listed) === JSON.stringify(["YouTube", "TikTok", "Instagram"]), "the run lists where it went up, and a link added by hand is kept", `${sheet} / ${gramLink} / ${JSON.stringify(listed)}`);
+    const wrongSite = await api.keepUpload(track, run.name, "instagram", "https://youtu.be/AbC_dEf-123");
+    await api.keepUpload(track, run.name, "tiktok", "");
+    say(Boolean(wrongSite.problem) && library.state(track).uploads?.[run.name]?.instagram?.link === gramLink && !library.state(track).uploads?.[run.name]?.tiktok, "another site's link isn't kept, and a link taken off goes", wrongSite.problem ?? "kept");
+
     // Only the sites it knows, and only videos in the library or chosen by the pilot.
     const place0 = { x: 0, y: 0, width: 10, height: 10 };
     say((await api.openUpload("elsewhere", place0, { file: landscape })).problem !== null && api.uploadIsOpen() === null, "only the sites the app knows can be opened");
@@ -855,6 +881,8 @@ ${run.name}`)}); await window.showForSnapshot(${JSON.stringify(`files:${track}`)
     library.update(track, (state) => {
       if (kept === undefined) delete state.links?.[run.name];
       else state.links[run.name] = kept;
+      if (logged === undefined) delete state.uploads?.[run.name];
+      else state.uploads[run.name] = logged;
     });
     if (ownBefore === undefined) delete library.store.uploadLines;
     else library.store.uploadLines = ownBefore;
