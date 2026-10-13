@@ -105,8 +105,9 @@ export async function openSubmit(track, run) {
       answers[question.id] = [value];
       ask("setLink", track, run.name, value);
     };
-    // The video goes up through YouTube's own page, in the window. Its link is kept with the run,
-    // and this window opens again, with the link in it, once that page is left.
+    // The video goes up through YouTube's own page, in the pilot's own browser, with the app's
+    // steps for it in the window. Its link is kept with the run when the pilot copies it there, and
+    // this window opens again, with the link in it, once the steps are left.
     const upload = async () => {
       await keep();
       leave();
@@ -129,7 +130,7 @@ export async function openSubmit(track, run) {
       ),
       h("div.row.tight", linkStatus, h("span.spacer"),
         video
-          ? secondary("Upload to YouTube", upload, { icon: "upload", probe: "submit upload", help: "Opens YouTube's own upload page here, with this run's 16:9 video put in. Its link is filled in here as soon as YouTube shows it." })
+          ? secondary("Upload to YouTube", upload, { icon: "upload", probe: "submit upload", help: "Uploads this run's 16:9 video on YouTube, in your own browser, with the title and the description ready. Its link comes back here when you copy it there." })
           : secondary("YouTube's upload page", () => openLink("https://www.youtube.com/upload")),
         video && secondary("Show the video", () => reveal(video), { help: `Show this run's 16:9 video in ${fileBrowser}.` }),
       ),

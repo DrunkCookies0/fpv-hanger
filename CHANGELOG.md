@@ -2,6 +2,12 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.21.0 (13 October 2026)
+
+- Uploading to YouTube and YouTube Shorts happens in your own browser now. Google doesn't let anyone sign in inside an app ("This browser or app may not be secure"), so YouTube's upload page opens in your browser, and FPV Hangar shows the steps beside the words it wrote for you: press **Open YouTube**, drag your video onto YouTube's page from the column on the left (or press **Show in Finder**, or Explorer, and drag it from there), paste the title and the description, and press Publish. The video still goes up named for what it is.
+- The link comes back by itself. Press the copy button beside the video's link on YouTube and come back to FPV Hangar: the link is put in and kept with the run, so **Submit this run** has it. It can be pasted or typed in too. Only a link copied by itself is taken, never one inside a description.
+- TikTok and Instagram stay in the app. Google turns away TikTok's **Continue with Google** in the same way, so log in to TikTok with your email, phone or username. If Google turns you away, the column says so, above **Use my browser instead**.
+
 ## v0.20.1 (13 October 2026)
 
 - Updating on Windows no longer opens black windows saying `find /i ".exe"` while FPV Hangar closes and the new version is put in its place. The update's helper now runs out of sight. The update to this version still shows them, because it is the version you had that does the updating; the ones after it won't.

@@ -1,60 +1,55 @@
-// Uploading a finished video to YouTube, TikTok and Instagram, through each site's own upload page
-// shown inside the app. No developer account or app review is involved: the pilot signs in on the
-// site's own page, once, and presses its own Post button. The app puts the video in for them,
-// named for what it is, has the words for each site ready (a title and a description for
-// YouTube, a caption for TikTok and Instagram), and for YouTube keeps the video's link for the
-// entry form. Nothing here touches the disk or the network, so it can be tested by itself.
+// Uploading a finished video to YouTube, TikTok and Instagram, through each site's own upload page.
+// No developer account or app review is involved: the pilot signs in on the site's own page and
+// presses its own Post button. TikTok's and Instagram's pages are shown inside the app, and the
+// app puts the video in for them. YouTube's opens in the pilot's own browser, because Google
+// doesn't let anyone sign in inside an app's browser; there the video is dragged in from the app,
+// and the video's link, copied from YouTube, comes back to the app for the entry form. Either way
+// the video goes up named for what it is, with the words for each site ready (a title and a
+// description for YouTube, a caption for TikTok and Instagram). Nothing here touches the disk or
+// the network, so it can be tested by itself.
 
 /**
  * Where a video can go. `shape` is the finished video each takes: "landscape" (16:9) or
- * "upright" (9:16). Sites that share a sign-in share a corner of the browser (`partition`).
- * The video is only ever put into a chooser on one of the site's own `hosts`, on a page whose
- * path matches `pages` when there is one, and inside a dialog when `inDialog` (so never into the
- * chooser of a message being written). `findsLink`: the page shows the video's link once it is
- * going up. `keepsLink`: that link is the one the run's entry form wants.
+ * "upright" (9:16). `browser`: its upload page opens in the pilot's own browser, not in the app.
+ * `keepsLink`: the video's link there is the one the run's entry form wants.
+ *
+ * A page shown in the app has a corner of the browser of its own (`partition`), kept between
+ * runs. The video is only ever put into a chooser on one of the site's own `hosts`, on a page
+ * whose path matches `pages` when there is one, and inside a dialog when `inDialog` (so never into
+ * the chooser of a message being written).
  */
 export const sites = {
   youtube: {
-    title: "YouTube", shape: "landscape",
+    title: "YouTube", shape: "landscape", browser: true, keepsLink: true,
     address: "https://www.youtube.com/upload",
-    partition: "persist:upload-google",
-    hosts: ["studio.youtube.com", "www.youtube.com"],
-    findsLink: true, keepsLink: true,
   },
   shorts: {
-    title: "YouTube Shorts", shape: "upright",
+    title: "YouTube Shorts", shape: "upright", browser: true, keepsLink: false,
     address: "https://www.youtube.com/upload",
-    partition: "persist:upload-google",
-    hosts: ["studio.youtube.com", "www.youtube.com"],
-    findsLink: true, keepsLink: false,
   },
   tiktok: {
-    title: "TikTok", shape: "upright",
+    title: "TikTok", shape: "upright", browser: false, keepsLink: false,
     address: "https://www.tiktok.com/tiktokstudio/upload",
     partition: "persist:upload-tiktok",
     hosts: ["www.tiktok.com"],
     pages: "^/(tiktokstudio/upload|upload|creator)",
-    findsLink: false, keepsLink: false,
   },
   instagram: {
-    title: "Instagram", shape: "upright",
+    title: "Instagram", shape: "upright", browser: false, keepsLink: false,
     address: "https://www.instagram.com/",
     partition: "persist:upload-instagram",
     hosts: ["www.instagram.com"],
     inDialog: true,
     pages: "^/(?!direct/)",
-    findsLink: false, keepsLink: false,
   },
 };
 
 /** The sites that take a video of a shape, in the order they are offered. */
 export const sitesFor = (shape) => Object.keys(sites).filter((id) => sites[id].shape === shape);
 
-/** What to do on each site once it is open, in a line or two. */
+/** What to do on a site whose page is shown in the app, in a line or two. */
 export const howTo = {
-  youtube: "Sign in if it asks. Your video goes in by itself, or drag it onto the page. The title is on the clipboard: paste it over YouTube's, then copy the description and paste it below. Choose who can see it and press Publish.",
-  shorts: "Sign in if it asks. Your video goes in by itself, or drag it onto the page. A 9:16 video up to three minutes long goes up as a Short. The title is on the clipboard: paste it over YouTube's, then copy the description and paste it below. Press Publish.",
-  tiktok: "Log in if it asks. Your video goes in by itself, or drag it onto the page. Paste the caption and press Post.",
+  tiktok: "Log in if it asks, with your email, phone or username: Google's sign-in doesn't work inside an app. Your video goes in by itself, or drag it onto the page. Paste the caption and press Post.",
   instagram: "Log in if it asks, then press Create and choose Post. Your video goes in by itself once Instagram asks for one, or drag it onto its window. It goes up as a Reel. Paste the caption and press Share.",
 };
 
@@ -67,7 +62,7 @@ export function mayTakeVideo(site, address) {
   } catch {
     return false;
   }
-  if (!site.hosts.includes(url.hostname)) return false;
+  if (!site.hosts?.includes(url.hostname)) return false;
   return !site.pages || new RegExp(site.pages).test(url.pathname);
 }
 
@@ -168,18 +163,9 @@ export function videoLinksIn(text) {
 /** The first YouTube video's address in some text, or null. */
 export const videoLinkIn = (text) => videoLinksIn(text)[0] ?? null;
 
-/**
- * The link of the video going up, from what the page reads (`readPage`). YouTube shows it in its
- * upload dialog as soon as the video starts going up, and that is taken first. Failing that, once
- * the app has put the video in (`put`), a link that wasn't on the page before then (`before`):
- * the list of the channel's other videos behind the dialog has theirs.
- */
-export function uploadLink(read, before, put) {
-  const inDialog = videoLinkIn(read?.dialog);
-  if (inDialog) return inDialog;
-  if (!put) return null;
-  return videoLinksIn(read?.all).find((link) => !before.has(link)) ?? null;
-}
+/** A YouTube video's address when that is all the text is, as when it was copied with YouTube's
+ *  own copy button, or null: an address in among other words, such as a description, isn't one. */
+export const linkAlone = (text) => (/^\S+$/.test(String(text ?? "").trim()) ? videoLinkIn(text) : null);
 
 /**
  * The script run in a site's page to find where its video goes: the page's own file chooser, in
@@ -211,22 +197,6 @@ export function chooserScript({ inDialog = false } = {}) {
 })()`;
 }
 
-/** The script that reads a site's page, shadows and all, for a video's link: the words and links
- *  in its upload dialog, and in the whole page. */
-export const readPage = `(() => {
-  const words = (root) => {
-    const parts = [];
-    const look = (at) => {
-      for (const element of at.querySelectorAll("a[href]")) parts.push(element.href);
-      for (const element of at.querySelectorAll("*")) if (element.shadowRoot) {
-        parts.push(element.shadowRoot.textContent || "");
-        look(element.shadowRoot);
-      }
-    };
-    look(root);
-    parts.push(root.innerText || root.textContent || "");
-    return parts.join("\\n");
-  };
-  const dialogs = [...document.querySelectorAll("ytcp-uploads-dialog")];
-  return JSON.stringify({ dialog: dialogs.map(words).join("\\n"), all: document.body ? words(document.body) : "" });
-})()`;
+/** Whether a page is Google turning away a sign-in, as it does in an app's own browser: "This
+ *  browser or app may not be secure", or the same for a site's "Continue with Google". */
+export const googleSaysNo = (address) => /^https:\/\/accounts\.google\.com\/\S*(rejected|oauth\/error|disallowed_useragent)/i.test(String(address ?? ""));

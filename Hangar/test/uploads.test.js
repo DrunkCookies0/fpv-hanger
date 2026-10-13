@@ -1,23 +1,25 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dayInWords, fileName, hashtag, mayTakeVideo, sites, sitesFor, uploadLink, videoLinkIn, videoLinksIn, words } from "../shared/uploads.js";
+import { dayInWords, fileName, googleSaysNo, hashtag, linkAlone, mayTakeVideo, sites, sitesFor, videoLinkIn, videoLinksIn, words } from "../shared/uploads.js";
 
-test("uploads: each site takes the video of its shape, and the two YouTubes share a sign-in", () => {
+test("uploads: each site takes the video of its shape, and YouTube's page is in the pilot's own browser", () => {
   assert.equal(sites.youtube.shape, "landscape");
   assert.deepEqual(sitesFor("landscape"), ["youtube"]);
   assert.deepEqual(sitesFor("upright"), ["shorts", "tiktok", "instagram"]);
-  assert.equal(sites.youtube.partition, sites.shorts.partition);
+  // Google turns away a sign-in inside an app, so both YouTubes go through the pilot's browser.
+  assert.deepEqual(Object.keys(sites).filter((id) => sites[id].browser), ["youtube", "shorts"]);
   assert.notEqual(sites.tiktok.partition, sites.instagram.partition);
-  assert.ok(Object.values(sites).every((site) => site.address.startsWith("https://") && mayTakeVideo(site, site.address)));
+  assert.ok(Object.values(sites).every((site) => site.address.startsWith("https://")));
+  assert.ok(Object.values(sites).filter((site) => !site.browser).every((site) => site.partition && mayTakeVideo(site, site.address)));
   // Only the 16:9 video's link is the one an entry form wants.
   assert.deepEqual(Object.keys(sites).filter((id) => sites[id].keepsLink), ["youtube"]);
 });
 
 test("uploads: the video only goes into a chooser on the site's own upload page", () => {
-  assert.ok(mayTakeVideo(sites.youtube, "https://studio.youtube.com/channel/UCxxxxxxxxxxxxxxxxxxxxxx/videos/upload?d=ud"));
-  assert.ok(!mayTakeVideo(sites.youtube, "https://accounts.google.com/v3/signin/identifier"));
-  assert.ok(!mayTakeVideo(sites.youtube, "https://studio.youtube.com.example.com/upload"));
+  // Nothing is put into a page in the pilot's own browser.
+  assert.ok(!mayTakeVideo(sites.youtube, "https://www.youtube.com/upload"));
   assert.ok(mayTakeVideo(sites.tiktok, "https://www.tiktok.com/tiktokstudio/upload?from=creator_center"));
+  assert.ok(!mayTakeVideo(sites.tiktok, "https://www.tiktok.com.example.com/tiktokstudio/upload"));
   assert.ok(!mayTakeVideo(sites.tiktok, "https://www.tiktok.com/messages"));
   assert.ok(mayTakeVideo(sites.instagram, "https://www.instagram.com/"));
   assert.ok(!mayTakeVideo(sites.instagram, "https://www.instagram.com/direct/inbox/"));
@@ -76,14 +78,20 @@ test("uploads: a YouTube link is found, whichever way it is written", () => {
   assert.deepEqual(videoLinksIn("youtu.be/AAAAAAAAAAA and youtu.be/BBBBBBBBBBB, youtu.be/AAAAAAAAAAA"), ["https://youtu.be/AAAAAAAAAAA", "https://youtu.be/BBBBBBBBBBB"]);
 });
 
-test("uploads: the link kept is the one of the video going up, not another on the page", () => {
-  const older = "https://youtu.be/OlderVideo1";
-  const before = new Set([older]);
-  // The upload dialog's own link is taken whenever it shows.
-  assert.equal(uploadLink({ dialog: "Video link\nhttps://youtu.be/NewVideo123", all: older }, before, false), "https://youtu.be/NewVideo123");
-  // Otherwise only a link that wasn't there before the video went in, and only once it has.
-  assert.equal(uploadLink({ dialog: "", all: `${older} https://youtu.be/NewVideo123` }, before, false), null);
-  assert.equal(uploadLink({ dialog: "", all: `${older} https://youtu.be/NewVideo123` }, before, true), "https://youtu.be/NewVideo123");
-  assert.equal(uploadLink({ dialog: "", all: older }, before, true), null);
-  assert.equal(uploadLink(null, before, true), null);
+test("uploads: only a link copied by itself is taken from the clipboard, not one in among words", () => {
+  assert.equal(linkAlone("https://youtu.be/NewVideo_12"), "https://youtu.be/NewVideo_12");
+  assert.equal(linkAlone("  https://youtube.com/shorts/NewVideo_12\n"), "https://youtu.be/NewVideo_12");
+  // A description with a link of the pilot's own in it, or the title, isn't the video's link.
+  assert.equal(linkAlone("Spring Cup\n\nMy last race: https://youtu.be/OlderVideo1"), null);
+  assert.equal(linkAlone("Spring Cup · 31.002 best 3 laps | Test Pilot"), null);
+  assert.equal(linkAlone("https://studio.youtube.com/video/NewVideo_12/edit"), null);
+  assert.equal(linkAlone(""), null);
+});
+
+test("uploads: Google turning away a sign-in is told apart from signing in", () => {
+  assert.ok(googleSaysNo("https://accounts.google.com/v3/signin/rejected?continue=https%3A%2F%2Fwww.tiktok.com"));
+  assert.ok(googleSaysNo("https://accounts.google.com/signin/oauth/error?authError=Cg9kaXNhbGxvd2VkX3VzZXJhZ2VudA"));
+  assert.ok(!googleSaysNo("https://accounts.google.com/v3/signin/identifier?continue=https%3A%2F%2Fwww.tiktok.com"));
+  assert.ok(!googleSaysNo("https://www.tiktok.com/login/rejected"));
+  assert.ok(!googleSaysNo(undefined));
 });

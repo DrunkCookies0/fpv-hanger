@@ -22,16 +22,19 @@
 //            checked and put in place, all in a folder of its own. With `--live` it also opens
 //            Betaflight's app and the ExpressLRS flasher from their own sites, which needs the
 //            network, and reads that each arrived. No device is asked for or touched.
-//   uploads  uploading a run's videos, with a made-up page of the app's own standing in for the
-//            sites: the page opens over its place, the video goes into its chooser by itself,
-//            named for what it is, and not into one only for pictures, the title and the
-//            description are made from the run and the title is on the clipboard, the pilot's own
-//            lines are kept and go on the end, the video's link is read off the page and kept for
-//            the entry form, and a page that is still busy holds the pilot back from leaving, and
-//            from closing the window, until they say so. Nothing of YouTube's, TikTok's or
-//            Instagram's is called on.
+//   uploads  uploading a run's videos. YouTube's: its steps show beside the column, the title and
+//            the description are made from the run and the title is on the clipboard, the pilot's
+//            own lines are kept and go on the end, the page and the video named for what it is
+//            would be opened in the pilot's own browser and file browser (they aren't), and the
+//            video's link, copied by itself, is taken in on coming back to the window and kept
+//            for the entry form. TikTok's and Instagram's, with a made-up page of the app's own
+//            standing in: the page opens over its place, the video goes into its chooser by
+//            itself, named, and not into one only for pictures, a page that is still busy holds
+//            the pilot back from leaving, and from closing the window, until they say so, and
+//            Google turning away a sign-in is told. Nothing of YouTube's, TikTok's, Instagram's
+//            or Google's is called on.
 
-import { app, clipboard } from "electron";
+import { app, clipboard, session } from "electron";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, writeFileSync, appendFileSync, copyFileSync, cpSync, createReadStream, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, utimesSync } from "node:fs";
@@ -44,7 +47,7 @@ import { install, thisCopy, whatTheOldAppKept, startScript } from "./updates.js"
 import { markerFile, FrameRate } from "../shared/timing.js";
 import { Library } from "./library.js";
 import { copyName, libraryName } from "../shared/drive.js";
-import { fileName } from "../shared/uploads.js";
+import { fileName, sites } from "../shared/uploads.js";
 
 /** With `--report <file>`, everything said is written there too, a line at a time as it happens,
  *  so a check that stops halfway still leaves what it had found. */
@@ -638,14 +641,15 @@ async function outside(tools) {
 }
 
 /** A page standing in for a site's upload page. Its file choosers come a moment after it loads,
- *  inside a part with a shadow of its own, as YouTube's do: first one only for pictures, then one
- *  for videos. A video chosen is "going up" until `window.done`, and asks to stay meanwhile. */
+ *  inside a part with a shadow of its own, as the sites' do: first one only for pictures, then one
+ *  for videos. A video chosen is "going up" until `window.done`, and asks to stay meanwhile. Opened
+ *  as "#google", it goes on to Google turning away a sign-in. */
 const standInPage = `<!doctype html>
 <meta charset="utf-8"><title>Made-up upload page</title>
-<p>An older video: <a href="https://youtu.be/OlderVideo1">https://youtu.be/OlderVideo1</a></p>
 <script>
 window.chosen = null;
 window.done = false;
+if (location.hash === "#google") setTimeout(() => { location.href = "https://accounts.google.com/v3/signin/rejected?continue=made-up"; }, 300);
 setTimeout(() => {
   const host = document.createElement("upload-picker");
   document.body.append(host);
@@ -657,14 +661,7 @@ setTimeout(() => {
   const videos = document.createElement("input");
   videos.type = "file";
   videos.accept = "video/*";
-  videos.addEventListener("change", () => {
-    window.chosen = videos.files[0] ? videos.files[0].name : null;
-    setTimeout(() => {
-      const dialog = document.createElement("ytcp-uploads-dialog");
-      dialog.innerHTML = '<span>Video link</span> <a href="https://youtu.be/NewVideo_12">https://youtu.be/NewVideo_12</a>';
-      document.body.append(dialog);
-    }, 400);
-  });
+  videos.addEventListener("change", () => { window.chosen = videos.files[0] ? videos.files[0].name : null; });
   shadow.append(pictures, videos);
 }, 700);
 window.addEventListener("beforeunload", (event) => {
@@ -675,7 +672,8 @@ window.addEventListener("beforeunload", (event) => {
 });
 </script>`;
 
-/** Uploading a run's videos, through a page of the app's own standing in for the sites. */
+/** Uploading a run's videos: YouTube's through the pilot's own browser, and TikTok's and
+ *  Instagram's through a page of the app's own standing in for theirs. */
 async function uploads(tools) {
   const { api, library, ffmpeg } = tools;
   const { js, errors } = await page(tools);
@@ -683,6 +681,9 @@ async function uploads(tools) {
   const standIn = join(work, "upload.html");
   writeFileSync(standIn, standInPage);
   api.useUploadStandIn(pathToFileURL(standIn).href);
+  // Google's page, for the made-up page to go on to, made up too.
+  const instagram = session.fromPartition(sites.instagram.partition);
+  instagram.protocol.handle("https", () => new Response("<!doctype html><title>Couldn't sign you in</title>", { headers: { "content-type": "text/html" } }));
   // A run with a 16:9 and a 9:16 video to upload: a second of a test picture each, made here.
   const track = library.tracks.find((one) => library.clips(one).length > 0) ?? library.tracks[0];
   const run = track && (await library.summary(track)).runs[0];
@@ -698,6 +699,7 @@ async function uploads(tools) {
   }
   const [landscape, upright] = made;
   const kept = library.state(track).links?.[run.name], ownBefore = library.store.uploadLines;
+  const named = [];
   const frame = () => js(`return (() => { const at = document.querySelector(".upload .tool-frame")?.getBoundingClientRect(); return at && { x: Math.round(at.left), y: Math.round(at.top), width: Math.round(at.width), height: Math.round(at.height) }; })()`);
   const until = async (test, tries = 60) => {
     for (let one = 0; one < tries; one += 1) {
@@ -707,6 +709,8 @@ async function uploads(tools) {
     }
     return null;
   };
+  const press = (probe) => js(`document.querySelector('[data-probe="${probe}"]').click()`);
+  const chip = () => js(`return document.querySelector(".upload-chip .file-name")?.textContent ?? null`);
   try {
     // The run's files have an Upload button on each finished video. The 16:9's goes to YouTube only.
     await js(`await window.hangar_.app.tool?.close(); await window.showForSnapshot(${JSON.stringify(`files:${track}`)})`);
@@ -716,7 +720,7 @@ ${run.name}`)}); await window.showForSnapshot(${JSON.stringify(`files:${track}`)
     const probe = (output, file) => `upload ${output} ${basename(file)}`;
     say(buttons.includes(probe("landscape", landscape)) && buttons.includes(probe("upright", upright)), "each finished video of a run has an Upload button", buttons.join(", "));
     const offered = async (output, file) => {
-      await js(`document.querySelector('[data-probe="${probe(output, file)}"]').click()`);
+      await press(probe(output, file));
       await pause(150);
       const items = await js(`return [...document.querySelectorAll(".menu .menu-item")].map((one) => one.textContent)`);
       return items;
@@ -729,11 +733,11 @@ ${run.name}`)}); await window.showForSnapshot(${JSON.stringify(`files:${track}`)
     say(JSON.stringify(landscapeSites) === JSON.stringify(["Upload to YouTube…"]), "a 16:9 video can go to YouTube", landscapeSites.join(", "));
     await js(`[...document.querySelectorAll(".menu .menu-item")].find((one) => one.textContent === "Upload to YouTube…").click()`);
 
-    // Its page opens over its place, with the caption ready on the clipboard.
-    const open = await until(() => (api.uploadIsOpen() ? api.uploadIsOpen() : null));
+    // YouTube's steps show beside the column, with nothing opened until the pilot asks.
+    const youtube = await until(() => api.uploadIsOpen());
     await pause(300);
-    const place = await frame();
-    say(open?.id === "youtube" && open.original === landscape && Boolean(place) && JSON.stringify(api.uploadIsOpen().place) === JSON.stringify(place) && place.width > 500, "YouTube's page opens over its place in the window, beside the app's column", JSON.stringify(api.uploadIsOpen()?.place));
+    const drawn = await js(`return { frame: Boolean(document.querySelector(".upload .tool-frame")), steps: [...document.querySelectorAll(".upload-step .guide-title")].map((one) => one.textContent) }`);
+    say(youtube?.id === "youtube" && youtube.browser && youtube.place === null && youtube.went.length === 0 && !drawn.frame && drawn.steps[0] === "Open YouTube's upload page" && drawn.steps.includes("Bring its link back here"), "YouTube's steps show in the window, for its page in the pilot's own browser", `${JSON.stringify(drawn)} ${JSON.stringify(youtube)}`);
     const typed = () => js(`return { title: document.querySelector(".upload-title")?.value ?? null, description: document.querySelector(".upload-caption")?.value ?? "" }`);
     const shown = await typed();
     const pilot = library.settings.pilot ?? "";
@@ -741,27 +745,68 @@ ${run.name}`)}); await window.showForSnapshot(${JSON.stringify(`files:${track}`)
     say(shown.title?.includes(run.best?.seconds ?? "-") && (pilot === "" || shown.title.endsWith(`| ${pilot}`)) && onClipboard === shown.title, "the title is made of the race, the time and the pilot, and is on the clipboard", `${JSON.stringify(shown.title)}${onClipboard === shown.title ? "" : `, but the clipboard has ${JSON.stringify(onClipboard.slice(0, 80))}`}`);
     say(shown.description.includes(`Laps: ${timed.laps.join(" · ")}`) && shown.description.includes(`Best lap: ${timed.bestLap}`) && shown.description.endsWith("#SelfTest"), "the description has the laps, the best lap and hashtags", JSON.stringify(shown.description));
     // The pilot's own lines go on the end, and are kept for next time.
-    await js(`const box = document.querySelector('[data-key="own"]'); box.value = "Gear: a made-up whoop"; box.dispatchEvent(new Event("input"))`);
+    await js(`const box = document.querySelector('[data-key="own"]'); box.value = "Gear: a made-up whoop https://youtu.be/OlderVideo1"; box.dispatchEvent(new Event("input"))`);
     await pause(700);
     const own = await typed();
-    say(own.description.includes("\n\nGear: a made-up whoop\n\n#fpv") && library.store.uploadLines === "Gear: a made-up whoop", "the pilot's own lines go on the end of the description, and are kept", JSON.stringify(library.store.uploadLines));
+    say(own.description.includes("\n\nGear: a made-up whoop https://youtu.be/OlderVideo1\n\n#fpv") && library.store.uploadLines === "Gear: a made-up whoop https://youtu.be/OlderVideo1", "the pilot's own lines go on the end of the description, and are kept", JSON.stringify(library.store.uploadLines));
 
-    // The video goes into the chooser for videos by itself, and the link shows once it is going up.
+    // The page and the video, named for what it is, would open in the pilot's own browser and file browser.
+    await press("upload open page");
+    await press("upload show video");
+    const asked = api.uploadIsOpen();
+    named.push(asked?.file ?? "");
+    const opened = [`open https://www.youtube.com/upload`, `show ${asked?.file}`];
+    say(JSON.stringify(asked?.went) === JSON.stringify(opened) && asked.lent && existsSync(asked.file) && asked.original === landscape && basename(asked.file) === (await chip()) && basename(asked.file).startsWith(fileName(shown.title.replace(" | ", " - "))), "YouTube's upload page opens in the pilot's own browser, and the video, named for what it is, shows in their file browser", JSON.stringify(asked?.went));
+
+    // The video's link is taken in on coming back to the window, when it was copied by itself, and
+    // not out of the description with a link of the pilot's own in it.
+    await js(`[...document.querySelectorAll("button")].find((one) => one.textContent.includes("Copy description")).click()`);
+    tools.window().emit("focus");
+    await pause(300);
+    const notYet = api.uploadIsOpen()?.link ?? null;
+    await clipboard.writeText("https://youtu.be/NewVideo_12\n");
+    tools.window().emit("focus");
+    const link = await until(() => api.uploadIsOpen()?.link, 40);
+    const linkShown = await until(() => js(`return document.querySelector('[data-key="link"]')?.value || null`), 20);
+    const note = await js(`return document.querySelector(".upload-step .upload-note.good")?.textContent ?? null`);
+    say(notYet === null && link === "https://youtu.be/NewVideo_12" && library.state(track).links?.[run.name] === link && linkShown === link && Boolean(note), "the video's link is taken in on coming back, not one in the description, and kept with the run for its entry form", `${notYet} / ${link} / ${linkShown} / ${note}`);
+    // A link pasted by hand that isn't one isn't kept.
+    await clipboard.writeText("not a link");
+    await press("upload paste link");
+    const wrong = await until(() => js(`return document.querySelector(".upload-step .upload-note.warn")?.textContent ?? null`), 20);
+    say(Boolean(wrong) && library.state(track).links?.[run.name] === link, "something pasted that isn't a YouTube link is said so, and the link kept stays", wrong ?? "nothing said");
+
+    // Leaving goes without asking. The video stays named, since the browser may still be reading it.
+    await press("upload back");
+    const left = await until(async () => api.uploadIsOpen() === null && (await js(`return document.getElementById("tool").childElementCount`)) === 0, 40);
+    say(Boolean(left) && existsSync(named[0]), "leaving YouTube's steps goes back, and leaves the named video for the browser", named[0]);
+
+    // TikTok's page opens in the window, with the caption on the clipboard.
+    await press(probe("upright", upright));
+    await pause(150);
+    await js(`[...document.querySelectorAll(".menu .menu-item")].find((one) => one.textContent === "Upload to TikTok…").click()`);
+    const tiktok = await until(() => api.uploadIsOpen());
+    await pause(300);
+    const place = await frame();
+    say(tiktok?.id === "tiktok" && !tiktok.browser && tiktok.original === upright && Boolean(place) && JSON.stringify(api.uploadIsOpen().place) === JSON.stringify(place) && place.width > 500, "TikTok's page opens over its place in the window, beside the app's column", JSON.stringify(api.uploadIsOpen()?.place));
+    const caption = await typed();
+    const captionOn = await clipboard.readText();
+    say(caption.title === null && caption.description !== "" && captionOn === caption.description, "TikTok has a caption, with no title, and it is on the clipboard", JSON.stringify(captionOn.slice(0, 80)));
+
+    // The video goes into the chooser for videos by itself, named for what it is.
     const put = await until(() => api.uploadIsOpen()?.put, 80);
     const reads = await api.uploadReads();
-    const named = api.uploadIsOpen()?.file ?? "";
-    say(Boolean(put) && reads?.chosen === basename(named) && reads.chosen.startsWith(fileName(shown.title.replace(" | ", " - "))) && api.uploadIsOpen().original === landscape, "the video goes into the page's own chooser by itself, named for what it is, and not into the one for pictures", reads?.chosen ?? "nothing chosen");
-    const link = await until(() => api.uploadIsOpen()?.link, 60);
-    const linkShown = await js(`return document.querySelector(".upload-link-text")?.textContent ?? null`);
-    say(link === "https://youtu.be/NewVideo_12" && library.state(track).links?.[run.name] === link && linkShown === link, "the video's link is read off the page, not an older one, and kept with the run for its entry form", `${link} / ${linkShown}`);
+    const putFile = api.uploadIsOpen()?.file ?? "";
+    named.push(putFile);
+    say(Boolean(put) && putFile !== upright && reads?.chosen === basename(putFile) && reads.chosen === (await chip()) && /^[\x20-\x7e]+$/.test(reads.chosen), "the video goes into the page's own chooser by itself, named for what it is, and not into the one for pictures", reads?.chosen ?? "nothing chosen");
     const said = await js(`return document.querySelector(".upload-side .upload-note.good")?.textContent ?? null`);
     say(Boolean(said), "the column says the video is in", said ?? "");
 
     // Leaving while the video is still going up asks first, with the page out of the way.
     await api.uploadReads();
-    await js(`document.querySelector('[data-probe="upload back"]').click()`);
-    const asked = await until(() => js(`return document.querySelector("#sheets .alert-title")?.textContent ?? null`), 40);
-    say(asked === "YouTube is still busy" && api.uploadIsOpen()?.shown === false, "leaving while the page is still busy asks first", asked ?? "nothing asked");
+    await press("upload back");
+    const busy = await until(() => js(`return document.querySelector("#sheets .alert-title")?.textContent ?? null`), 40);
+    say(busy === "TikTok is still busy" && api.uploadIsOpen()?.shown === false, "leaving while the page is still busy asks first", busy ?? "nothing asked");
     await js(`[...document.querySelectorAll("#sheets button")].find((one) => one.textContent === "Stay").click()`);
     await pause(300);
     say(api.uploadIsOpen()?.shown === true, "Stay keeps the page, and it comes back");
@@ -770,36 +815,42 @@ ${run.name}`)}); await window.showForSnapshot(${JSON.stringify(`files:${track}`)
     await api.uploadReads();
     tools.window().close();
     const held = await until(() => js(`return document.querySelector("#sheets .alert-title")?.textContent ?? null`), 40);
-    say(held === "YouTube is still busy" && !tools.window().isDestroyed(), "closing the window while it is busy asks first, and the window stays", held ?? "nothing asked");
+    say(held === "TikTok is still busy" && !tools.window().isDestroyed(), "closing the window while it is busy asks first, and the window stays", held ?? "nothing asked");
     await js(`[...document.querySelectorAll("#sheets button")].find((one) => one.textContent === "Stay").click()`);
     await pause(300);
 
     // Leave anyway goes, and leaves nothing behind.
     await api.uploadReads();
-    await js(`document.querySelector('[data-probe="upload back"]').click()`);
+    await press("upload back");
     await until(() => js(`return document.querySelector("#sheets .alert-title")?.textContent ?? null`), 40);
     await js(`[...document.querySelectorAll("#sheets button")].find((one) => one.textContent === "Leave anyway").click()`);
     await until(async () => api.uploadIsOpen() === null && (await js(`return document.getElementById("tool").childElementCount`)) === 0, 40);
     const cleared = await js(`return { layer: document.getElementById("tool").childElementCount, sheets: document.querySelectorAll("#sheets .alert").length, inert: document.getElementById("stage").hasAttribute("inert") }`);
-    say(api.uploadIsOpen() === null && cleared.layer === 0 && cleared.sheets === 0 && !cleared.inert && !tools.window().isDestroyed() && !existsSync(named) && existsSync(landscape), "Leave anyway goes back to the race, and nothing of the page is left, nor the named copy", JSON.stringify(cleared));
+    say(api.uploadIsOpen() === null && cleared.layer === 0 && cleared.sheets === 0 && !cleared.inert && !tools.window().isDestroyed() && !existsSync(putFile) && existsSync(upright), "Leave anyway goes back to the race, and nothing of the page is left, nor the named copy", JSON.stringify(cleared));
 
-    // A page that isn't busy goes when it is left, without asking.
-    await js(`document.querySelector('[data-probe="${probe("upright", upright)}"]').click()`);
+    // Google turning away a sign-in on Instagram's page is told, with the pilot's own browser as the way round.
+    api.useUploadStandIn(`${pathToFileURL(standIn).href}#google`);
+    await press(probe("upright", upright));
     await pause(150);
-    await js(`[...document.querySelectorAll(".menu .menu-item")].find((one) => one.textContent === "Upload to TikTok…").click()`);
-    const tiktok = await until(() => api.uploadIsOpen());
-    await js(`document.querySelector('[data-probe="upload back"]').click()`);
+    await js(`[...document.querySelectorAll(".menu .menu-item")].find((one) => one.textContent === "Upload to Instagram…").click()`);
+    const gram = await until(() => api.uploadIsOpen());
+    const told = await until(() => js(`return document.querySelector(".upload-side .upload-note.warn")?.textContent ?? null`), 40);
+    say(gram?.id === "instagram" && Boolean(told?.includes("Google")), "Google turning away a sign-in is told, with the pilot's own browser as the way round", told ?? "nothing told");
+
+    // A page with nothing going up is left without asking.
+    await press("upload back");
     const gone = await until(() => api.uploadIsOpen() === null, 40);
     const asks = await js(`return document.querySelector("#sheets .alert-title")?.textContent ?? null`);
-    say(tiktok?.id === "tiktok" && tiktok.original === upright && Boolean(gone) && asks === null, "a page with nothing going up is left without asking", asks ?? "");
+    say(Boolean(gone) && asks === null, "a page with nothing going up is left without asking", asks ?? "");
 
     // Only the sites it knows, and only videos in the library or chosen by the pilot.
     const place0 = { x: 0, y: 0, width: 10, height: 10 };
     say((await api.openUpload("elsewhere", place0, { file: landscape })).problem !== null && api.uploadIsOpen() === null, "only the sites the app knows can be opened");
-    say((await api.openUpload("youtube", place0, { file: standIn })).problem !== null && api.uploadIsOpen() === null, "a file from outside the library isn't uploaded unless the pilot chose it");
+    say((await api.openUpload("tiktok", place0, { file: standIn })).problem !== null && api.uploadIsOpen() === null, "a file from outside the library isn't uploaded unless the pilot chose it");
   } finally {
     await api.closeUpload({ force: true });
     api.useUploadStandIn(null);
+    instagram.protocol.unhandle("https");
     await js(`await window.hangar_.app.tool?.close(); document.querySelectorAll("#sheets .backdrop, .menu").forEach((one) => one.remove())`);
     library.update(track, (state) => {
       if (kept === undefined) delete state.links?.[run.name];
@@ -808,7 +859,7 @@ ${run.name}`)}); await window.showForSnapshot(${JSON.stringify(`files:${track}`)
     if (ownBefore === undefined) delete library.store.uploadLines;
     else library.store.uploadLines = ownBefore;
     library.saveStore();
-    for (const file of made) rmSync(file, { force: true });
+    for (const file of [...made, ...named]) if (file) rmSync(file, { force: true });
     rmSync(work, { recursive: true, force: true });
   }
   say(errors.length === 0, "nothing went wrong on the page", errors.join(" | "));
@@ -1486,7 +1537,7 @@ async function form(tools) {
 
 async function pages(tools) {
   const { js, errors } = await page(tools);
-  for (const which of ["home", "creator", "track", "files", "settings", "guide", "leaderboard", "welcome", "whatsnew", "setup", "submit", "race", "editor", "wave", "trackview", "upload:shorts"]) {
+  for (const which of ["home", "creator", "track", "files", "settings", "guide", "leaderboard", "welcome", "whatsnew", "setup", "submit", "race", "editor", "wave", "trackview", "upload:youtube", "upload:shorts", "upload:tiktok"]) {
     const before = errors.length;
     let problem = "";
     try {

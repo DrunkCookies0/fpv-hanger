@@ -224,7 +224,7 @@ function runFiles(track, data, run) {
         secondary(`Show in ${fileBrowser}`, () => act.reveal(file.path)),
         file.output && secondary("Upload", (event) => uploadMenu(event.currentTarget, file.output, videoOf(track, run, file.path), aboutRun(data, run)), {
           icon: "upload", probe: `upload ${file.output} ${file.name}`,
-          help: file.output === "landscape" ? "Upload to YouTube, through YouTube's own page." : "Upload to YouTube Shorts, TikTok or Instagram, through their own pages.",
+          help: file.output === "landscape" ? "Upload to YouTube, through YouTube's own page in your browser." : "Upload to YouTube Shorts, TikTok or Instagram, through their own pages.",
         }),
         file.output && secondary("", () => act.trashFiles([file], track), { icon: "trash", help: `Move to ${bin}`, "aria-label": `Move ${file.name} to ${bin}` }),
       );

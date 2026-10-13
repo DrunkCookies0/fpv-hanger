@@ -846,7 +846,9 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
       if (!inLibrary && path !== chosenToUpload) return { problem: "That video isn't one FPV Hangar can upload." };
       if (!videoExtensions.has(extname(path).slice(1).toLowerCase())) return { problem: "That isn't a video." };
       if (copy) await clipboard.writeText(copy);
-      return uploads.openUpload(site, place, { file: path, name, track: inLibrary ? track : null, run: inLibrary ? run : null });
+      const ofRun = inLibrary && library.tracks.includes(track) && typeof run === "string";
+      const link = ofRun ? library.state(track).links?.[run] || null : null;
+      return uploads.openUpload(site, place, { file: path, name, track: ofRun ? track : null, run: ofRun ? run : null, link });
     },
 
     /** Lines of the pilot's own that go on every upload's description, such as their gear or links. */

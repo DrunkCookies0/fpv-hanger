@@ -1,24 +1,31 @@
-// Uploading a finished video through a site's own upload page, shown inside the app's window:
-// YouTube, YouTube Shorts, TikTok and Instagram (see shared/uploads.js). The pilot signs in on the
+// Uploading a finished video through a site's own upload page: YouTube, YouTube Shorts, TikTok
+// and Instagram (see shared/uploads.js). Posting is always left to the site's own button.
+//
+// TikTok's and Instagram's pages are shown inside the app's window. The pilot signs in on the
 // site's own page, once: each site has a corner of the browser of its own, kept between runs. The
 // app puts the video into the page's own file chooser when the page shows one, the way a pilot
-// choosing it would, and for YouTube reads the video's link off the page as soon as it shows it.
-// Posting is left to the site's own button.
+// choosing it would.
+//
+// YouTube's page opens in the pilot's own browser instead, since Google turns away anyone signing
+// in inside an app. The app's page stays open beside it, with the video to drag onto YouTube's and
+// the words to paste, and takes in the video's link when the pilot copies it on YouTube and comes
+// back to the app.
 //
 // The video goes up under a name that says what it is, which YouTube and TikTok start its title
 // and its caption from: a copy of it by that name, made in a folder of the app's own (a second
-// name for the same file where the disk allows, so it takes no room), and gone again with the page.
+// name for the same file where the disk allows, so it takes no room). It goes with the page,
+// unless the pilot's own browser may still be reading it: then it stays until the app next starts.
 //
-// A video going up is lost if its page closes. Leaving the page asks it first, as a browser
-// closing a tab does, and if the page says it is still busy, the pilot is asked before it goes.
-// The same happens when the window is closed while a page is open.
+// A video going up in the app is lost if its page closes. Leaving the page asks it first, as a
+// browser closing a tab does, and if the page says it is still busy, the pilot is asked before it
+// goes. The same happens when the window is closed while a page is open.
 
 import { WebContentsView, session, shell, clipboard, nativeImage } from "electron";
 import { existsSync, linkSync, mkdirSync, rmSync, constants } from "node:fs";
 import { copyFile } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { sites, mayTakeVideo, chooserScript, readPage, uploadLink, videoLinksIn, fileName } from "../shared/uploads.js";
+import { sites, mayTakeVideo, chooserScript, fileName, googleSaysNo, linkAlone, videoLinkIn } from "../shared/uploads.js";
 import { log } from "./paths.js";
 
 const folder = dirname(fileURLToPath(import.meta.url));
@@ -38,21 +45,27 @@ const signsIn = (address) => {
   }
 };
 
-/** How often the page is looked at for its chooser and its link. */
+/** How often the page is looked at for its chooser. */
 const every = 1500;
 
 /**
  * The uploads as the app's pages ask for them: `openUpload`, `placeUpload`, `showUpload`,
  * `reloadUpload`, `putVideoAgain`, `dragVideo`, `copyText`, `uploadElsewhere`, `closeUpload`
- * and `stayOnUpload`. The pages hear "upload" (how the page is getting on: loading, a problem,
- * whether the video is in, its link) and "uploadLeave" (the window is being closed: leave the
- * page first). `keepLink(track, run, link)` keeps a YouTube video's link with its run. The
- * named copies go in `staging`. With `still`, a page is given its place but its site is not
- * called on: that is for the app drawing its pages into pictures.
+ * and `stayOnUpload` for a page in the app, and `openUploadPage`, `showUploadVideo`,
+ * `lookForLink` and `setUploadLink` for one in the pilot's own browser. The pages hear "upload"
+ * (how the page is getting on: loading, a problem, whether the video is in, its link) and
+ * "uploadLeave" (the window is being closed: leave the page first). `keepLink(track, run, link)`
+ * keeps a YouTube video's link with its run. The named copies go in `staging`. With `still`, a
+ * page is given its place but its site is not called on: that is for the app drawing its pages
+ * into pictures. With `quiet`, nothing is opened in the pilot's own browser or file browser.
  */
 export function makeUploads({ window, tell, keepLink, staging, quiet = false, still = false }) {
-  // Named copies left from a page that was open when the app last stopped.
-  rmSync(staging, { recursive: true, force: true });
+  // Named copies left from when the app last ran. One a browser still has open stays.
+  try {
+    rmSync(staging, { recursive: true, force: true });
+  } catch (error) {
+    log(`Clearing the videos named to upload: ${error.message}`);
+  }
   /** The one upload page that is open. */
   let open = null;
   const prepared = new Set();
@@ -64,6 +77,15 @@ export function makeUploads({ window, tell, keepLink, staging, quiet = false, st
     return standIn ? { ...site, address: standIn, hosts: [new URL(standIn).hostname], pages: null, inDialog: false } : site;
   };
   const say = (what) => { if (open) tell("upload", { site: open.id, ...what }); };
+
+  /** Opens an address in the pilot's own browser, or shows a file in their file browser. A copy
+   *  that is trying itself out only notes it, for its checks. */
+  const elsewhere = (how, target) => {
+    open?.went.push(`${how} ${target}`);
+    if (quiet) return;
+    if (how === "open") shell.openExternal(target);
+    else shell.showItemInFolder(target);
+  };
 
   /** A site's corner of the browser is given its rules once. */
   function prepare(site) {
@@ -78,7 +100,7 @@ export function makeUploads({ window, tell, keepLink, staging, quiet = false, st
   }
 
   /** What a page, or a sign-in window it opens, may open and go to. */
-  function rules(contents, part, windows) {
+  function rules(contents, part, here) {
     contents.setWindowOpenHandler(({ url }) => {
       if (signsIn(url)) {
         return { action: "allow", overrideBrowserWindowOptions: { parent: window() ?? undefined, width: 520, height: 720, autoHideMenuBar: true, backgroundColor: "#ffffff", webPreferences: { session: part, sandbox: true, contextIsolation: true, nodeIntegration: false } } };
@@ -87,11 +109,18 @@ export function makeUploads({ window, tell, keepLink, staging, quiet = false, st
       return { action: "deny" };
     });
     contents.on("did-create-window", (child) => {
-      windows.add(child);
-      child.on("closed", () => windows.delete(child));
-      rules(child.webContents, part, windows);
+      here.windows.add(child);
+      child.on("closed", () => here.windows.delete(child));
+      rules(child.webContents, part, here);
     });
     contents.on("will-navigate", (event, address) => { if (!/^https:\/\//i.test(address)) event.preventDefault(); });
+    // Signing in with Google, as TikTok and Instagram offer, is turned away by Google here.
+    const turnedAway = (_event, address) => {
+      if (open !== here || !googleSaysNo(address)) return;
+      say({ google: true });
+    };
+    contents.on("did-navigate", turnedAway);
+    contents.on("did-navigate-in-page", turnedAway);
   }
 
   /**
@@ -215,25 +244,10 @@ export function makeUploads({ window, tell, keepLink, staging, quiet = false, st
     }
   }
 
-  /** Reads the page for the link of the video going up. */
-  async function findLink(here) {
-    const contents = here.contents;
-    if (!here.site.hosts.includes(hostOf(contents.getURL()))) return;
-    const read = JSON.parse(await contents.executeJavaScript(readPage, false));
-    // What was on the page before the video went in is the channel's other videos.
-    if (!here.put) for (const link of videoLinksIn(read.all)) here.before.add(link);
-    const link = uploadLink(read, here.before, here.put);
-    if (!link || open !== here) return;
-    here.link = link;
-    if (here.site.keepsLink && here.track && here.run) keepLink(here.track, here.run, link);
-    say({ link, kept: Boolean(here.site.keepsLink && here.track && here.run) });
-  }
-
   async function look(here) {
     if (open !== here || here.looking || here.contents.isDestroyed()) return;
     here.looking = true;
     try {
-      if (here.site.findsLink && !here.link) await findLink(here);
       if (!here.put && !here.stuck) await putVideo(here);
     } catch (error) {
       // A page part-way through loading can't be read. The next look tries again.
@@ -269,17 +283,26 @@ export function makeUploads({ window, tell, keepLink, staging, quiet = false, st
   function finish(here) {
     if (!here || here.finished) return;
     here.finished = true;
-    // A copy shown for the pilot's own browser to upload stays until the app next starts.
-    if (here.file !== here.original && !here.shown) rmSync(here.file, { force: true });
+    // A copy lent to the pilot's own browser to upload stays until the app next starts.
+    if (here.file !== here.original && !here.lent) {
+      try {
+        rmSync(here.file, { force: true });
+      } catch (error) {
+        log(`Uploading: ${error.message}`);
+      }
+    }
     clearInterval(here.timer);
     if (open === here) open = null;
-    window()?.off("close", here.guard);
-    letGo(here);
-    for (const child of here.windows) if (!child.isDestroyed()) child.destroy();
-    try {
-      window()?.contentView.removeChildView(here.view);
-    } catch {}
-    if (!here.contents.isDestroyed()) here.contents.close();
+    if (here.guard) window()?.off("close", here.guard);
+    if (here.comeBack) window()?.off("focus", here.comeBack);
+    if (here.view) {
+      letGo(here);
+      for (const child of here.windows) if (!child.isDestroyed()) child.destroy();
+      try {
+        window()?.contentView.removeChildView(here.view);
+      } catch {}
+      if (!here.contents.isDestroyed()) here.contents.close();
+    }
     tell("upload", { site: here.id, closed: true });
     // The window was being closed when the page was asked to go: it goes now.
     if (here.quitting) {
@@ -291,19 +314,31 @@ export function makeUploads({ window, tell, keepLink, staging, quiet = false, st
   }
 
   const api = {
-    /** Opens a site's upload page over the place given, for one video, which goes up as `name`. */
-    async openUpload(id, place, { file, name = "", track = null, run = null }) {
+    /**
+     * Opens a site's upload page for one video, which goes up as `name`: over the place given, or,
+     * for YouTube, in the pilot's own browser once they ask (`openUploadPage`). `link` is the one
+     * already kept with the run, if any.
+     */
+    async openUpload(id, place, { file, name = "", track = null, run = null, link = null }) {
       if (!Object.hasOwn(sites, id) || !window()) return { problem: "There is no such site." };
       if (!existsSync(file)) return { problem: "That video isn't there any more." };
       if (open) finish(open);
       const original = file;
       file = await named(original, name);
       const site = siteOf(id);
+      if (site.browser) {
+        const here = { id, site, browser: true, file, original, track, run, link: videoLinkIn(link), lent: false, went: [], finished: false };
+        // Coming back from the browser is when a link the pilot copied there is looked for.
+        here.comeBack = () => api.lookForLink();
+        open = here;
+        window().on("focus", here.comeBack);
+        return { problem: null, name: basename(file), browser: true, link: here.link };
+      }
       const part = prepare(site);
       const view = new WebContentsView({ webPreferences: { session: part, sandbox: true, contextIsolation: true, nodeIntegration: false } });
       const contents = view.webContents;
       // Kept by itself: a view no longer has its page once the page has closed.
-      const here = { id, site, view, contents, file, original, track, run, put: false, seen: 0, link: null, before: new Set(), windows: new Set(), debugger: null, worlds: new Map(), looking: false, quitting: false, finished: false };
+      const here = { id, site, view, contents, file, original, track, run, put: false, seen: 0, windows: new Set(), debugger: null, worlds: new Map(), looking: false, quitting: false, lent: false, went: [], finished: false };
       // Closing the window while a page is open leaves the page first, which may ask the pilot.
       // Closing it again while that is going on closes it, page and all.
       here.guard = (event) => {
@@ -318,7 +353,7 @@ export function makeUploads({ window, tell, keepLink, staging, quiet = false, st
         tell("uploadLeave", { site: id });
       };
       open = here;
-      rules(contents, part, here.windows);
+      rules(contents, part, here);
       contents.on("did-start-loading", () => say({ loading: true }));
       contents.on("did-stop-loading", () => say({ loading: false }));
       contents.on("did-fail-load", (_event, code, _words, _address, mainFrame) => {
@@ -337,26 +372,26 @@ export function makeUploads({ window, tell, keepLink, staging, quiet = false, st
 
     /** Moves the page to where the app's page says it goes, when the window changes size. */
     placeUpload(place) {
-      if (!open || !place) return;
+      if (!open?.view || !place) return;
       open.view.setBounds({ x: Math.round(place.x), y: Math.round(place.y), width: Math.max(1, Math.round(place.width)), height: Math.max(1, Math.round(place.height)) });
     },
 
     /** The page steps aside while the app asks the pilot something, and comes back after. */
     showUpload(shown) {
-      open?.view.setVisible(Boolean(shown));
+      open?.view?.setVisible(Boolean(shown));
     },
 
     /** Loads the site's upload page again, from the start: the video goes in again too. */
     reloadUpload() {
-      if (!open) return;
-      Object.assign(open, { put: false, stuck: false, seen: 0, link: null, before: new Set() });
-      say({ put: false, link: null, problem: null });
+      if (!open?.view) return;
+      Object.assign(open, { put: false, stuck: false, seen: 0 });
+      say({ put: false, problem: null });
       open.contents.loadURL(open.site.address).catch(() => {});
     },
 
     /** Puts the video in again the next time the page shows its chooser. */
     putVideoAgain() {
-      if (!open) return;
+      if (!open?.view) return;
       Object.assign(open, { put: false, stuck: false, seen: 1 });
       say({ put: false, problem: null });
     },
@@ -366,6 +401,7 @@ export function makeUploads({ window, tell, keepLink, staging, quiet = false, st
       if (!open || !window()) return;
       const icon = nativeImage.createFromPath(join(folder, "..", "assets", "icon.png"));
       if (icon.isEmpty()) return;
+      if (open.browser) open.lent = true;
       window().webContents.startDrag({ file: open.file, icon: icon.resize({ width: 48, height: 48 }) });
     },
 
@@ -378,9 +414,51 @@ export function makeUploads({ window, tell, keepLink, staging, quiet = false, st
     async uploadElsewhere(text) {
       if (!open) return;
       await clipboard.writeText(String(text ?? ""));
-      shell.openExternal(sites[open.id].address);
-      open.shown = true;
-      shell.showItemInFolder(open.file);
+      open.lent = true;
+      elsewhere("open", sites[open.id].address);
+      elsewhere("show", open.file);
+    },
+
+    /** Opens the site's upload page in the pilot's own browser. */
+    openUploadPage() {
+      if (!open?.browser) return;
+      open.lent = true;
+      elsewhere("open", sites[open.id].address);
+    },
+
+    /** Shows the video in the pilot's file browser, to drag from there. */
+    showUploadVideo() {
+      if (!open) return;
+      open.lent = true;
+      elsewhere("show", open.file);
+    },
+
+    /** Takes in the video's link when the pilot has copied it on YouTube, with its own copy
+     *  button, and come back to the app. Only a link by itself on the clipboard is taken. It is
+     *  only looked for when it has a run to be kept with. */
+    async lookForLink() {
+      const here = open;
+      if (!here?.browser || !here.site.keepsLink || !here.track || !here.run) return;
+      const link = linkAlone(await clipboard.readText());
+      if (link && link !== here.link && open === here) api.setUploadLink(link);
+    },
+
+    /** The video's link, pasted or typed by the pilot or taken from the clipboard, kept with its
+     *  run when it is a YouTube video's. Empty takes it away. */
+    setUploadLink(text) {
+      const here = open;
+      if (!here?.browser) return null;
+      const typed = String(text ?? "").trim();
+      const link = videoLinkIn(typed);
+      if (typed !== "" && !link) {
+        say({ linkProblem: "That isn't a YouTube video's link." });
+        return { problem: "That isn't a YouTube video's link." };
+      }
+      here.link = link;
+      const kept = Boolean(here.site.keepsLink && here.track && here.run);
+      if (kept) keepLink(here.track, here.run, link ?? "");
+      say({ link, kept, linkProblem: null });
+      return { link, kept };
     },
 
     /**
@@ -392,7 +470,7 @@ export function makeUploads({ window, tell, keepLink, staging, quiet = false, st
       const here = open;
       if (!here) return { closed: true };
       const contents = here.contents;
-      if (force || contents.isDestroyed()) {
+      if (force || !contents || contents.isDestroyed()) {
         finish(here);
         return { closed: true };
       }
@@ -425,7 +503,7 @@ export function makeUploads({ window, tell, keepLink, staging, quiet = false, st
 
     /** The pilot stays on a page that is still busy: it comes back, and the window stays open. */
     stayOnUpload() {
-      if (!open) return;
+      if (!open?.view) return;
       open.quitting = false;
       open.view.setVisible(true);
       open.contents.focus();
@@ -433,11 +511,13 @@ export function makeUploads({ window, tell, keepLink, staging, quiet = false, st
 
     /** For the app's checks of itself: which page is open and where, and how it is getting on. */
     uploadIsOpen() {
-      return open ? { id: open.id, file: open.file, original: open.original, put: open.put, link: open.link, place: open.view.getBounds(), shown: open.view.getVisible(), windows: open.windows.size } : null;
+      if (!open) return null;
+      const { id, browser = false, file, original, put = false, link = null, lent, went } = open;
+      return { id, browser, file, original, put, link, lent, went: [...went], place: open.view?.getBounds() ?? null, shown: open.view?.getVisible() ?? false, windows: open.windows?.size ?? 0 };
     },
     /** For the app's checks of itself: what the open page says of itself, and of the video it was given. */
     uploadReads() {
-      if (!open) return null;
+      if (!open?.contents) return null;
       // As if the pilot had pressed something on the page, which a page needs before it may ask to stay.
       return open.contents.executeJavaScript(`({ at: location.href, title: document.title, chosen: window.chosen ?? null })`, true).catch(() => null);
     },

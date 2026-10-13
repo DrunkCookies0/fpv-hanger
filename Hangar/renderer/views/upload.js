@@ -1,15 +1,18 @@
 // Uploading a finished video to YouTube, YouTube Shorts, TikTok or Instagram, through the site's
 // own upload page.
 //
-// The site's page is shown in the window beside a column of the app's own (the main process lays
-// it over `.tool-frame`, the way it does another project's tool). The column has the video, which
-// goes into the page by itself and can be dragged onto it otherwise, the words to paste (a title
-// and a description for YouTube, a caption for TikTok and Instagram, each written for that site,
-// with the pilot's own lines on the end), and, for YouTube, the video's link, which is kept for the
-// run's entry form. While the page is open it takes over the window, the way a tool does.
+// TikTok's and Instagram's pages are shown in the window beside a column of the app's own (the
+// main process lays them over `.tool-frame`, the way it does another project's tool). YouTube's
+// opens in the pilot's own browser, since Google doesn't let anyone sign in inside an app, and the
+// column stays in the window beside the steps to take there. The column has the video, which goes
+// into an in-app page by itself and can be dragged onto any of them, and the words to paste (a
+// title and a description for YouTube, a caption for TikTok and Instagram, each written for that
+// site, with the pilot's own lines on the end). For YouTube there is the video's link too, which
+// is taken in when the pilot copies it there and comes back, and kept for the run's entry form.
+// While the upload is open it takes over the window, the way a tool does.
 
 import { app, ask, hangar, render, loadTrack } from "../core.js";
-import { h, icon, label, secondary, plain, fill } from "../ui.js";
+import { h, icon, label, primary, secondary, plain, fill } from "../ui.js";
 import { confirm, menu, showSheet } from "../sheets.js";
 import { fileBrowser } from "../words.js";
 import { sites, sitesFor, howTo, words as wordsFor } from "../../shared/uploads.js";
@@ -35,6 +38,9 @@ class UploadView {
     this.own = app.state.uploadLines ?? "";
     this.words = wordsFor(id, this.about, this.own);
     this.after = after;
+    // YouTube's page is in the pilot's own browser. Its link is kept when there is a run to keep it with.
+    this.inBrowser = Boolean(this.site.browser);
+    this.keepsLink = this.inBrowser && this.site.keepsLink && Boolean(video.track && video.run);
     this.put = false;
     this.link = null;
     this.kept = false;
@@ -44,14 +50,14 @@ class UploadView {
 
   async open() {
     const site = this.site;
-    this.frame = h("div.tool-frame");
-    this.status = h("span.tool-status", "Opening…");
+    this.frame = this.inBrowser ? null : h("div.tool-frame");
+    this.status = h("span.tool-status", this.inBrowser ? "" : "Opening…");
     this.videoNote = h("p.upload-note");
     this.again = secondary("Put it in again", () => {
       ask("putVideoAgain");
       this.copied("The video goes in again when the page asks for one.");
     }, { help: "For when the page lost the video, or you started over on it." });
-    this.linkNote = h("div.upload-link");
+    const show = secondary(`Show in ${fileBrowser}`, () => ask("showUploadVideo"), { probe: "upload show video", help: `Shows the video in ${fileBrowser}, to drag onto ${site.title}'s page from there.` });
     const { title, description } = this.words;
     const titled = title !== null;
     this.title = titled && h("input.field.upload-title", { type: "text", value: title, spellcheck: true, key: "title", maxLength: 100 });
@@ -65,13 +71,14 @@ class UploadView {
       ask("copyText", field.value);
       this.copied(`The ${what} is on the clipboard. Paste it into the page.`);
     }, { icon: "copies", probe: `copy ${what}` });
+    this.elsewhereNote = h("p.upload-note.faint", `If ${site.title} won't let you sign in here, upload from your own browser instead.`);
     this.root = h("div.tool.upload",
       h("div.tool-bar",
         secondary("Hangar", () => this.close(), { icon: "chevronLeft", help: "Back to the Hangar", probe: "upload back" }),
         h("div.tool-title", label("UPLOAD TO"), h("h1.tool-name", site.title.toUpperCase())),
         h("span.spacer"),
         this.status,
-        secondary("Load again", () => ask("reloadUpload"), { help: `Loads ${site.title}'s upload page again, from the start. The video goes in again.` }),
+        !this.inBrowser && secondary("Load again", () => ask("reloadUpload"), { help: `Loads ${site.title}'s upload page again, from the start. The video goes in again.` }),
       ),
       h("div.upload-body",
         h("div.upload-side",
@@ -79,15 +86,15 @@ class UploadView {
             label("YOUR VIDEO"),
             h("div.upload-chip", {
               draggable: true, probe: "upload video",
-              help: `Drag this onto ${site.title}'s page if it didn't go in by itself. It goes up by this name, which ${site.title} starts from.`,
+              help: `Drag this onto ${site.title}'s page${this.inBrowser ? " in your browser" : " if it didn't go in by itself"}. It goes up by this name, which ${site.title} starts from.`,
               ondragstart: (event) => {
                 event.preventDefault();
                 ask("dragVideo");
               },
             }, icon(site.shape === "upright" ? "portrait" : "landscape", 14, { class: "file-icon" }),
-            h("div.file-words", this.chipName = h("div.file-name", this.video.name), h("div.file-detail", "Drag onto the page"))),
+            h("div.file-words", this.chipName = h("div.file-name", this.video.name), h("div.file-detail", this.inBrowser ? "Drag onto YouTube's page" : "Drag onto the page"))),
             this.videoNote,
-            h("div.row.tight", this.again),
+            h("div.row.tight", this.inBrowser ? show : this.again),
           ),
           titled && h("div.upload-part", label("TITLE"), this.title, h("div.row.tight", copy(this.title, "title")), this.captionNote),
           h("div.upload-part",
@@ -101,22 +108,20 @@ class UploadView {
             this.mine,
             h("p.upload-note.faint", "Lines of your own for the end of every description and caption, on every site. They are kept for next time."),
           ),
-          site.findsLink && h("div.upload-part", label("ITS LINK"), this.linkNote),
-          h("div.upload-part", label("HOW IT GOES"), h("p.upload-note", howTo[this.id])),
-          h("span.spacer"),
-          h("div.upload-part",
-            h("p.upload-note.faint", `If ${site.title} won't let you sign in here, upload from your own browser instead.`),
+          !this.inBrowser && h("div.upload-part", label("HOW IT GOES"), h("p.upload-note", howTo[this.id])),
+          !this.inBrowser && h("span.spacer"),
+          !this.inBrowser && h("div.upload-part",
+            this.elsewhereNote,
             plain("Use my browser instead", () => {
               ask("uploadElsewhere", this.title ? this.title.value : this.caption.value);
               this.copied(`The ${this.title ? "title" : "caption"} is on the clipboard, and the video is showing in ${fileBrowser}.`);
             }, { icon: "arrowUpRight", class: "quiet", help: `Opens ${site.title}'s upload page in your own browser, shows the video in ${fileBrowser}, and puts the caption on the clipboard.` }),
           ),
         ),
-        this.frame,
+        this.inBrowser ? this.steps() : this.frame,
       ),
     );
     this.drawVideo();
-    this.drawLink();
     fill(document.getElementById("tool"), this.root);
     document.getElementById("stage").setAttribute("inert", "");
     app.tool = this;
@@ -125,12 +130,47 @@ class UploadView {
       // The window is being closed: the page is left first, which may ask the pilot.
       hangar.hear("uploadLeave", () => this.close()),
     ];
-    this.watch = new ResizeObserver(this.onResize);
-    this.watch.observe(this.frame);
-    window.addEventListener("resize", this.onResize);
-    const opened = await ask("openUpload", this.id, this.rect(), { file: this.video.file, name: this.words.name, track: this.video.track, run: this.video.run, copy: this.words.title ?? this.words.description });
+    if (this.frame) {
+      this.watch = new ResizeObserver(this.onResize);
+      this.watch.observe(this.frame);
+      window.addEventListener("resize", this.onResize);
+    }
+    const opened = await ask("openUpload", this.id, this.frame ? this.rect() : null, { file: this.video.file, name: this.words.name, track: this.video.track, run: this.video.run, copy: this.words.title ?? this.words.description });
     if (opened?.name) this.chipName.textContent = opened.name;
+    if (opened?.link) this.hear({ site: this.id, link: opened.link, kept: this.keepsLink });
     return opened;
+  }
+
+  /** What to do on YouTube, in the pilot's own browser, with what the app has ready for it. */
+  steps() {
+    const site = this.site;
+    const step = (number, title, words, ...more) => h("div.upload-step",
+      h("span.guide-number", String(number)),
+      h("div.upload-step-words", h("div.guide-title", title), h("p.upload-step-text", words), ...more));
+    const steps = [
+      ["Open YouTube's upload page", "It opens in your own browser. Sign in there if it asks.",
+        h("div.row.tight", primary(`Open ${site.title}`, () => ask("openUploadPage"), { icon: "arrowUpRight", probe: "upload open page", help: "Opens YouTube's upload page in your own browser." }))],
+      ["Put your video in", `Drag your video from the left onto YouTube's page. Or press Show in ${fileBrowser}, under it, and drag it from there.`],
+      ["Paste the title and the description", "The title is on the clipboard already. Copy the description from the left when YouTube asks for it."],
+    ];
+    if (this.keepsLink) {
+      this.linkField = h("input.field.grow", {
+        type: "text", key: "link", placeholder: "https://youtu.be/…", spellcheck: false,
+        onchange: () => this.setLink(this.linkField.value),
+      });
+      this.linkNote = h("p.upload-note");
+      steps.push(["Bring its link back here", "YouTube shows the video's link while it goes up. Press the copy button beside it and come back here: the link comes in by itself, and is kept with this run for its entry form.",
+        h("div.row.tight", this.linkField, secondary("Paste", async () => this.setLink(await ask("clipboardText")), { probe: "upload paste link", help: "Paste the link you copied from YouTube." })),
+        this.linkNote]);
+    }
+    steps.push(["Publish it", "Choose who can see it, then press Publish, or Save. It carries on going up in your browser, whatever you do here."]);
+    this.drawLink();
+    return h("div.upload-steps",
+      h("div.upload-steps-list",
+        h("div.upload-steps-head",
+          h("div.card-title", "On YouTube, in your own browser"),
+          h("p.upload-step-text", "Google doesn't let anyone sign in to YouTube inside an app, so its upload page opens in your browser, and everything for it is ready here.")),
+        steps.map(([title, words, ...more], at) => step(at + 1, title, words, ...more))));
   }
 
   /** The pilot's own lines changed: kept, and put on the end of the words, unless those have
@@ -151,7 +191,12 @@ class UploadView {
   }
 
   place() {
-    if (app.tool === this) ask("placeUpload", this.rect());
+    if (app.tool === this && this.frame) ask("placeUpload", this.rect());
+  }
+
+  /** The link, pasted or typed: kept when it is a YouTube video's. */
+  setLink(text) {
+    return ask("setUploadLink", text);
   }
 
   hear(news) {
@@ -159,6 +204,12 @@ class UploadView {
     if ("loading" in news || "problem" in news) {
       this.status.classList.toggle("warn", Boolean(news.problem));
       this.status.textContent = news.problem ?? (news.loading ? "Loading…" : "");
+    }
+    // Google turned away a sign-in on the page: the pilot's own browser is the way round it. It
+    // stays said, under the button for that, whatever the page does next.
+    if (news.google) {
+      this.elsewhereNote.textContent = `Google doesn't let anyone sign in inside an app. Log in to ${this.site.title} another way, or upload from your own browser.`;
+      this.elsewhereNote.classList.replace("faint", "warn");
     }
     if (news.name) this.chipName.textContent = news.name;
     if ("put" in news) {
@@ -168,11 +219,20 @@ class UploadView {
     if ("link" in news) {
       this.link = news.link;
       this.kept = Boolean(news.kept);
+      this.linkProblem = null;
+      this.drawLink();
+    }
+    if (news.linkProblem) {
+      this.linkProblem = news.linkProblem;
       this.drawLink();
     }
   }
 
   drawVideo() {
+    if (this.inBrowser) {
+      this.videoNote.textContent = `Drag it onto ${this.site.title}'s page in your browser.`;
+      return;
+    }
     this.again.hidden = !this.put;
     this.videoNote.textContent = this.put
       ? `It's in: ${this.site.title} has it now.`
@@ -181,21 +241,15 @@ class UploadView {
   }
 
   drawLink() {
-    if (!this.site.findsLink) return;
-    if (!this.link) {
-      fill(this.linkNote, h("p.upload-note", "Shows here as soon as the video starts going up."));
-      return;
-    }
-    fill(this.linkNote,
-      h("div.upload-link-row", icon("checkCircle", 13, { class: "good" }), h("span.upload-link-text", this.link)),
-      h("p.upload-note", this.kept
-        ? "Kept with this run, for its entry form. It works once you press Publish."
-        : "It works once you press Publish."),
-      h("div.row.tight", secondary("Copy link", () => {
-        ask("copyText", this.link);
-        this.copied("The link is on the clipboard.");
-      }, { icon: "copies" })),
-    );
+    if (!this.keepsLink) return;
+    if (document.activeElement !== this.linkField) this.linkField.value = this.link ?? "";
+    const [kind, words] = this.linkProblem
+      ? ["warn", this.linkProblem]
+      : this.link
+        ? ["good", this.kept ? "Kept with this run, for its entry form. It works once you press Publish." : "It works once you press Publish."]
+        : ["", "Not here yet."];
+    this.linkNote.className = `upload-note${kind ? ` ${kind}` : ""}`;
+    fill(this.linkNote, kind === "good" && icon("checkCircle", 12), ` ${words}`);
   }
 
   /** Says, for a moment, what was just done. */
@@ -211,6 +265,8 @@ class UploadView {
     if (app.tool !== this || this.leaving) return;
     this.leaving = true;
     try {
+      // A link typed but not yet taken in is taken in first.
+      if (this.keepsLink && document.activeElement === this.linkField) await this.setLink(this.linkField.value);
       const answer = await ask("closeUpload");
       if (answer?.held) {
         const leave = await confirm({
@@ -239,7 +295,7 @@ class UploadView {
       ask("setUploadLines", this.own);
     }
     for (const off of this.offs) off();
-    this.watch.disconnect();
+    this.watch?.disconnect();
     window.removeEventListener("resize", this.onResize);
     fill(document.getElementById("tool"));
     document.getElementById("stage").removeAttribute("inert");

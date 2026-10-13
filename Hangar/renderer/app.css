@@ -651,7 +651,8 @@ textarea.field { resize: vertical; line-height: 1.38; }
 .tool-frame { flex: 1 1 0; min-height: 0; background: #0e1116; box-shadow: inset 0 1px 0 var(--stroke); }
 
 /* A finished video going up through a site's own upload page, laid over the frame by the main
-   process, beside a column of the app's own. */
+   process, beside a column of the app's own. YouTube's is in the pilot's own browser: the steps
+   to take there go where its page would. */
 .upload [hidden] { display: none; }
 .upload-body { flex: 1 1 0; min-height: 0; display: flex; }
 .upload-body .tool-frame { min-width: 0; }
@@ -665,9 +666,16 @@ textarea.field { resize: vertical; line-height: 1.38; }
 .upload-note.faint { color: var(--faint); }
 .upload-note:empty { display: none; }
 .upload-caption, .upload-title { width: 100%; font-size: 12px; }
-.upload-link-row { display: flex; align-items: flex-start; gap: 6px; font: 700 12px/1.3 var(--face); }
-.upload-link-row .good { flex: none; margin-top: 1px; }
-.upload-link-text { user-select: text; cursor: text; word-break: break-all; }
+.upload-note.warn { color: var(--warn); }
+.upload-note > .icon { vertical-align: -2px; }
+.upload-steps { flex: 1 1 0; min-width: 0; display: flex; justify-content: center; padding: 26px 32px 32px; overflow-y: auto; background: #0e1116; box-shadow: inset 0 1px 0 var(--stroke); }
+.upload-steps-list { display: flex; flex-direction: column; gap: 22px; width: 100%; max-width: 560px; }
+.upload-steps-head { display: flex; flex-direction: column; gap: 6px; margin-bottom: 2px; }
+.upload-step { display: flex; align-items: flex-start; gap: 16px; }
+.upload-step-words { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding-top: 6px; }
+.upload-step-words .guide-title { margin-bottom: 0; }
+.upload-step-text { margin: 0; font-size: 13px; line-height: 1.45; color: var(--dim); }
+.upload-step-words .row .field { font-size: 13px; }
 
 /* The list a tool's page asks the pilot to choose a device from. */
 .devices { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; margin-top: 4px; }
