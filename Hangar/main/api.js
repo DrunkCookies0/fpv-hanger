@@ -5,7 +5,7 @@ import { app, dialog, shell, clipboard, WebContentsView } from "electron";
 import { spawn } from "node:child_process";
 import { existsSync, statSync, statfsSync, readdirSync, readFileSync, writeFileSync, rmSync, utimesSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { eventFolder, trackName, trackNumber, videoExtensions, audioExtensions, pictureExtensions, bookendPictures, removalPhrase, bytes } from "./library.js";
 import { analysisOf, soundOf } from "./songs.js";
@@ -20,6 +20,7 @@ import { readBoards } from "../shared/leaderboard.js";
 import { stillsOf, pipesIn } from "./trackvideo.js";
 import { latest, install, checkIsDue } from "./updates.js";
 import { makeTools } from "./tools.js";
+import { makeUploads } from "./uploads.js";
 import { makePrograms } from "./components.js";
 import { makeDriveCopy } from "./drive.js";
 import { measure, moveFolder } from "./move.js";
@@ -114,6 +115,12 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
   // A copy that shows no window is trying itself out: it opens a tool's place without calling on
   // the project's site, unless it was asked to (`--live`).
   const outside = makeTools({ window, tell, still: quiet && !process.argv.includes("--live") }), kept = makePrograms({ tell, quiet });
+  /** A finished video going up through a site's own upload page. YouTube's link is kept with its run. */
+  const uploads = makeUploads({ window, tell, quiet, staging: join(cache, "Uploading"), still: quiet && !process.argv.includes("--live"), keepLink: (track, run, link) => {
+    if (library.tracks.includes(track)) api.setLink(track, run, link);
+  } });
+  /** A video from anywhere that the pilot chose to upload. Any other has to be in the library. */
+  let chosenToUpload = null;
   /** The copy of the library kept in Google Drive, when the pilot has asked for one. */
   const drive = makeDriveCopy({ library, tell, quiet, busy: () => job !== null });
   let greeted = false;
@@ -251,6 +258,7 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
         settings: library.settings,
         email: library.store.email ?? "",
         answers: library.store.answers ?? {},
+        uploadLines: library.store.uploadLines ?? "",
         season: series.season,
         idLabel: series.idLabel,
         lastTrack: config().lastTrack ?? null,
@@ -822,6 +830,45 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
 
     ...outside,
     ...kept,
+
+    // Uploading to YouTube, TikTok and Instagram.
+
+    ...uploads,
+
+    /**
+     * Opens a site's upload page for a video: a run's finished video, which is in the library, or
+     * one the pilot chose. It goes up as `name`. `copy`, the first words the site asks for, goes on
+     * the clipboard, ready to paste.
+     */
+    async openUpload(site, place, { file, name = "", track = null, run = null, copy = "" }) {
+      const path = resolve(String(file ?? ""));
+      const inLibrary = path.startsWith(resolve(library.root) + sep);
+      if (!inLibrary && path !== chosenToUpload) return { problem: "That video isn't one FPV Hangar can upload." };
+      if (!videoExtensions.has(extname(path).slice(1).toLowerCase())) return { problem: "That isn't a video." };
+      if (copy) await clipboard.writeText(copy);
+      return uploads.openUpload(site, place, { file: path, name, track: inLibrary ? track : null, run: inLibrary ? run : null });
+    },
+
+    /** Lines of the pilot's own that go on every upload's description, such as their gear or links. */
+    setUploadLines(text) {
+      library.store.uploadLines = String(text ?? "");
+      library.saveStore();
+    },
+
+    /** Any video to upload, chosen by the pilot. */
+    async chooseVideoToUpload() {
+      const picked = await dialog.showOpenDialog(window(), {
+        title: "Upload a video",
+        message: "Choose the video to upload.",
+        buttonLabel: "Choose",
+        defaultPath: library.root,
+        properties: ["openFile"],
+        filters: [{ name: "Videos", extensions: [...videoExtensions] }],
+      });
+      if (picked.canceled) return null;
+      chosenToUpload = resolve(picked.filePaths[0]);
+      return { file: chosenToUpload, name: basename(chosenToUpload) };
+    },
 
     /** Replaces this copy of the app with the newer one, and starts it. */
     async installUpdate() {

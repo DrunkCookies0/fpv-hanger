@@ -2,6 +2,17 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.19.0 (13 October 2026)
+
+- Upload to YouTube, YouTube Shorts, TikTok and Instagram from the app. In a run's files, each finished video has an **Upload** button, and the menu of the run's video button has the same: the 16:9 video goes to YouTube, the 9:16 video to YouTube Shorts, TikTok or Instagram. The **Upload** tile on the first screen takes any video.
+- It is each site's own upload page, shown in the app, so there is nothing to set up and no account of FPV Hangar's: sign in on the site's page the first time, and it remembers you. The video goes into the page by itself as soon as the page asks for one, or drag it onto the page from the column on the left. You press the site's own Publish, Post or Share.
+- The words are written for you, for each site, from the run: the race and its group, the day, your best laps in a row, your best lap and every lap, your name and number, the song, and hashtags that suit the site. YouTube and YouTube Shorts get a title and a description, each with a Copy button, and the title is on the clipboard as the page opens. TikTok and Instagram get a caption of their own, on the clipboard. Change any of it in the column before you copy it.
+- The video goes up named for what it is, such as "RaceGOW6 Track 1 - 28.316 best 3 laps - your name", rather than clip_0001-1, so YouTube's title and TikTok's caption start out right. Your files keep their names.
+- **On every one**: lines of your own, such as your gear or your channels, that go on the end of every description and caption, on every site. They are kept for next time.
+- On YouTube, the video's link shows on the left as soon as the video starts going up, and is kept with the run: **Submit this run** has it filled in already. In Submit this run, **Upload to YouTube** does the upload from there and comes back with the link in.
+- Leaving a page while a video is still going up would stop it, so the app asks first, and closing the window does the same.
+- If a site won't let you sign in inside the app, **Use my browser instead** opens its upload page in your own browser, with the video shown in its folder and the caption on the clipboard.
+
 ## v0.18.0 (13 October 2026)
 
 - Groups and races. What were events are groups now: a race series or a club you fly with, such as Circle City FPV. **New group** asks for its name, then for its first race. Each race in a group has a name of its own and the day it was flown: **New race** asks for both, and today is filled in for you. Races are listed in the order they were flown, and a race's page shows its group and its date above its name.

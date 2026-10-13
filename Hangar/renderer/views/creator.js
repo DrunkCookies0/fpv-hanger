@@ -2,14 +2,15 @@
 // and its entry form.
 
 import { app, go, open, refresh, render, eventFolder, eventOf, trackName, loadForm } from "../core.js";
-import { h, icon, label, primary, secondary, plain, comingSoonBadge, testCopyBadge, when } from "../ui.js";
+import { h, icon, label, primary, secondary, plain, testCopyBadge, when } from "../ui.js";
 import { menu } from "../sheets.js";
-import { bin, Bin, fileBrowser, season, comingSoon } from "../words.js";
+import { bin, Bin, fileBrowser, season } from "../words.js";
 import * as act from "../actions.js";
 import { updatePill } from "./home.js";
 import { showSetUp } from "./notes.js";
 import { driveWord } from "./drive.js";
 import { addClips, cardNote } from "./cards.js";
+import { uploadItems, uploadMenu, aboutRun } from "./upload.js";
 
 const busy = () => Boolean(app.state.job);
 
@@ -179,8 +180,11 @@ function formCard(track, data) {
   );
 }
 
-/** Makes a file, or offers the ones already made. */
-function fileButton(track, run, shape, title, files) {
+/** A run's finished video, to upload. */
+const videoOf = (track, run, file) => ({ file, name: file.split(/[\\/]/).pop(), track, run: run.name });
+
+/** Makes a file, or offers the ones already made, and the places to upload the newest. */
+function fileButton(track, data, run, shape, title, files) {
   const make = () => act.makeVideo(track, run, shape);
   const off = busy() || !run.clip;
   if (files.length === 0) return secondary(`Make ${title}`, make, { disabled: off });
@@ -191,6 +195,8 @@ function fileButton(track, run, shape, title, files) {
       { title: app.state.vlc ? "Open the newest in VLC" : "Open the newest", action: () => act.play(newest) },
       { title: `Show in ${fileBrowser}`, action: () => act.reveal(newest) },
       { title: files.length === 1 ? "Make a new version" : "Make another version", action: make },
+      "-",
+      ...uploadItems(shape, videoOf(track, run, newest), aboutRun(data, run)),
     ]),
   }, icon(files.length === 1 ? "check" : "copies"), files.length === 1 ? title : `${title} ×${files.length}`, icon("chevronDown", 10));
 }
@@ -198,8 +204,9 @@ function fileButton(track, run, shape, title, files) {
 const fileIcons = { "16:9 video": "landscape", "9:16 video": "portrait", "Race clip": "film", Music: "music" };
 const outputTitles = { landscape: "16:9 video", upright: "9:16 video" };
 
-/** The files behind a run, each with a way to play it. Finished videos can be thinned down to the right one. */
-function runFiles(track, run) {
+/** The files behind a run, each with a way to play it. Finished videos can be thinned down to the
+ *  right one, and uploaded. */
+function runFiles(track, data, run) {
   const files = run.files;
   // Videos that exist in more than one version.
   const crowded = ["landscape", "upright"].filter((output) => files.filter((file) => file.output === output).length > 1);
@@ -215,11 +222,14 @@ function runFiles(track, run) {
           { help: `Moves the other version${versions.length > 2 ? "s" : ""} of the ${outputTitles[file.output]} to ${bin}.` }),
         secondary(app.state.vlc ? "Open in VLC" : "Open", () => act.play(file.path)),
         secondary(`Show in ${fileBrowser}`, () => act.reveal(file.path)),
+        file.output && secondary("Upload", (event) => uploadMenu(event.currentTarget, file.output, videoOf(track, run, file.path), aboutRun(data, run)), {
+          icon: "upload", probe: `upload ${file.output} ${file.name}`,
+          help: file.output === "landscape" ? "Upload to YouTube, through YouTube's own page." : "Upload to YouTube Shorts, TikTok or Instagram, through their own pages.",
+        }),
         file.output && secondary("", () => act.trashFiles([file], track), { icon: "trash", help: `Move to ${bin}`, "aria-label": `Move ${file.name} to ${bin}` }),
       );
     }),
     files.length === 0 && h("p.dim.small", "No files for this run yet."),
-    h("div.file.soon", { help: comingSoon.upload.detail }, icon(comingSoon.upload.icon, 14, { class: "file-icon" }), h("div.file-name", comingSoon.upload.title), comingSoonBadge(), h("span.spacer")),
   );
 }
 
@@ -261,11 +271,11 @@ function runCard(track, data, run, rank) {
       h("div.run-buttons",
         secondary("Markers & music", () => act.editRun(run, track), { disabled: busy() || !run.clip, help: run.clip ? "Move the lap markers, choose the stretch the videos show, and place a song." : "There's no race clip with this run's name to open." }),
         h("div.row.tight", { help: run.clip ? "A finished video with the timer drawn in, ready to upload." : "There's no race clip with this run's name to make a video from." },
-          fileButton(track, run, "landscape", "16:9 video", run.landscapes), fileButton(track, run, "upright", "9:16 video", run.uprights)),
+          fileButton(track, data, run, "landscape", "16:9 video", run.landscapes), fileButton(track, data, run, "upright", "9:16 video", run.uprights)),
         takesEntries(track, data) && primary("Submit this run", () => act.submitRun(track, run), { disabled: busy() || !run.best }),
       ),
     ),
-    isOpen && runFiles(track, run),
+    isOpen && runFiles(track, data, run),
   );
 }
 

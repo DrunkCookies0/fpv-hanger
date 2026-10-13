@@ -113,7 +113,8 @@ const started = (async () => {
  *   home, creator, track, track:<path>, files (a track with its first run's files showing),
  *   settings, guide, leaderboard, welcome, whatsnew, setup, setup:<pilot name> (the second
  *   question, looked up), race (the sheet for renaming or moving a race), trackview,
- *   tool:<which>, program:<which>, notice:<words>
+ *   tool:<which>, program:<which>, upload:<site> (a site's upload page, for the first run's video),
+ *   notice:<words>
  */
 /** For the mode that writes the read-me a download goes out with (`--read-me`). */
 window.readMeText = async (platform) => {
@@ -193,6 +194,19 @@ window.showForSnapshot = async (which) => {
     const { openTool, showProgram } = await import("./views/tool.js");
     if (name === "tool") await openTool(detail);
     else showProgram(detail);
+  } else if (name === "upload") {
+    // A site's upload page ("upload:shorts"), for the first run's video of that shape, or its race
+    // clip when there is no such video yet.
+    await showTrack();
+    const data = app.tracks.get(app.page.track);
+    const run = data?.summary.runs[0];
+    const { sites } = await import("../shared/uploads.js");
+    const id = Object.hasOwn(sites, detail) ? detail : "youtube";
+    const file = run && ((sites[id].shape === "upright" ? run.uprights : run.landscapes).at(-1) ?? run.clip);
+    if (file) {
+      const { openUpload, aboutRun } = await import("./views/upload.js");
+      await openUpload(id, { file, name: file.split(/[\\/]/).pop(), track: app.page.track, run: run.name }, aboutRun(data, run));
+    }
   } else if (name === "notice") app.notice = detail;
   else go({ name: "home" });
   render();

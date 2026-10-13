@@ -30,10 +30,6 @@ export const comingSoon = {
     title: "Video Creator for any footage", icon: "filmStack",
     detail: "The same clipping, lap timer and music for any FPV footage, without a race series or an entry form. For now, the Video Creator under RaceGOW takes any recording: make a group for it.",
   },
-  upload: {
-    title: "Upload to YouTube, TikTok and Instagram", icon: "upload",
-    detail: "Send a finished video straight to your channels from here, with the YouTube link filled into the submission form for you. For now, upload it yourself and paste the link.",
-  },
 };
 
 /** One tile on the first screen. */
@@ -51,8 +47,8 @@ export const tools = {
     summary: "Clip a flight, time its laps and add music, without a race series or an entry form.",
   },
   upload: {
-    title: "Upload", icon: "upload", soon: comingSoon.upload,
-    summary: "Send a finished video to YouTube, TikTok and Instagram from here.",
+    title: "Upload", icon: "upload", soon: null,
+    summary: "Send any video to YouTube, Shorts, TikTok or Instagram, through each site's own upload page, here in the Hangar.",
   },
   betaflight: {
     title: "Betaflight", icon: "chip", soon: null,
@@ -96,7 +92,8 @@ export const readMeFor = (mac) => ({
         ["step", `On the first screen, open Video Creator, under RaceGOW. If you fly ${season} its open tracks are there already. Otherwise press New group, name it, then name the race and give its date. Press Add clips and choose your recordings, or drop them onto the race's page.`],
         ["step", "Press Mark laps on a clip. A recording you add by itself opens there straight away. Step to the frame where you cross the start/finish gate and press M. Do that for every crossing, then press Done, which saves it."],
         ["step", "Press Make 16:9 video for YouTube, or Make 9:16 video for Shorts, TikTok and Reels. Markers & music lets you add a song, put one of its drops on the start gate, and choose where the video starts and ends."],
-        ["step", `Upload your video to YouTube and press Submit this run. The app fills the track's entry form in, and you press Submit on the form yourself. A ${season} track has its form already. For any other, paste its Google Form link on the track page first.`],
+        ["step", "Press Upload beside a finished video and choose where it goes: YouTube for the 16:9 video, and YouTube Shorts, TikTok or Instagram for the 9:16. The site's own upload page opens in the app with your video in it, and the title and description, or the caption, written for that site. Sign in the first time, paste them in, and press the site's own Publish, Post or Share."],
+        ["step", `For a ${season} track, press Submit this run. The YouTube link is already in it if you uploaded from the app. The app fills the track's entry form in, and you press Submit on the form yourself.`],
         ["paragraph", "The full walk-through and the editor's keys are in the app under How it works."],
       ],
     },
@@ -129,8 +126,9 @@ export const readMeFor = (mac) => ({
         ["point", "Lap times are as exact as your markers: one video frame, which is about 0.017 seconds at 60 frames a second."],
         ["point", "It has been used most with HDZero recordings (.ts). An .mp4 recording has been tested once. Other formats have not been tried."],
         ["point", `If you fly ${season}, its tracks appear by themselves: each one on the day it opens, with its deadline and, once the series posts it, its entry form. Every track has a form of its own.`],
-        ["point", `The app goes online for these things only: to read your Google Form, to check for a newer version, to read what the series publishes if you say you fly ${season} (its pilot list, its schedule, its entry forms and its leaderboards), to watch a track's video on YouTube when you ask it to read the track out of it, to open Betaflight's app and the ExpressLRS flasher from their own sites when you open them (what those tools then send is theirs to say), and to look at ExpressLRS's Releases page for a newer Configurator, once a day if you have it and whenever you open its tile.`],
+        ["point", `The app goes online for these things only: to read your Google Form, to check for a newer version, to read what the series publishes if you say you fly ${season} (its pilot list, its schedule, its entry forms and its leaderboards), to watch a track's video on YouTube when you ask it to read the track out of it, to open Betaflight's app and the ExpressLRS flasher from their own sites when you open them (what those tools then send is theirs to say), to show YouTube's, TikTok's and Instagram's own upload pages when you upload to them (what you post there, and how, is theirs), and to look at ExpressLRS's Releases page for a newer Configurator, once a day if you have it and whenever you open its tile.`],
         ["point", "With two computers, Pilot & settings can keep your library in Google Drive, so both open the same one. It needs Google's own Drive for desktop on each computer: FPV Hangar keeps the library in Drive's folder and Drive uploads it and brings down what the other computer did, so the app itself never signs in to Google or sends your files anywhere."],
+        ["point", "Uploading goes through each site's own page, and you sign in on that page, as you would in a browser. FPV Hangar never sees your password and never posts anything: the site's own button does. Each site's sign-in is kept in a corner of the app of its own. Leaving a page while a video is still going up stops it, so the app asks first."],
         ["point", "With the card from your goggles plugged in, a track's page offers the recordings on it. The card is only read."],
         ["point", "It never sends your entry for you. Nothing goes to RaceGOW until you press Submit on the form."],
         ["paragraph", "Something not working? Tell whoever sent you this."],
@@ -145,8 +143,8 @@ export const readMe = readMeFor(mac);
 /** A short walk through the whole job, from a raw clip to a submitted time. */
 export const guide = {
   steps: [
-    ["Set up the track",
-      "On the first screen, open Video Creator, under RaceGOW. Its tracks are listed down the side, grouped by event. Press New track under an event, or New event for another race or series. Press Add clips on the track's page and choose your recordings, or drop them onto the page. Then paste the track's Google Form link into Submission form on the track page."],
+    ["Set up the race",
+      `On the first screen, open Video Creator, under RaceGOW. Down the side are your groups, each a series or a club, with their races. ${season}'s tracks appear by themselves, each with its entry form. For anything else, press New group, then New race under it, and give the race its name and date. Press Add clips on the race's page and choose your recordings, or drop them onto the page.`],
     ["Mark the laps",
       `Press Mark laps on a clip. A recording you add by itself opens there straight away. Play or drag to just before a start/finish gate crossing, step to the exact frame with the arrow keys, and press M. The first marker starts lap 1; each later one ends a lap. The lap timer shows over the picture as the 16:9 video will have it, and changes with every marker; the timer button beside the playback speed hides it. To fix one, go to it with the up and down arrows and move it a frame at a time with ${keys("cmd", "left")} and ${keys("cmd", "right")}. Right-click a marker, in the list or on the timeline, to delete it or all of them. The marker keys are Premiere's: M, ${keys("shift", "M")} and ${keys("shift", "cmd", "M")} for the next and previous, ${keys("alt", "M")} to clear one and ${keys("alt", "cmd", "M")} to clear all${mac ? ", and they are in the Markers menu too" : ""}. Press Done, which saves it, and the run appears on the track page, ranked by its best 3 laps in a row. Discard changes leaves without keeping them, and ${keys("cmd", "S")} saves while you carry on.`],
     ["Choose what the video shows",
@@ -157,8 +155,10 @@ export const guide = {
       "Make 16:9 video is for YouTube. Make 9:16 video is for Shorts, TikTok and Reels. Both carry the timer, your name and ID, the event and track, and the music. The 9:16 timer is built around your best 3 laps in a row: one big time for the three together, those laps under it, and the others smaller. It keeps clear of the buttons those apps put over a video. An event's logo, chosen in Pilot & settings, goes on its videos: at the head of the timer box on 16:9, and at the top beside your name on 9:16. A short clip or a picture can go before and after every video of an event too, such as a title card or a sign-off: choose them under the event in Pilot & settings, one pair for 16:9 videos and one for 9:16. When a video is made the app asks whether to watch it."],
     ["Check them",
       `Click a run to see its files and open any of them. If there are two versions of something, press Keep only this one on the right one and the other goes to ${bin}. A clip you haven't marked has a ${Bin} button of its own on the track page.`],
+    ["Upload",
+      "Press Upload beside a finished video in a run's files, or choose it from the menu of the run's video button. The 16:9 video goes to YouTube; the 9:16 video to YouTube Shorts, TikTok or Instagram. The site's own upload page opens in the app: sign in the first time, and it is remembered. Your video goes in by itself as soon as the page asks for one, named for the race, your time and you, or drag it onto the page from the left. The words are written for that site from the run: a title and a description for YouTube, a caption for TikTok and Instagram, with the race and its group, the day, your laps, your name, the song and hashtags. The first of them is on the clipboard: paste it, copy the next with its button, change any of it first if you like, and press the site's own Publish, Post or Share. Lines of your own, such as your gear or your channels, go under On every one, and on the end of everything from then on. On YouTube, the video's link shows on the left as soon as it starts going up, and is kept for the entry form. Stay on the page until the site says the video is up: leaving stops it, so the app asks first. If a site won't let you sign in inside the app, Use my browser instead opens its page in your own browser, with the video shown in its folder."],
     ["Submit",
-      "Upload the 16:9 video to YouTube, then press Submit this run. Paste the link, type your email the first time, since the form asks for one, and look over the answers: the app fills in your handle, number and time, and for the questions it can't know it shows what you answered last time, one line each, with Change beside it. Press Fill in the form, check the Google Form, and press Submit at the bottom of it yourself. The track page then shows what you sent."],
+      "Press Submit this run, on a track with an entry form. If you uploaded from the app the link is there already; if the video isn't on YouTube yet, press Upload to YouTube in it. Otherwise paste the link, type your email the first time, since the form asks for one, and look over the answers: the app fills in your handle, number and time, and for the questions it can't know it shows what you answered last time, one line each, with Change beside it. Press Fill in the form, check the Google Form, and press Submit at the bottom of it yourself. The track page then shows what you sent."],
   ],
   notes: [
     "Lap times are only as exact as the markers: one frame, which is about 0.017 seconds at 60 frames a second. A run shows a warning when its markers aren't on exact frames.",

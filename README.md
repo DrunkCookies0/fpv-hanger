@@ -17,17 +17,17 @@ The app is not signed, so macOS and Windows both ask before opening it the first
 - **Rank runs.** Each track's runs are listed fastest first by best three laps in a row.
 - **Make videos.** A 16:9 video for YouTube and a 9:16 one for Shorts, TikTok and Reels, with the timer, your name and the event drawn in, in a colour you choose. A clip or a picture of your own can go before and after.
 - **Add music.** Songs go into one library, for every track, and the marks you put in a song stay with it. The app works out a song's tempo and finds its drops, and puts a drop on the start gate with one press.
+- **Upload.** Send a finished video to YouTube, YouTube Shorts, TikTok or Instagram through each site's own upload page, shown in the app. You sign in on the site's page; the app puts the video in, writes a title and description or a caption for each site from the run, and keeps the YouTube link for the entry form. The site's own button posts it.
 - **Submit.** The app checks your answers with you, then fills the track's Google Form in. You press Submit yourself.
 - **See the track in 3D.** A track's pipes on their grid with the lap flown round them. Build one by clicking sections into place, or have the app read the pipes out of the track's video.
 - **Leaderboards.** Every entry on each track as the series has it, with yours picked out.
 - **One library on two computers.** Keep your library in Google Drive and your Mac and your PC open the same one. Google's own Drive for desktop carries it between them, so the app never signs in to anything.
-- **Keep events apart.** Tracks are grouped by event, a race or a series, each with its own name on the timer, its own ID number, and a logo of your choosing on its videos.
+- **Groups and races.** Races are grouped by series or club, each group with its own name on the timer, its own ID number, and a logo of your choosing on its videos. Each race has its own name and the day it was flown.
 
 ## Coming soon
 
 These are marked "Coming soon" in the app and do nothing yet:
 
-- Upload to YouTube, TikTok and Instagram
 - A Video Creator for any footage, without a race series
 
 ## Building it

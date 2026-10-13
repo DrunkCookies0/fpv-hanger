@@ -3,7 +3,7 @@
 // real Google Form, filled in, for the pilot to look over and send.
 
 import { app, ask, hangar, render, loadTrack, trackName } from "../core.js";
-import { h, icon, label, primary, secondary, comingSoonBadge, redraw } from "../ui.js";
+import { h, icon, label, primary, secondary, redraw } from "../ui.js";
 import { showSheet } from "../sheets.js";
 import { fileBrowser } from "../words.js";
 import { looksLikeEmail, looksLikeYouTube } from "../../shared/forms.js";
@@ -105,8 +105,17 @@ export async function openSubmit(track, run) {
       answers[question.id] = [value];
       ask("setLink", track, run.name, value);
     };
+    // The video goes up through YouTube's own page, in the window. Its link is kept with the run,
+    // and this window opens again, with the link in it, once that page is left.
+    const upload = async () => {
+      await keep();
+      leave();
+      const { openUpload, aboutRun } = await import("./upload.js");
+      const page = app.tracks.get(track);
+      openUpload("youtube", { file: video, name: video.split(/[\\/]/).pop(), track, run: run.name }, page ? aboutRun(page, run) : { race: trackName(track) }, () => openSubmit(track, run));
+    };
     return h("div.card.submit-card", { help: question.title },
-      h("div.row", label("YOUR VIDEO'S LINK"), h("span.spacer"), h("span", { help: "Uploading the video to YouTube from here, with the link filled in for you." }, comingSoonBadge())),
+      h("div.row", label("YOUR VIDEO'S LINK")),
       h("div.row.tight",
         box("link", "Paste the YouTube link to your 16:9 video", answers[question.id]?.[0] ?? "", (value) => {
           set(value);
@@ -119,8 +128,10 @@ export async function openSubmit(track, run) {
         }, { help: "Paste the link you copied from YouTube." }),
       ),
       h("div.row.tight", linkStatus, h("span.spacer"),
-        secondary("YouTube's upload page", () => openLink("https://www.youtube.com/upload")),
-        video && secondary("Show the video", () => reveal(video), { help: `Show this run's 16:9 video in ${fileBrowser}, to upload it.` }),
+        video
+          ? secondary("Upload to YouTube", upload, { icon: "upload", probe: "submit upload", help: "Opens YouTube's own upload page here, with this run's 16:9 video put in. Its link is filled in here as soon as YouTube shows it." })
+          : secondary("YouTube's upload page", () => openLink("https://www.youtube.com/upload")),
+        video && secondary("Show the video", () => reveal(video), { help: `Show this run's 16:9 video in ${fileBrowser}.` }),
       ),
       !video && status("warn plain", "There is no 16:9 video of this run yet. Make it on the track page."),
     );
@@ -246,12 +257,17 @@ export async function openSubmit(track, run) {
     ask("placeForm", { x: at.left, y: at.top, width: at.width, height: at.height });
   }
 
-  /** Keeps what was answered for the next entry, then opens the form itself, filled in. */
-  async function fill() {
+  /** Keeps what was answered, for the next entry and for coming back to this one. */
+  async function keep() {
     const kept = {};
     for (const question of questions) if (question.role === null) kept[question.title] = answers[question.id] ?? [];
     await ask("rememberAnswers", track, run.name, { email: state.email, answers: kept, link: linkQuestion ? answers[linkQuestion.id]?.[0] ?? "" : null });
     if (app.state) app.state.email = state.email.trim();
+  }
+
+  /** Keeps what was answered for the next entry, then opens the form itself, filled in. */
+  async function fill() {
+    await keep();
     state.showingForm = true;
     draw();
     const at = formPlace.getBoundingClientRect();

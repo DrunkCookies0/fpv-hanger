@@ -22,19 +22,29 @@
 //            checked and put in place, all in a folder of its own. With `--live` it also opens
 //            Betaflight's app and the ExpressLRS flasher from their own sites, which needs the
 //            network, and reads that each arrived. No device is asked for or touched.
+//   uploads  uploading a run's videos, with a made-up page of the app's own standing in for the
+//            sites: the page opens over its place, the video goes into its chooser by itself,
+//            named for what it is, and not into one only for pictures, the title and the
+//            description are made from the run and the title is on the clipboard, the pilot's own
+//            lines are kept and go on the end, the video's link is read off the page and kept for
+//            the entry form, and a page that is still busy holds the pilot back from leaving, and
+//            from closing the window, until they say so. Nothing of YouTube's, TikTok's or
+//            Instagram's is called on.
 
-import { app } from "electron";
+import { app, clipboard } from "electron";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, writeFileSync, appendFileSync, copyFileSync, cpSync, createReadStream, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, utimesSync } from "node:fs";
 import { createServer } from "node:http";
 import { EOL, arch, cpus, release, tmpdir, totalmem, version as systemVersion } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { argument, config, setConfig, logFile, version } from "./paths.js";
 import { install, thisCopy, whatTheOldAppKept } from "./updates.js";
 import { markerFile, FrameRate } from "../shared/timing.js";
 import { Library } from "./library.js";
 import { copyName, libraryName } from "../shared/drive.js";
+import { fileName } from "../shared/uploads.js";
 
 /** With `--report <file>`, everything said is written there too, a line at a time as it happens,
  *  so a check that stops halfway still leaves what it had found. */
@@ -55,7 +65,7 @@ function say(ok, what, detail = "") {
 }
 
 export async function run(which, tools) {
-  const checks = { editor, video, pages, form, bookends, trackview, trackvideo, outside, drive, cards, update, updating, carryover, everything };
+  const checks = { editor, video, pages, form, bookends, trackview, trackvideo, outside, uploads, drive, cards, update, updating, carryover, everything };
   if (report) writeFileSync(report, "");
   if (!checks[which]) {
     console.error(`There is no check called ${which}. There are: ${Object.keys(checks).join(", ")}.`);
@@ -581,6 +591,183 @@ async function outside(tools) {
       await js(`document.querySelectorAll("#sheets .backdrop").forEach((one) => one.remove())`);
       rmSync(work, { recursive: true, force: true });
     }
+  }
+  say(errors.length === 0, "nothing went wrong on the page", errors.join(" | "));
+}
+
+/** A page standing in for a site's upload page. Its file choosers come a moment after it loads,
+ *  inside a part with a shadow of its own, as YouTube's do: first one only for pictures, then one
+ *  for videos. A video chosen is "going up" until `window.done`, and asks to stay meanwhile. */
+const standInPage = `<!doctype html>
+<meta charset="utf-8"><title>Made-up upload page</title>
+<p>An older video: <a href="https://youtu.be/OlderVideo1">https://youtu.be/OlderVideo1</a></p>
+<script>
+window.chosen = null;
+window.done = false;
+setTimeout(() => {
+  const host = document.createElement("upload-picker");
+  document.body.append(host);
+  const shadow = host.attachShadow({ mode: "open" });
+  const pictures = document.createElement("input");
+  pictures.type = "file";
+  pictures.accept = "image/png,image/jpeg";
+  pictures.addEventListener("change", () => { window.chosen = "into the picture chooser"; });
+  const videos = document.createElement("input");
+  videos.type = "file";
+  videos.accept = "video/*";
+  videos.addEventListener("change", () => {
+    window.chosen = videos.files[0] ? videos.files[0].name : null;
+    setTimeout(() => {
+      const dialog = document.createElement("ytcp-uploads-dialog");
+      dialog.innerHTML = '<span>Video link</span> <a href="https://youtu.be/NewVideo_12">https://youtu.be/NewVideo_12</a>';
+      document.body.append(dialog);
+    }, 400);
+  });
+  shadow.append(pictures, videos);
+}, 700);
+window.addEventListener("beforeunload", (event) => {
+  if (window.chosen && !window.done) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});
+</script>`;
+
+/** Uploading a run's videos, through a page of the app's own standing in for the sites. */
+async function uploads(tools) {
+  const { api, library, ffmpeg } = tools;
+  const { js, errors } = await page(tools);
+  const work = mkdtempSync(join(tmpdir(), "fpv-hangar-upload-"));
+  const standIn = join(work, "upload.html");
+  writeFileSync(standIn, standInPage);
+  api.useUploadStandIn(pathToFileURL(standIn).href);
+  // A run with a 16:9 and a 9:16 video to upload: a second of a test picture each, made here.
+  const track = library.tracks.find((one) => library.clips(one).length > 0) ?? library.tracks[0];
+  const run = track && (await library.summary(track)).runs[0];
+  const timed = run;
+  if (!say(Boolean(run), "there is a run to upload the videos of", track ?? "no tracks")) return;
+  const made = [];
+  for (const [shape, size] of [["landscape", "320x180"], ["vertical", "180x320"]]) {
+    const file = library.nextNumbered(library.folder(track, shape), run.name, "mp4");
+    mkdirSync(dirname(file), { recursive: true });
+    const wrote = await ffmpeg.run(["-v", "error", "-y", "-f", "lavfi", "-i", `testsrc2=size=${size}:rate=30`, "-t", "1", "-pix_fmt", "yuv420p", file]);
+    if (!say(wrote.code === 0, `a ${shape} video is made to upload`, wrote.said?.slice(-300))) return;
+    made.push(file);
+  }
+  const [landscape, upright] = made;
+  const kept = library.state(track).links?.[run.name], ownBefore = library.store.uploadLines;
+  const frame = () => js(`return (() => { const at = document.querySelector(".upload .tool-frame")?.getBoundingClientRect(); return at && { x: Math.round(at.left), y: Math.round(at.top), width: Math.round(at.width), height: Math.round(at.height) }; })()`);
+  const until = async (test, tries = 60) => {
+    for (let one = 0; one < tries; one += 1) {
+      const got = await test();
+      if (got) return got;
+      await pause(150);
+    }
+    return null;
+  };
+  try {
+    // The run's files have an Upload button on each finished video. The 16:9's goes to YouTube only.
+    await js(`await window.hangar_.app.tool?.close(); await window.showForSnapshot(${JSON.stringify(`files:${track}`)})`);
+    await js(`window.hangar_.app.expanded.add(${JSON.stringify(`${track}
+${run.name}`)}); await window.showForSnapshot(${JSON.stringify(`files:${track}`)})`);
+    const buttons = await js(`return [...document.querySelectorAll('[data-probe^="upload "]')].map((one) => one.dataset.probe)`);
+    const probe = (output, file) => `upload ${output} ${basename(file)}`;
+    say(buttons.includes(probe("landscape", landscape)) && buttons.includes(probe("upright", upright)), "each finished video of a run has an Upload button", buttons.join(", "));
+    const offered = async (output, file) => {
+      await js(`document.querySelector('[data-probe="${probe(output, file)}"]').click()`);
+      await pause(150);
+      const items = await js(`return [...document.querySelectorAll(".menu .menu-item")].map((one) => one.textContent)`);
+      return items;
+    };
+    const uprightSites = await offered("upright", upright);
+    await js(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+    await js(`document.querySelectorAll(".menu").forEach((one) => one.remove())`);
+    say(JSON.stringify(uprightSites) === JSON.stringify(["Upload to YouTube Shorts…", "Upload to TikTok…", "Upload to Instagram…"]), "a 9:16 video can go to YouTube Shorts, TikTok and Instagram", uprightSites.join(", "));
+    const landscapeSites = await offered("landscape", landscape);
+    say(JSON.stringify(landscapeSites) === JSON.stringify(["Upload to YouTube…"]), "a 16:9 video can go to YouTube", landscapeSites.join(", "));
+    await js(`[...document.querySelectorAll(".menu .menu-item")].find((one) => one.textContent === "Upload to YouTube…").click()`);
+
+    // Its page opens over its place, with the caption ready on the clipboard.
+    const open = await until(() => (api.uploadIsOpen() ? api.uploadIsOpen() : null));
+    await pause(300);
+    const place = await frame();
+    say(open?.id === "youtube" && open.original === landscape && Boolean(place) && JSON.stringify(api.uploadIsOpen().place) === JSON.stringify(place) && place.width > 500, "YouTube's page opens over its place in the window, beside the app's column", JSON.stringify(api.uploadIsOpen()?.place));
+    const typed = () => js(`return { title: document.querySelector(".upload-title")?.value ?? null, description: document.querySelector(".upload-caption")?.value ?? "" }`);
+    const shown = await typed();
+    const pilot = library.settings.pilot ?? "";
+    const onClipboard = await clipboard.readText();
+    say(shown.title?.includes(run.best?.seconds ?? "-") && (pilot === "" || shown.title.endsWith(`| ${pilot}`)) && onClipboard === shown.title, "the title is made of the race, the time and the pilot, and is on the clipboard", `${JSON.stringify(shown.title)}${onClipboard === shown.title ? "" : `, but the clipboard has ${JSON.stringify(onClipboard.slice(0, 80))}`}`);
+    say(shown.description.includes(`Laps: ${timed.laps.join(" · ")}`) && shown.description.includes(`Best lap: ${timed.bestLap}`) && shown.description.endsWith("#SelfTest"), "the description has the laps, the best lap and hashtags", JSON.stringify(shown.description));
+    // The pilot's own lines go on the end, and are kept for next time.
+    await js(`const box = document.querySelector('[data-key="own"]'); box.value = "Gear: a made-up whoop"; box.dispatchEvent(new Event("input"))`);
+    await pause(700);
+    const own = await typed();
+    say(own.description.includes("\n\nGear: a made-up whoop\n\n#fpv") && library.store.uploadLines === "Gear: a made-up whoop", "the pilot's own lines go on the end of the description, and are kept", JSON.stringify(library.store.uploadLines));
+
+    // The video goes into the chooser for videos by itself, and the link shows once it is going up.
+    const put = await until(() => api.uploadIsOpen()?.put, 80);
+    const reads = await api.uploadReads();
+    const named = api.uploadIsOpen()?.file ?? "";
+    say(Boolean(put) && reads?.chosen === basename(named) && reads.chosen.startsWith(fileName(shown.title.replace(" | ", " - "))) && api.uploadIsOpen().original === landscape, "the video goes into the page's own chooser by itself, named for what it is, and not into the one for pictures", reads?.chosen ?? "nothing chosen");
+    const link = await until(() => api.uploadIsOpen()?.link, 60);
+    const linkShown = await js(`return document.querySelector(".upload-link-text")?.textContent ?? null`);
+    say(link === "https://youtu.be/NewVideo_12" && library.state(track).links?.[run.name] === link && linkShown === link, "the video's link is read off the page, not an older one, and kept with the run for its entry form", `${link} / ${linkShown}`);
+    const said = await js(`return document.querySelector(".upload-side .upload-note.good")?.textContent ?? null`);
+    say(Boolean(said), "the column says the video is in", said ?? "");
+
+    // Leaving while the video is still going up asks first, with the page out of the way.
+    await api.uploadReads();
+    await js(`document.querySelector('[data-probe="upload back"]').click()`);
+    const asked = await until(() => js(`return document.querySelector("#sheets .alert-title")?.textContent ?? null`), 40);
+    say(asked === "YouTube is still busy" && api.uploadIsOpen()?.shown === false, "leaving while the page is still busy asks first", asked ?? "nothing asked");
+    await js(`[...document.querySelectorAll("#sheets button")].find((one) => one.textContent === "Stay").click()`);
+    await pause(300);
+    say(api.uploadIsOpen()?.shown === true, "Stay keeps the page, and it comes back");
+
+    // So does closing the window: it stays open until the pilot says.
+    await api.uploadReads();
+    tools.window().close();
+    const held = await until(() => js(`return document.querySelector("#sheets .alert-title")?.textContent ?? null`), 40);
+    say(held === "YouTube is still busy" && !tools.window().isDestroyed(), "closing the window while it is busy asks first, and the window stays", held ?? "nothing asked");
+    await js(`[...document.querySelectorAll("#sheets button")].find((one) => one.textContent === "Stay").click()`);
+    await pause(300);
+
+    // Leave anyway goes, and leaves nothing behind.
+    await api.uploadReads();
+    await js(`document.querySelector('[data-probe="upload back"]').click()`);
+    await until(() => js(`return document.querySelector("#sheets .alert-title")?.textContent ?? null`), 40);
+    await js(`[...document.querySelectorAll("#sheets button")].find((one) => one.textContent === "Leave anyway").click()`);
+    await until(async () => api.uploadIsOpen() === null && (await js(`return document.getElementById("tool").childElementCount`)) === 0, 40);
+    const cleared = await js(`return { layer: document.getElementById("tool").childElementCount, sheets: document.querySelectorAll("#sheets .alert").length, inert: document.getElementById("stage").hasAttribute("inert") }`);
+    say(api.uploadIsOpen() === null && cleared.layer === 0 && cleared.sheets === 0 && !cleared.inert && !tools.window().isDestroyed() && !existsSync(named) && existsSync(landscape), "Leave anyway goes back to the race, and nothing of the page is left, nor the named copy", JSON.stringify(cleared));
+
+    // A page that isn't busy goes when it is left, without asking.
+    await js(`document.querySelector('[data-probe="${probe("upright", upright)}"]').click()`);
+    await pause(150);
+    await js(`[...document.querySelectorAll(".menu .menu-item")].find((one) => one.textContent === "Upload to TikTok…").click()`);
+    const tiktok = await until(() => api.uploadIsOpen());
+    await js(`document.querySelector('[data-probe="upload back"]').click()`);
+    const gone = await until(() => api.uploadIsOpen() === null, 40);
+    const asks = await js(`return document.querySelector("#sheets .alert-title")?.textContent ?? null`);
+    say(tiktok?.id === "tiktok" && tiktok.original === upright && Boolean(gone) && asks === null, "a page with nothing going up is left without asking", asks ?? "");
+
+    // Only the sites it knows, and only videos in the library or chosen by the pilot.
+    const place0 = { x: 0, y: 0, width: 10, height: 10 };
+    say((await api.openUpload("elsewhere", place0, { file: landscape })).problem !== null && api.uploadIsOpen() === null, "only the sites the app knows can be opened");
+    say((await api.openUpload("youtube", place0, { file: standIn })).problem !== null && api.uploadIsOpen() === null, "a file from outside the library isn't uploaded unless the pilot chose it");
+  } finally {
+    await api.closeUpload({ force: true });
+    api.useUploadStandIn(null);
+    await js(`await window.hangar_.app.tool?.close(); document.querySelectorAll("#sheets .backdrop, .menu").forEach((one) => one.remove())`);
+    library.update(track, (state) => {
+      if (kept === undefined) delete state.links?.[run.name];
+      else state.links[run.name] = kept;
+    });
+    if (ownBefore === undefined) delete library.store.uploadLines;
+    else library.store.uploadLines = ownBefore;
+    library.saveStore();
+    for (const file of made) rmSync(file, { force: true });
+    rmSync(work, { recursive: true, force: true });
   }
   say(errors.length === 0, "nothing went wrong on the page", errors.join(" | "));
 }
@@ -1135,7 +1322,7 @@ async function everything(tools) {
 
   const steps = [
     ["The marker editor", editor], ["Making the videos", video], ["Before and after a video", bookends],
-    ["The track in 3D, and building one", trackview], ["Other projects' tools", outside], ["A card from the goggles", cards], ["The copy in Google Drive", drive], ["Every page", pages], ["Updating itself", updating],
+    ["The track in 3D, and building one", trackview], ["Other projects' tools", outside], ["Uploading", uploads], ["A card from the goggles", cards], ["The copy in Google Drive", drive], ["Every page", pages], ["Updating itself", updating],
   ];
   for (const [title, step] of steps) {
     note(`-- ${title}`);
@@ -1208,17 +1395,18 @@ async function form(tools) {
 
 async function pages(tools) {
   const { js, errors } = await page(tools);
-  for (const which of ["home", "creator", "track", "files", "settings", "guide", "leaderboard", "welcome", "whatsnew", "setup", "submit", "race", "editor", "wave", "trackview"]) {
+  for (const which of ["home", "creator", "track", "files", "settings", "guide", "leaderboard", "welcome", "whatsnew", "setup", "submit", "race", "editor", "wave", "trackview", "upload:shorts"]) {
     const before = errors.length;
     let problem = "";
     try {
-      await js(`const editor = window.hangar_.app.editor; if (editor) editor.close(); window.hangar_.app.trackView?.close(); await window.showForSnapshot(${JSON.stringify(which)})`);
+      await js(`const editor = window.hangar_.app.editor; if (editor) editor.close(); window.hangar_.app.trackView?.close(); await window.hangar_.app.tool?.close(); await window.showForSnapshot(${JSON.stringify(which)})`);
     } catch (error) {
       problem = error.message;
     }
     await pause(100);
     say(problem === "" && errors.length === before, `the ${which} page draws`, problem || errors.slice(before).join(" | "));
   }
+  await js(`await window.hangar_.app.tool?.close()`);
   // The leaderboard with entries in it. A copy that shows no window doesn't read the series'
   // spreadsheet by itself, so these are made up, and one of them is given the pilot's own name.
   const before = errors.length;

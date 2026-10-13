@@ -650,6 +650,25 @@ textarea.field { resize: vertical; line-height: 1.38; }
 .tool-status.warn { color: #ff9f0a; }
 .tool-frame { flex: 1 1 0; min-height: 0; background: #0e1116; box-shadow: inset 0 1px 0 var(--stroke); }
 
+/* A finished video going up through a site's own upload page, laid over the frame by the main
+   process, beside a column of the app's own. */
+.upload [hidden] { display: none; }
+.upload-body { flex: 1 1 0; min-height: 0; display: flex; }
+.upload-body .tool-frame { min-width: 0; }
+.upload-side { flex: none; width: 312px; display: flex; flex-direction: column; gap: 20px; padding: 16px 18px 18px 20px; overflow-y: auto; box-shadow: inset 0 1px 0 var(--stroke); }
+.upload-part { display: flex; flex-direction: column; gap: 8px; }
+.upload-part > .button { align-self: flex-start; }
+.upload-chip { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--raised); box-shadow: inset 0 0 0 1px var(--stroke); cursor: grab; }
+.upload-chip:hover { box-shadow: inset 0 0 0 1.5px rgba(255, 214, 10, 0.75); }
+.upload-note { margin: 0; font-size: 12px; line-height: 1.4; color: var(--dim); }
+.upload-note.good { color: var(--good); }
+.upload-note.faint { color: var(--faint); }
+.upload-note:empty { display: none; }
+.upload-caption, .upload-title { width: 100%; font-size: 12px; }
+.upload-link-row { display: flex; align-items: flex-start; gap: 6px; font: 700 12px/1.3 var(--face); }
+.upload-link-row .good { flex: none; margin-top: 1px; }
+.upload-link-text { user-select: text; cursor: text; word-break: break-all; }
+
 /* The list a tool's page asks the pilot to choose a device from. */
 .devices { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; margin-top: 4px; }
 .device { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; width: 100%; padding: 10px 12px; border: 0; border-radius: 9px; background: var(--raised); text-align: left; }
