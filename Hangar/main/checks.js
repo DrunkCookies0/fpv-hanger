@@ -1281,7 +1281,9 @@ async function updating() {
     // What the copy writes as it goes, kept to say why if it goes wrong.
     let output = "";
     const ended = await new Promise((done) => {
-      const child = spawn(program, ["--update-feed", address, "--check", "update", "--root", join(drill, "library"), "--user-data", join(drill, "memory"), "--report", report, "--drill-said", said, "--drill-aside", old, "--enable-logging=stderr"], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+      // On Windows a program started from this one is held with it, which a copy of the app may not
+      // start under. Started on its own, as the update starts the new version, it is free of that.
+      const child = spawn(program, ["--update-feed", address, "--check", "update", "--root", join(drill, "library"), "--user-data", join(drill, "memory"), "--report", report, "--drill-said", said, "--drill-aside", old, "--enable-logging=stderr"], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true, detached: !mac });
       for (const stream of [child.stdout, child.stderr]) stream.on("data", (piece) => { output = (output + piece).slice(-6000); });
       const timer = setTimeout(() => child.kill(), 240000);
       child.once("exit", (code) => {
@@ -1301,6 +1303,12 @@ async function updating() {
       const lines = [...output.split(/\r?\n/), ...(existsSync(wrong) ? readFileSync(wrong, "utf8").split(/\r?\n/) : [])].filter((line) => line.trim() !== "" && !/dbus|Fontconfig/i.test(line));
       for (const line of lines.slice(-25)) note(`   the copy said: ${line.slice(0, 400)}`);
       note(`   the copy was ${program}${existsSync(program) ? "" : ", which isn't there"}`);
+      // Whether it starts at all, asked only to say its version: the copy, and this app itself.
+      for (const [who, exe] of [["the copy", program], ["this app", process.execPath]]) {
+        const file = join(drill, `${who.replace(" ", "-")}.txt`);
+        const tried = spawnSync(exe, ["--say-version", file], { encoding: "utf8", windowsHide: true, timeout: 60000 });
+        note(`   ${who}, asked its version: left with ${tried.status ?? tried.error?.message ?? tried.signal}, ${existsSync(file) ? `said v${readFileSync(file, "utf8").trim()}` : "said nothing"}${(tried.stderr ?? "").trim() ? `: ${tried.stderr.trim().slice(-300)}` : ""}`);
+      }
       return;
     }
     // The later copy starts where the first one was, and says which version it is.

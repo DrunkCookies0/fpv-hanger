@@ -115,6 +115,14 @@ jobs:
             exit 1
           }
 
+      # A program that stops before it can say why may have been written down by Windows.
+      - name: What Windows noted going wrong
+        if: failure()
+        shell: pwsh
+        run: |
+          Get-WinEvent -FilterHashtable @{ LogName = "Application"; Level = 1, 2; StartTime = (Get-Date).AddMinutes(-60) } -ErrorAction SilentlyContinue |
+            Select-Object -First 15 | Format-List TimeCreated, ProviderName, Id, Message
+
       - name: Keep its report with the run
         if: always()
         uses: actions/upload-artifact@v4
