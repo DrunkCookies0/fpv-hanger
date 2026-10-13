@@ -11,6 +11,7 @@ The app is not signed, so macOS and Windows both ask before opening it the first
 ## What it does
 
 - **Set up in two questions.** Your pilot name, and whether you fly RaceGOW6. If you do, the app finds your registration number on the series' public pilot list.
+- **Your groups and races at a glance.** The Video Creator opens on Your flying: your groups, races and runs, the season's next track, what is waiting on you (clips to mark, entries to send) and your latest races. Your groups sit down the left, each with its logo, and choosing one shows its races beside it.
 - **Follow the season.** For RaceGOW6, each track appears on the day it opens, with its deadline and its own entry form, read from what the series publishes.
 - **Add clips.** Choose your recordings, or drop them onto a track's page. One added by itself opens straight into marking.
 - **Mark laps.** Step through a clip frame by frame and press M each time you cross the start/finish gate. The lap timer shows over the picture as you go, exactly as the video will have it.

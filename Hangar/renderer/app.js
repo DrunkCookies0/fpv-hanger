@@ -19,7 +19,7 @@ const status = document.getElementById("status");
 
 function pageView() {
   switch (app.page.name) {
-    case "track": case "tracks": return videoCreator();
+    case "track": case "tracks": case "group": return videoCreator();
     case "leaderboard": return leaderboard();
     case "settings": return settings();
     case "guide": return guidePage();

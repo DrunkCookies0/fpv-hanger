@@ -1,7 +1,7 @@
-// The Video Creator: its sidebar of events and tracks, and a track's page with its runs, its clips
-// and its entry form.
+// The Video Creator: a rail of its groups, the open group's races beside it, its first page with
+// everything at a glance, and a track's page with its runs, its clips and its entry form.
 
-import { app, ask, go, open, refresh, render, eventFolder, eventOf, trackName, loadForm } from "../core.js";
+import { app, ask, go, open, refresh, render, eventOf, trackName, loadForm } from "../core.js";
 import { h, icon, label, primary, secondary, plain, testCopyBadge, when } from "../ui.js";
 import { menu } from "../sheets.js";
 import { bin, Bin, fileBrowser, season } from "../words.js";
@@ -19,99 +19,246 @@ const countsOf = (track, link) => app.counts.get(track)?.counts?.[videoIdOf(link
 
 const busy = () => Boolean(app.state.job);
 
-function sidebarRow(title, detail, selected, action, props = {}) {
-  return h(`button.side-row${selected ? ".selected" : ""}`, { type: "button", onclick: action, ...props },
-    h("span.side-mark"), h("span.side-title", title), h("span.spacer"), detail && h("span.side-detail", detail));
+// The groups, down the left: each a badge with its logo, or its initials in a colour of its own, so
+// a group is never taken for a race. Choosing one shows its races in the column beside it.
+
+/** Colours for groups with no logo, each the same lightness so none stands out. */
+const hues = ["#5cccff", "#ff66bd", "#45db85", "#b18cff", "#ff9e38", "#5ee0d0"];
+
+/** Each group's colour: the one its folder's name picks, or the next one no group before it has,
+ *  so two groups side by side don't share one while there are colours enough. */
+function hueOf(event) {
+  const taken = new Set();
+  for (const one of app.state.events) {
+    let sum = 0;
+    for (const character of one.folder || "tracks") sum = (sum * 31 + character.charCodeAt(0)) >>> 0;
+    let at = sum % hues.length;
+    for (let tries = 0; tries < hues.length && taken.has(hues[at]); tries += 1) at = (at + 1) % hues.length;
+    if (one.folder === event.folder) return hues[at];
+    taken.add(hues[at]);
+  }
+  return hues[0];
 }
 
-function sidebar() {
+/** The colour, faint, for behind a group's initials. */
+function tintOf(hue, alpha = 0.16) {
+  const [r, g, b] = [1, 3, 5].map((at) => Number.parseInt(hue.slice(at, at + 2), 16));
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+const groupName = (event) => (event.name === "" ? "Tracks" : event.name);
+
+/** Two letters for a group: the first of its first two words, or its capitals ("RaceGOW6" is RG). */
+export function initialsOf(name) {
+  const words = String(name).trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+  const word = words[0] ?? "";
+  const capitals = word.replace(/[^A-Z]/g, "");
+  return (capitals.length >= 2 ? capitals.slice(0, 2) : word.slice(0, 2)).toUpperCase();
+}
+
+/** A group's badge: its logo when it has one, else its initials on its colour. */
+function groupBadge(event, size = 44) {
+  const hue = hueOf(event);
+  return h(`span.group-badge${event.logo ? ".logo" : ""}`, { style: { width: `${size}px`, height: `${size}px`, borderRadius: `${Math.round(size * 0.28)}px`, color: hue, background: event.logo ? "#20242a" : tintOf(hue), fontSize: `${Math.round(size * 0.32)}px` } },
+    event.logo ? h("img", { src: event.logo, alt: "" }) : initialsOf(groupName(event)));
+}
+
+/** What sort of group it is, and how many races it has. */
+function kindOf(event) {
+  const count = event.tracks.length;
+  if (event.isSeason) return `SERIES · ${count} TRACK${count === 1 ? "" : "S"}`;
+  return `${count} RACE${count === 1 ? "" : "S"}`;
+}
+
+/** Goes to a group: the race last looked at in it, else its newest, else the group itself. */
+function openGroup(event) {
+  const last = app.state.lastTrack;
+  const there = event.tracks.find((track) => track.path === last) ?? event.tracks.at(-1);
+  go(there ? { name: "track", track: there.path } : { name: "group", folder: event.folder });
+}
+
+function groupMenu(event) {
+  return (click) => {
+    click.preventDefault();
+    menu(click, [
+      { title: event.isSeason ? "New track" : "New race", action: () => act.newRace(event.folder) },
+      // Only a group with a folder of its own can go, and only once its races have.
+      ...(event.folder === "" ? [] : [{ title: event.tracks.length === 0 ? `Move this group to ${bin}` : `Delete its ${event.isSeason ? "tracks" : "races"} first to delete this group`, disabled: event.tracks.length > 0, action: () => act.removeEvent(event.folder) }]),
+    ]);
+  };
+}
+
+function rail(current) {
   const state = app.state;
-  const current = app.page.name === "track" ? eventFolder(app.page.track) : state.events[0]?.folder ?? "";
-  const event = state.events.find((one) => one.folder === current);
-  const list = state.events.map((one, index) => {
-    const title = one.name === "" ? "Tracks" : one.name;
-    const rows = [
-      h(`div.side-event${index === 0 ? ".first" : ""}`, {
-        oncontextmenu: (click) => {
-          click.preventDefault();
-          menu(click, [
-            { title: one.isSeason ? "New track" : "New race", action: () => act.newRace(one.folder) },
-            // Only a group with a folder of its own can go, and only once its races have.
-            ...(one.folder === "" ? [] : [{ title: one.tracks.length === 0 ? `Move this group to ${bin}` : `Delete its ${one.isSeason ? "tracks" : "races"} first to delete this group`, disabled: one.tracks.length > 0, action: () => act.removeEvent(one.folder) }]),
-          ]);
-        },
-      }, title.toUpperCase()),
-      one.tracks.map((track) => sidebarRow(track.name, track.best, app.page.name === "track" && app.page.track === track.path, () => go({ name: "track", track: track.path }), {
-        oncontextmenu: (click) => {
-          click.preventDefault();
-          menu(click, [
-            ...(one.isSeason ? [] : [{ title: "Rename or move…", action: () => act.editRace(track.path) }]),
-            { title: `Move ${track.name} to ${bin}`, action: () => act.removeTrack(track.path) },
-          ]);
-        },
-      })),
-    ];
-    if (one.next) {
-      // The season's next track: it becomes a track of its own on the day it opens.
-      const opens = new Date(one.next.release), closes = new Date(one.next.deadline);
-      const full = { weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" };
-      rows.push(h("div.side-row.next", {
-        help: `Track ${one.next.number} opens on ${opens.toLocaleString(undefined, full)} and its entries close on ${closes.toLocaleString(undefined, full)}. It will appear here by itself.`,
-      }, h("span.side-mark"), h("span.side-title", `Track ${one.next.number}`), h("span.spacer"),
-        h("span.side-opens", `OPENS ${opens.toLocaleDateString(undefined, { month: "short", day: "numeric" }).toUpperCase()}`)));
-    } else if (!one.hasSeason) {
-      rows.push(h("button.side-add", { type: "button", onclick: () => act.newRace(one.folder) }, icon("plus"), one.isSeason ? "New track" : "New race"));
-    }
-    return rows;
+  const onFirst = app.page.name === "tracks";
+  const button = (classes, props, ...inside) => h(`button.rail-btn${classes}`, { type: "button", ...props }, ...inside);
+  return h("nav.rail", { "aria-label": "Groups" },
+    button(".rail-back", { help: "Back to all the tools", "aria-label": "Back to the Hangar", probe: "tool hangar", onclick: () => go({ name: "home" }) }, icon("chevronLeft", 14)),
+    button(`.rail-home${onFirst ? ".on" : ""}`, { help: "Your flying: everything in the Video Creator", "aria-label": "Your flying", probe: "creator home", onclick: () => go({ name: "tracks" }) }, icon("home", 18)),
+    h("span.rail-line"),
+    h("div.rail-groups", { "data-scroll": "rail" },
+      state.events.map((event) => button(`.rail-group${current?.folder === event.folder ? ".on" : ""}`, {
+        help: groupName(event), "aria-label": groupName(event), probe: `group ${event.folder}`,
+        onclick: () => openGroup(event), oncontextmenu: groupMenu(event),
+      }, groupBadge(event))),
+      !state.libraryAway && button(".rail-add", { help: "New group: a race series or a club you fly with, with its own races, its own name on the timer and its own ID.", "aria-label": "New group", probe: "new group", onclick: act.newEvent }, icon("plus", 16)),
+    ),
+    h("span.spacer"),
+    button("", { help: "Pilot & settings", "aria-label": "Pilot & settings", probe: "tool settings", onclick: () => open({ name: "settings" }) },
+      icon("gear", 17), state.update?.kind === "available" && h("span.rail-dot")),
+    button("", { help: "How it works", "aria-label": "How it works", probe: "tool guide", onclick: () => open({ name: "guide" }) }, icon("book", 17)),
+  );
+}
+
+/** A race's day, short: "4 Oct 2026". */
+const dayOf = (date) => (date ? new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "");
+
+/** The group that is open: its name, what it is, and its races. */
+function groupColumn(event) {
+  const state = app.state;
+  const hue = hueOf(event);
+  const rows = event.tracks.map((track) => {
+    const here = app.page.name === "track" && app.page.track === track.path;
+    return h(`button.race-row${here ? ".on" : ""}`, {
+      type: "button", probe: `race ${track.path}`, onclick: () => go({ name: "track", track: track.path }),
+      oncontextmenu: (click) => {
+        click.preventDefault();
+        menu(click, [
+          ...(event.isSeason ? [] : [{ title: "Rename or move…", action: () => act.editRace(track.path) }]),
+          { title: `Move ${track.name} to ${bin}`, action: () => act.removeTrack(track.path) },
+        ]);
+      },
+    }, h("span.race-name", track.name), h("span.race-detail", dayOf(track.date), track.best && h("span.race-best", track.best)));
   });
-  return h("aside.sidebar",
-    h("div.side-head",
-      secondary("Hangar", () => go({ name: "home" }), { icon: "chevronLeft", help: "Back to all the tools", probe: "tool hangar" }),
-      h("div", h("div.side-wordmark", h("span", "VIDEO"), h("span.accent", "CREATOR")), label("RACEGOW")),
+  if (event.next) {
+    // The season's next track: it becomes a track of its own on the day it opens.
+    const opens = new Date(event.next.release), closes = new Date(event.next.deadline);
+    const full = { weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" };
+    rows.push(h("div.race-row.next", { help: `Track ${event.next.number} opens on ${opens.toLocaleString(undefined, full)} and its entries close on ${closes.toLocaleString(undefined, full)}. It will appear here by itself.` },
+      h("span.race-name", `Track ${event.next.number}`), h("span.race-detail", `Opens ${opens.toLocaleDateString(undefined, { day: "numeric", month: "short" })}`)));
+  }
+  return h("aside.group-column", { "aria-label": `${groupName(event)}'s races` },
+    h("div.column-head",
+      h("div.column-kind", { style: { color: hue } }, kindOf(event)),
+      h("div.column-title",
+        h("h2.column-name", groupName(event)),
+        secondary("", () => open({ name: "settings" }), { icon: "gear", help: "This group's name on the timer, your ID and its logo are in Pilot & settings.", "aria-label": "Group settings" }),
+      ),
+      event.id !== "" && h("div.column-id", `${event.idLabel} ${event.id}`.toUpperCase()),
     ),
-    // Events and their tracks can outgrow the window, so this part scrolls.
-    h("div.side-list", { "data-scroll": "side" },
-      list,
-      !app.state.libraryAway && h("button.side-add.event", { type: "button", help: "A race series or a club you fly with, with its own races, its own name on the timer and its own ID.", onclick: act.newEvent }, icon("folderPlus"), "New group"),
+    label(event.isSeason ? "TRACKS" : "RACES"),
+    h("div.column-list", { "data-scroll": "side" },
+      rows,
+      !event.hasSeason && h("button.side-add", { type: "button", probe: "new track", onclick: () => act.newRace(event.folder) }, icon("plus"), event.isSeason ? "New track" : "New race"),
     ),
-    sidebarRow("Pilot & settings", null, false, () => open({ name: "settings" }), { probe: "tool settings" }),
-    sidebarRow("How it works", null, false, () => open({ name: "guide" }), { probe: "tool guide" }),
     h("div.side-foot",
       updatePill(),
       state.settings.pilot === ""
         ? h("button.side-pilot.add", { type: "button", onclick: () => open({ name: "settings" }) }, "Add your pilot name")
         : h("div.side-pilot", state.settings.pilot),
-      // The ID is the event's: the one for the track that is showing.
-      event && event.id !== "" && h("div.side-id", `${event.idLabel} ${event.id}`.toUpperCase()),
       h("div.side-version", `FPV Hangar v${state.version}`),
       state.testCopy && testCopyBadge(),
     ),
   );
 }
 
-/** The Video Creator before it has a track: with no event yet, or an event with nothing in it. */
-function noTracks() {
-  const events = app.state.events;
-  return h("div.scroll", { "data-scroll": "page" }, h("div.track-page",
-    h("h1.page-title", "VIDEO CREATOR"),
-    h("div.card.roomy", app.state.libraryAway ? [
-      // The library is somewhere that isn't there just now, Google Drive say: nothing is made until it is.
+/** The Video Creator's first page: everything in it at a glance, and what is waiting to be done. */
+function firstPage() {
+  const state = app.state;
+  const events = state.events;
+  const head = h("div.first-head",
+    h("div", h("div.first-wordmark", h("span", "VIDEO"), h("span.accent", "CREATOR")), h("h1.page-title", "YOUR FLYING")),
+    h("span.spacer"),
+    updatePill(),
+    state.testCopy && testCopyBadge(),
+    !state.libraryAway && secondary("New group", act.newEvent, { probe: "new event" }),
+  );
+  const holder = (...cards) => h("div.scroll", { "data-scroll": "page" }, h("div.track-page.first-page", head, ...cards));
+  const races = events.flatMap((event) => event.tracks.map((track) => ({ ...track, event })));
+  if (state.libraryAway) {
+    // The library is somewhere that isn't there just now, Google Drive say: nothing is made until it is.
+    return holder(h("div.card.roomy",
       h("div.card-title", "Your library isn't here just now"),
-      h("p.dim", { "data-probe": "library away" }, app.state.libraryAway),
+      h("p.dim", { "data-probe": "library away" }, state.libraryAway),
       h("div.row", secondary("Look again", () => refresh(), { probe: "library again" }), secondary("Pilot & settings", () => open({ name: "settings" }))),
-    ] : events.length === 0 ? [
+    ));
+  }
+  if (events.length === 0) {
+    return holder(h("div.card.roomy",
       h("div.card-title", "No groups yet"),
       h("p.dim", "A group is a race series or a club you fly with. Its races go inside it, and its name goes on the timer of every video you make in it."),
-      h("div.row", primary("New group", act.newEvent, { probe: "new event" }),
+      h("div.row", primary("New group", act.newEvent, { probe: "new event first" }),
         secondary(`I fly ${season}`, () => showSetUp(), { help: `Answer the setup questions: the app makes the ${season} group and looks up your registration number.` })),
-    ] : events[0]?.isSeason ? [
+    ));
+  }
+
+  const runs = races.reduce((sum, race) => sum + (race.runs ?? 0), 0);
+  const unmarked = races.reduce((sum, race) => sum + (race.unmarked ?? 0), 0);
+  const dated = races.filter((race) => race.date).sort((a, b) => b.date.localeCompare(a.date));
+  const totals = app.totals;
+  const views = !totals ? "…" : totals.needsKey || totals.videos === 0 ? "–" : totals.views.toLocaleString("en-US");
+  const viewsDetail = !totals ? "Reading YouTube…" : totals.problem ? totals.problem : totals.videos === 0 ? "Nothing on YouTube yet" : totals.needsKey ? "Add a YouTube key in Pilot & settings" : `${totals.videos} video${totals.videos === 1 ? "" : "s"}`;
+  const others = events.filter((event) => !event.isSeason).length;
+
+  // What is waiting: clips to mark, and the season's entries still to send while they are open.
+  const now = Date.now();
+  const waiting = [
+    ...races.filter((race) => race.unmarked > 0).map((race) => ({ race, what: `Mark laps on ${race.unmarked} clip${race.unmarked === 1 ? "" : "s"}`, colour: "var(--warn)" })),
+    ...races.filter((race) => race.event.isSeason && race.deadline && new Date(race.deadline) > now && race.runs > 0 && race.submissions === 0)
+      .map((race) => ({ race, what: "Submit a run", when: `entries close ${new Date(race.deadline).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}`, colour: "var(--accent)" })),
+  ].slice(0, 5);
+  const next = events.find((event) => event.next);
+
+  const latest = (dated.length > 0 ? dated : races.toReversed()).slice(0, 4);
+  return holder(
+    h("div.stats.four",
+      statCard("GROUPS", String(events.length), next ? `${groupName(next)}${others > 0 ? ` and ${others} more` : ""}` : `${others} of your own`),
+      statCard("RACES", String(races.length), dated[0] ? `the latest on ${dayOf(dated[0].date)}` : " "),
+      statCard("RUNS MARKED", String(runs), unmarked > 0 ? `${unmarked} clip${unmarked === 1 ? "" : "s"} still to mark` : "every clip marked"),
+      statCard("VIEWS ON YOUTUBE", views, viewsDetail, false),
+    ),
+    h("div.first-pair",
+      next && h("div.card.first-card",
+        label("UP NEXT"),
+        h("div.first-next", groupBadge(next, 40),
+          h("div", h("div.first-title", `${groupName(next)} · Track ${next.next.number}`),
+            h("div.dim.small", `Opens ${new Date(next.next.release).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })} · entries close ${new Date(next.next.deadline).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}`))),
+        h("p.dim.small", "It appears in its group by itself on the day it opens."),
+      ),
+      h("div.card.first-card",
+        label("WAITING ON YOU"),
+        waiting.length === 0
+          ? h("p.dim.small", "Nothing. Every clip is marked and every entry is in.")
+          : waiting.map((one) => h("button.first-todo", { type: "button", onclick: () => go({ name: "track", track: one.race.path }) },
+            h("span.first-dot", { style: { background: one.colour } }), h("span.first-what", one.what),
+            h("span.dim.small", `${groupName(one.race.event)} · ${one.race.name}${one.when ? `, ${one.when}` : ""}`))),
+      ),
+    ),
+    latest.length > 0 && h("div.group",
+      label("LATEST RACES"),
+      h("div.first-races", latest.map((race) => h("button.card.first-race", { type: "button", probe: `latest ${race.path}`, onclick: () => go({ name: "track", track: race.path }) },
+        h("span.first-race-group", { style: { color: hueOf(race.event) } }, groupBadge(race.event, 20), groupName(race.event)),
+        h("span.first-title", race.name),
+        h("span.dim.small", [dayOf(race.date), race.runs > 0 ? `${race.runs} run${race.runs === 1 ? "" : "s"}` : race.unmarked > 0 ? "not marked yet" : "no clips yet"].filter(Boolean).join(" · ")),
+        h("span.first-best", race.best ?? "–"),
+      ))),
+    ),
+  );
+}
+
+/** A group with no races in it yet. */
+function emptyGroup(event) {
+  return h("div.scroll", { "data-scroll": "page" }, h("div.track-page",
+    h("div", label(kindOf(event)), h("h1.page-title", groupName(event).toUpperCase())),
+    h("div.card.roomy", event.isSeason ? [
       h("div.card-title", "No tracks yet"),
       h("p.dim", `${season}'s tracks appear here by themselves, each on the day it opens.`),
-      h("div.row", primary("New track", () => act.newRace(events[0].folder), { probe: "new track" })),
+      !event.hasSeason && h("div.row", primary("New track", () => act.newRace(event.folder), { probe: "new track first" })),
     ] : [
       h("div.card-title", "No races yet"),
       h("p.dim", "A race is one day's racing: its recordings, laps and videos are kept together. Make one, add your recordings to it, and mark the laps on them."),
-      h("div.row", primary("New race", () => act.newRace(events[0]?.folder ?? ""), { probe: "new track" })),
+      h("div.row", primary("New race", () => act.newRace(event.folder), { probe: "new track first" })),
     ]),
   ));
 }
@@ -431,9 +578,15 @@ function trackPage(track) {
   return holder;
 }
 
-/** The Video Creator: its own sidebar of events and tracks, and one of its pages. */
+/** The Video Creator: the rail of groups, the open group's races beside it, and the page. */
 export function videoCreator() {
-  return h("div.creator", sidebar(), h("main.creator-page", app.page.name === "track" ? trackPage(app.page.track) : noTracks()));
+  const page = app.page;
+  const event = page.name === "track" ? eventOf(page.track) : page.name === "group" ? app.state.events.find((one) => one.folder === page.folder) ?? null : null;
+  return h("div.creator",
+    rail(event),
+    event && groupColumn(event),
+    h("main.creator-page", page.name === "track" ? trackPage(page.track) : event ? emptyGroup(event) : firstPage()),
+  );
 }
 
 export { loadForm, Bin };

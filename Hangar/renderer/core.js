@@ -27,7 +27,8 @@ export async function whenQuiet() {
 export const app = {
   /** What the main process last said about the library: events, tracks, the pilot, the job. */
   state: null,
-  /** The page that is showing: { name: "home" | "track" | "tracks" | "leaderboard" | "settings" | "guide", track? }. */
+  /** The page that is showing: { name: "home" | "track" | "tracks" | "group" | "leaderboard" | "settings" | "guide", track?, folder? }.
+   *  "tracks" is the Video Creator's first page, and "group" a group with no races yet. */
   page: { name: "home" },
   /** Where Pilot & settings, How it works or the leaderboard was opened from. */
   cameFrom: { name: "home" },
@@ -56,6 +57,8 @@ export const app = {
   cards: null,
   /** Each track's YouTube counts as last read: { counts: { [video id]: { views, likes, comments } }, problem, needsKey }. */
   counts: new Map(),
+  /** All the views on YouTube between the runs, for the Video Creator's first page: { views, videos, problem, needsKey }. */
+  totals: null,
 };
 
 /** Reads the season's leaderboards, again if told to, and draws the page when they arrive. */
@@ -82,7 +85,7 @@ export const allTracks = () => (app.state?.events ?? []).flatMap((event) => even
 export const trackName = (track) => track.split("/").pop();
 export const eventFolder = (track) => (track.includes("/") ? track.slice(0, track.indexOf("/")) : "");
 export const eventOf = (track) => app.state.events.find((event) => event.folder === eventFolder(track)) ?? null;
-export const inVideoCreator = (page) => page.name === "track" || page.name === "tracks";
+export const inVideoCreator = (page) => page.name === "track" || page.name === "tracks" || page.name === "group";
 const samePage = (a, b) => a.name === b.name && a.track === b.track;
 
 /** Takes what the main process answered: the library as it is now, and anything worth saying. */
@@ -140,6 +143,15 @@ export async function loadCounts(track, again = false) {
   if (app.page.name === "track" && app.page.track === track && JSON.stringify(read) !== before) render();
 }
 
+/** Reads how many views there are on YouTube between all the runs, for the Video Creator's first page. */
+export async function loadTotals() {
+  const read = await ask("youtubeTotals");
+  if (!read) return;
+  const before = JSON.stringify(app.totals);
+  app.totals = read;
+  if (app.page.name === "tracks" && JSON.stringify(read) !== before) render();
+}
+
 /** Looks for a card from the goggles, for the track that is showing. The page is drawn again
  *  when what is plugged in, or what is new on it, has changed. */
 export async function loadCards(track, again = false) {
@@ -162,6 +174,7 @@ export function go(page) {
     loadCards(page.track);
     loadCounts(page.track);
   }
+  if (page.name === "tracks") loadTotals();
   // Drive may have been set up since the app was opened.
   if (page.name === "settings" && app.state?.drive?.kind === "off") {
     ask("lookForDrive").then((answer) => {
@@ -188,20 +201,22 @@ export function goBack() {
 
 export const backTitle = () => (inVideoCreator(app.cameFrom) ? "Video Creator" : "Hangar");
 
-/** Opens the Video Creator where it was left: on the track last looked at, or else its first. */
+/** Opens the Video Creator on its first page: everything in it at a glance. */
 export function openVideoCreator() {
-  const tracks = allTracks();
-  const last = app.state.lastTrack;
-  go(last && tracks.includes(last) ? { name: "track", track: last } : tracks.length > 0 ? { name: "track", track: tracks[0] } : { name: "tracks" });
+  go({ name: "tracks" });
 }
 
-/** After the library has changed under a page: a track that has gone gives way to the first there
- *  is, and a Video Creator with nothing to show goes to a track that has arrived. */
+/** After the library has changed under a page: a track or a group that has gone gives way to the
+ *  Video Creator's first page, and a group that has had its first race goes to it. */
 export function settle() {
   const tracks = allTracks();
   const before = app.page;
-  if (app.page.name === "track" && !tracks.includes(app.page.track)) app.page = tracks.length > 0 ? { name: "track", track: tracks[0] } : { name: "tracks" };
-  if (app.page.name === "tracks" && tracks.length > 0) app.page = { name: "track", track: tracks[0] };
+  if (app.page.name === "track" && !tracks.includes(app.page.track)) app.page = { name: "tracks" };
+  if (app.page.name === "group") {
+    const group = app.state.events.find((event) => event.folder === app.page.folder);
+    if (!group) app.page = { name: "tracks" };
+    else if (group.tracks.length > 0) app.page = { name: "track", track: group.tracks.at(-1).path };
+  }
   for (const track of [...app.tracks.keys()]) if (!tracks.includes(track)) app.tracks.delete(track);
   if (!samePage(before, app.page) && app.page.name === "track") loadTrack(app.page.track).then(() => loadForm(app.page.track));
 }
@@ -214,6 +229,7 @@ export async function refresh({ quietly = false } = {}) {
   refreshed = performance.now();
   app.state = await ask("refresh");
   settle();
+  if (app.page.name === "tracks") loadTotals();
   if (app.page.name === "track") {
     await loadTrack(app.page.track);
     loadForm(app.page.track);

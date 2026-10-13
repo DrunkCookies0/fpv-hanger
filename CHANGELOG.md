@@ -2,6 +2,13 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.24.0 (13 October 2026)
+
+- The Video Creator tells groups and races apart. Your groups sit down the left as badges: a group's logo when it has one, or its initials in a colour of its own. Choose one, and its races are listed beside it, each with its date and best time, under the group's name and what it is (a series and its tracks, or a group and its races). The + under the groups makes a new group, and New race under its races makes a race. Right-click a group or a race for the rest, as before.
+- The Video Creator opens on a page of its own, **Your flying**: how many groups, races and runs you have, your views on YouTube, the season's next track, what is waiting on you (clips to mark, and RaceGOW entries still to send while they are open), and your latest races. The house at the top of the left side comes back to it.
+- Pilot & settings and How it works are at the foot of the left side; a dot on the gear says an update is ready.
+- On a small window, a race's buttons go under its name rather than squeezing it.
+
 ## v0.23.0 (13 October 2026)
 
 - Each run shows how many views its YouTube and YouTube Shorts videos have: **on YouTube · 1,234 views** under its laps, and the likes and comments too under **Uploaded** in its files.

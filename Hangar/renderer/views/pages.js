@@ -345,7 +345,7 @@ export function settings() {
     h("div.card.spaced",
       label("GROUPS"),
       state.events.map(eventFields),
-      h("p.dim.small", "A group is a race series or a club you fly with: a folder in your library with its races inside. Its name goes on the timer of every race in it, next to the race's name, and your ID for it goes beside your name and into its entry forms. New group in the Video Creator makes another."),
+      h("p.dim.small", "A group is a race series or a club you fly with: a folder in your library with its races inside. Its name goes on the timer of every race in it, next to the race's name, and your ID for it goes beside your name and into its entry forms. The + under the groups in the Video Creator makes another."),
     ),
     h("div.card",
       label("THE TIMER ON YOUR VIDEOS"),

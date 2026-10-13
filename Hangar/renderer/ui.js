@@ -75,6 +75,7 @@ const drawings = {
   arrowRight: line("M4 12h15M13 6l6 6-6 6"),
   arrowUpRight: line("M7 17L17 7M8 7h9v9"),
   plus: line("M12 5v14M5 12h14"),
+  home: line("M3.5 11L12 3.5l8.5 7.5M6 9.5V20h12V9.5"),
   check: line("M5 12.5l4.5 4.5L19 7.5"),
   close: line("M6 6l12 12M18 6L6 18"),
   book: line("M12 6.5C10 5 7.5 4.5 4 4.5v13c3.5 0 6 .5 8 2 2-1.500 4.500-2 8-2v-13c-3.500 0-6 .5-8 2zM12 6.500v13"),

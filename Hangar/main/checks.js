@@ -5,7 +5,9 @@
 //   editor   opens a run in the marker editor: every frame asked for is the frame shown, markers
 //            are added, moved, undone and saved, a song is placed, the sound wave window marks it
 //   video    makes a 16:9 and a 9:16 video of a run and measures what came out
-//   pages    draws every page and sheet, and fails on any error in the window
+//   pages    draws every page and sheet, and fails on any error in the window. The Video
+//            Creator opens on its first page, with a badge on its rail for every group (its logo
+//            when it has one), and a group chosen there shows its races beside it.
 //   form     opens the first track's real entry form, filled in with made-up answers, and reads
 //            back what it then holds. Nothing is sent. This is how to tell whether Google has
 //            changed its page.
@@ -1621,6 +1623,44 @@ async function pages(tools) {
     say(problem === "" && errors.length === before, `the ${which} page draws`, problem || errors.slice(before).join(" | "));
   }
   await js(`await window.hangar_.app.tool?.close()`);
+
+  // The Video Creator opens on its first page, with every group on its rail.
+  const { api, library, ffmpeg } = tools;
+  const group = api.state().events.find((event) => event.folder !== "" && event.tracks.length > 0);
+  const logoBefore = group ? library.logo(group.folder) : null;
+  const picture = join(mkdtempSync(join(tmpdir(), "fpv-hangar-logo-")), "logo.png");
+  try {
+    if (group && !logoBefore) {
+      await ffmpeg.run(["-v", "error", "-y", "-f", "lavfi", "-i", "color=c=0xff66bd:s=64x64", "-frames:v", "1", picture]);
+      await library.setLogo(group.folder, picture);
+    }
+    await js(`await window.showForSnapshot("creator")`);
+    const first = await js(`return {
+      title: document.querySelector(".first-page .page-title")?.textContent ?? null,
+      home: document.querySelector('[data-probe="creator home"]')?.classList.contains("on") ?? false,
+      groups: [...document.querySelectorAll(".rail-group")].map((one) => ({ name: one.getAttribute("aria-label"), logo: Boolean(one.querySelector(".group-badge img")) })),
+    }`);
+    const events = api.state().events;
+    const logos = first.groups.filter((one) => one.logo).map((one) => one.name);
+    say(first.title === "YOUR FLYING" && first.home && first.groups.length === events.length && (!group || logos.includes(group.name)), "the Video Creator opens on its first page, with every group on its rail, and a group's logo on its badge", JSON.stringify(first));
+    // A group chosen on the rail opens its newest race, with its races beside it.
+    if (group) {
+      await js(`document.querySelector('[data-probe="group ' + CSS.escape(${JSON.stringify(group.folder)}) + '"]').click()`);
+      await pause(300);
+      const opened = await js(`return {
+        name: document.querySelector(".column-name")?.textContent ?? null,
+        races: [...document.querySelectorAll(".group-column .race-row .race-name")].map((one) => one.textContent),
+        on: document.querySelector(".group-column .race-row.on .race-name")?.textContent ?? null,
+        page: window.hangar_.app.page,
+      }`);
+      const races = group.tracks.map((track) => track.name);
+      say(opened.name === group.name && JSON.stringify(opened.races) === JSON.stringify(races) && opened.page.name === "track" && group.tracks.some((track) => track.path === opened.page.track && track.name === opened.on), "a group chosen on the rail opens a race of its own, with its races beside it", JSON.stringify(opened));
+    }
+  } finally {
+    if (group && !logoBefore) rmSync(library.logo(group.folder) ?? picture, { force: true });
+    rmSync(dirname(picture), { recursive: true, force: true });
+  }
+
   // The leaderboard with entries in it. A copy that shows no window doesn't read the series'
   // spreadsheet by itself, so these are made up, and one of them is given the pilot's own name.
   const before = errors.length;

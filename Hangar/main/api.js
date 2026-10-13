@@ -301,9 +301,13 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
               const summary = summaries.get(path);
               const kept = library.state(path);
               const season = library.seasonTrack(path);
+              const timed = new Set(summary?.runs.map((run) => run.name.toLowerCase()) ?? []);
               return {
                 path, name: trackName(path),
                 best: summary?.best?.best?.seconds ?? null,
+                // For the Video Creator's first page: how much is marked, and what is still to do.
+                runs: summary?.runs.length ?? 0,
+                unmarked: summary ? library.clips(path).filter((clip) => !timed.has(basename(clip, extname(clip)).toLowerCase())).length : 0,
                 submissions: kept.submissions.length,
                 submitted: kept.submissions.at(-1) ?? null,
                 deadline: season?.deadline ?? null,
@@ -880,6 +884,22 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
       });
       if (ids.length === 0) return { counts: {}, problem: null, needsKey: false };
       return counts.countsOf(ids, { again });
+    },
+
+    /** How many views all the runs' YouTube and YouTube Shorts videos have between them, for the
+     *  Video Creator's first page: { views, videos, problem, needsKey }. */
+    async youtubeTotals() {
+      const ids = library.tracks.flatMap((track) => {
+        const state = library.state(track);
+        return Object.keys({ ...(state.uploads ?? {}), ...(state.links ?? {}) }).flatMap((run) => {
+          const done = uploadsOf(state, run);
+          return ["youtube", "shorts"].map((site) => videoIdOf(done[site]?.link)).filter(Boolean);
+        });
+      });
+      if (ids.length === 0) return { views: 0, videos: 0, problem: null, needsKey: false };
+      const read = await counts.countsOf(ids);
+      const known = Object.values(read.counts);
+      return { views: known.reduce((sum, one) => sum + (one.views ?? 0), 0), videos: new Set(ids).size, problem: read.problem, needsKey: read.needsKey };
     },
 
     /** Keeps the pilot's YouTube key, once YouTube has said it works. An empty one takes it away. */
