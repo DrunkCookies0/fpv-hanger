@@ -34,7 +34,7 @@
 import { app, clipboard } from "electron";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, writeFileSync, appendFileSync, copyFileSync, cpSync, createReadStream, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, utimesSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync, appendFileSync, copyFileSync, cpSync, createReadStream, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, utimesSync } from "node:fs";
 import { createServer } from "node:http";
 import { EOL, arch, cpus, release, tmpdir, totalmem, version as systemVersion } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -84,8 +84,10 @@ export async function run(which, tools) {
 /** Opens the window nobody sees and gives a way to run things in its page. */
 async function page({ open, window }) {
   const errors = [];
-  // One window serves every check that is run in the same go.
-  if (!window()) await open({ width: 1440, height: 900 });
+  // One window serves every check that is run in the same go. `--size` tries a smaller one, such as
+  // a screen of 1024 by 768 leaves (Windows keeps a window within its screen).
+  const size = /^(\d+)x(\d+)$/.exec(argument("--size") ?? "");
+  if (!window()) await open(size ? { width: Number(size[1]), height: Number(size[2]) } : { width: 1440, height: 900 });
   const contents = window().webContents;
   contents.on("console-message", (details) => {
     if (details.level === "error" || details.level === 3) errors.push(details.message);
@@ -365,13 +367,17 @@ async function trackview(tools) {
   rmSync(file, { force: true });
   const view = "window.hangar_.app.trackView";
   // A click, or a drag, on one of the view's two canvases, at places given in its own pixels.
-  const press = (canvas, places, { altKey = false } = {}) => js(`(() => {
+  // A click, or a drag through the places given. Then two frames go by, as they always do before a
+  // hand can click again: what the click changed around the picture is laid out by then, and the
+  // picture and the plan have measured themselves again.
+  const press = (canvas, places, { altKey = false } = {}) => js(`await (async () => {
     const canvas = ${view}.${canvas}, box = canvas.getBoundingClientRect(), places = ${JSON.stringify(places)};
     const send = (kind, place, buttons) => canvas.dispatchEvent(new PointerEvent(kind, { clientX: box.left + place.x, clientY: box.top + place.y, pointerId: 7, buttons, bubbles: true, altKey: ${altKey} }));
     send("pointermove", places[0], 0);
     send("pointerdown", places[0], 1);
     for (const place of places.slice(1)) send("pointermove", place, 1);
     send("pointerup", places.at(-1), 0);
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
   })()`);
   try {
     await js(`window.hangar_.app.editor?.close(); await ${view}?.close({ sure: true }); await window.showForSnapshot(${JSON.stringify(`trackview:${track}`)})`);
@@ -409,12 +415,15 @@ async function trackview(tools) {
     await pause(200);
     const plan = await js(`return (() => { const v = ${view}; const low = [v.low[0] - 1, v.low[1] - 1], high = [v.high[0] + 1, v.high[1] + 1]; return { size: Math.min(v.plan.w, v.plan.h), hidden: v.planBox.hidden, had: v.edit.points.length, corners: [[low[0], low[1]], [high[0], low[1]], [high[0], high[1]], [low[0], high[1]]].map((at) => ({ at, ...v.toPlan(at) })) }; })()`);
     if (!say(plan.size > 200 && !plan.hidden, "the plan of the track from above is shown", `${plan.size} px`)) return;
-    for (const corner of plan.corners) await press("planCanvas", [corner]);
+    // Where a place on the grid is on the plan just now: the plan is laid out again as the side of
+    // the window fills in, and a pilot clicks where they see it.
+    const onPlan = (at) => js(`return ${view}.toPlan(${JSON.stringify(at)})`);
+    for (const corner of plan.corners) await press("planCanvas", [await onPlan(corner.at)]);
     let lap = await js(`return (() => { const v = ${view}; return { points: v.edit.points.map((point) => point.at), line: Boolean(v.lap), picked: v.edit.picked }; })()`);
     say(lap.points.length === plan.had + 4 && lap.line && plan.corners.every((corner, index) => lap.points[plan.had + index][0] === corner.at[0] && lap.points[plan.had + index][1] === corner.at[1] && lap.points[plan.had + index][2] === 0.5), "four clicks on the plan put down four points at gate height, and they make a lap", JSON.stringify(lap.points.slice(plan.had)));
     // The last one is dragged half a section along.
-    const last = plan.corners[3], to = await js(`return ${view}.toPlan([${last.at[0] + 0.5}, ${last.at[1]}])`);
-    await press("planCanvas", [last, { x: (last.x + to.x) / 2, y: to.y }, to]);
+    const last = plan.corners[3], from = await onPlan(last.at), to = await onPlan([last.at[0] + 0.5, last.at[1]]);
+    await press("planCanvas", [from, { x: (from.x + to.x) / 2, y: to.y }, to]);
     // Its height, its move's name and the start gate are set with the controls beside the picture.
     await js(`(() => {
       const side = ${view}.sideBox, height = side.querySelector('input[type="range"]'), name = side.querySelector('input[type="text"]');
@@ -432,12 +441,12 @@ async function trackview(tools) {
     // or Alt held, a second click on the two goes from one to the other, and the plan can show one
     // height at a time, where a click adds a point at that height and leaves the others alone.
     const [low, other, third] = plan.corners, at = (corner) => `p.at[0] === ${corner.at[0]} && p.at[1] === ${corner.at[1]}`;
-    await press("planCanvas", [low], { altKey: true });
+    await press("planCanvas", [await onPlan(low.at)], { altKey: true });
     let stack = await js(`return (() => { const e = ${view}.edit; return { points: e.points.length, picked: e.picked, under: e.points.filter((p) => ${at(low)}).length }; })()`);
     say(stack.points === plan.had + 5 && stack.under === 2 && stack.picked === plan.had + 4, "with Option or Alt held, a click puts a point on top of another", JSON.stringify(stack));
-    await press("planCanvas", [low]);
+    await press("planCanvas", [await onPlan(low.at)]);
     const turn = await js(`return ${view}.edit.picked`);
-    await press("planCanvas", [low]);
+    await press("planCanvas", [await onPlan(low.at)]);
     const back = await js(`return ${view}.edit.picked`);
     say(turn === plan.had && back === plan.had + 4, "a second click on two points goes from one to the other", `${stack.picked + 1} to ${turn + 1} and back to ${back + 1}`);
     await js(`(() => {
@@ -446,7 +455,7 @@ async function trackview(tools) {
       height.dispatchEvent(new Event("input", { bubbles: true }));
       ${view}.storeyTabs[2].click();
     })()`);
-    await press("planCanvas", [other]);
+    await press("planCanvas", [await onPlan(other.at)]);
     stack = await js(`return (() => { const v = ${view}, e = v.edit; return { storey: e.storey, points: e.points.length, there: e.points.filter((p) => ${at(other)}).map((p) => p.at[2]), picked: e.points[e.picked]?.at, shown: e.points.filter((p) => v.onPlan(p)).length, words: v.storeyNote.textContent }; })()`);
     say(stack.storey === 1 && stack.points === plan.had + 6 && JSON.stringify(stack.there) === "[0.5,1.5]" && stack.picked?.[2] === 1.5, "with the plan showing one height, a click over a point lower down adds one at that height", JSON.stringify(stack.there));
     // The wheel zooms the plan about the place under the pointer.
@@ -1203,7 +1212,10 @@ async function updating() {
   const here = thisCopy();
   if (!here) return note("   (a copy run from its source can't update itself, so there is nothing to try)");
   const mac = process.platform === "darwin", name = "FPV Hangar", later = "99.0.0";
-  const drill = mkdtempSync(join(tmpdir(), "fpv-hangar-drill-"));
+  // On Windows the temporary folder can be given by its short name (C:\Users\RUNNER~1\…), and a
+  // copy of the app started from there may not start at all. The drill works from its full name.
+  const scratch = mkdtempSync(join(tmpdir(), "fpv-hangar-drill-"));
+  const drill = process.platform === "win32" ? realpathSync.native(scratch) : scratch;
   const run = (program, parts) => spawnSync(program, parts, { encoding: "utf8", windowsHide: true });
   const inside = (copy, ...more) => (mac ? join(copy, "Contents", "Resources", ...more) : join(copy, "resources", ...more));
   // A copy of an app, with everything a Mac bundle has kept as it is.
@@ -1266,8 +1278,11 @@ async function updating() {
     const said = join(drill, "said.txt"), report = join(drill, "report.txt"), old = join(drill, "old");
     const program = mac ? join(now, "Contents", "MacOS", "Electron") : join(now, basename(process.execPath));
     const started = Date.now();
+    // What the copy writes as it goes, kept to say why if it goes wrong.
+    let output = "";
     const ended = await new Promise((done) => {
-      const child = spawn(program, ["--update-feed", address, "--check", "update", "--root", join(drill, "library"), "--user-data", join(drill, "memory"), "--report", report, "--drill-said", said, "--drill-aside", old], { stdio: "ignore", windowsHide: true });
+      const child = spawn(program, ["--update-feed", address, "--check", "update", "--root", join(drill, "library"), "--user-data", join(drill, "memory"), "--report", report, "--drill-said", said, "--drill-aside", old, "--enable-logging=stderr"], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+      for (const stream of [child.stdout, child.stderr]) stream.on("data", (piece) => { output = (output + piece).slice(-6000); });
       const timer = setTimeout(() => child.kill(), 240000);
       child.once("exit", (code) => {
         clearTimeout(timer);
@@ -1280,7 +1295,14 @@ async function updating() {
     });
     const told = existsSync(report) ? readFileSync(report, "utf8").split(/\r?\n/).filter((line) => /^(ok|FAIL)/.test(line)) : [];
     for (const line of told) note(`   the copy: ${line}`);
-    if (!say(ended === 0 && told.length > 0 && told.every((line) => line.startsWith("ok")), "the copy finds the later version and installs it", `it left with ${ended} after ${((Date.now() - started) / 1000).toFixed(0)} s`)) return;
+    if (!say(ended === 0 && told.length > 0 && told.every((line) => line.startsWith("ok")), "the copy finds the later version and installs it", `it left with ${ended} after ${((Date.now() - started) / 1000).toFixed(0)} s`)) {
+      // Why, as far as the copy said: what it wrote, and what it wrote down as going wrong.
+      const wrong = join(drill, "memory", "What went wrong.txt");
+      const lines = [...output.split(/\r?\n/), ...(existsSync(wrong) ? readFileSync(wrong, "utf8").split(/\r?\n/) : [])].filter((line) => line.trim() !== "" && !/dbus|Fontconfig/i.test(line));
+      for (const line of lines.slice(-25)) note(`   the copy said: ${line.slice(0, 400)}`);
+      note(`   the copy was ${program}${existsSync(program) ? "" : ", which isn't there"}`);
+      return;
+    }
     // The later copy starts where the first one was, and says which version it is.
     for (let tries = 0; tries < 240 && !existsSync(said); tries += 1) await pause(500);
     await pause(500);
@@ -1294,7 +1316,7 @@ async function updating() {
     // Whatever was made for this goes. On Windows the last of it can still be closing.
     for (let tries = 0; tries < 10; tries += 1) {
       try {
-        rmSync(drill, { recursive: true, force: true });
+        rmSync(scratch, { recursive: true, force: true });
         break;
       } catch {
         await pause(1000);
