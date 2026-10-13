@@ -33,6 +33,20 @@ export function isNewer(one, other) {
 }
 
 /**
+ * How the app starts that script on Windows so that nothing shows. Started straight from the app,
+ * on its own and with no window, cmd.exe has no console, so every program the script runs while it
+ * waits (tasklist, find, ping, robocopy) opens a console window of its own, one after another.
+ * PowerShell, started the same way, starts cmd.exe with a console whose window is hidden, and the
+ * script's programs share that one. The command is given encoded, so no folder name can upset it.
+ * Gives the program and what it is started with.
+ */
+export function hiddenStart(script) {
+  const quoted = script.replace(/'/g, "''");
+  const command = `Start-Process -FilePath $env:ComSpec -ArgumentList '/c', '"${quoted}"' -WindowStyle Hidden`;
+  return ["powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(command, "utf16le").toString("base64")]];
+}
+
+/**
  * The script that puts a new copy of the app where the old one is, on Windows. A program can't
  * replace itself while it runs there, so the app writes this, starts it and closes. It waits for
  * the app to go, moves the old copy aside (kept, as a way back), moves the new one in, and starts

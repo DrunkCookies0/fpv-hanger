@@ -2,6 +2,11 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.20.1 (13 October 2026)
+
+- Updating on Windows no longer opens black windows saying `find /i ".exe"` while FPV Hangar closes and the new version is put in its place. The update's helper now runs out of sight. The update to this version still shows them, because it is the version you had that does the updating; the ones after it won't.
+- Every release from now on is tried out on Windows as well as on a Mac before it is published: the Windows download is unzipped on a Windows computer and runs its full self-test, updating itself included.
+
 ## v0.20.0 (13 October 2026)
 
 - **Preview** in Markers & music plays the finished video as it will be: from where the video starts to where it ends, wherever the playhead was, and it stops on the video's last frame. The music is the part of the song the video has, eased in and faded out at the end as it is in the video. It is beside the playback speed, and under Finished video, and P does the same. Press it again, or Space, to stop.

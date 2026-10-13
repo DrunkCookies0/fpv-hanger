@@ -1,7 +1,7 @@
 // Which version is the newest, for which kind of computer, and the script that swaps one in on Windows.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { releaseFor, isNewer, windowsSwap } from "../shared/updates.js";
+import { releaseFor, isNewer, windowsSwap, hiddenStart } from "../shared/updates.js";
 
 const sum = "0123456789abcdef".repeat(4);
 const told = { version: "0.13.0", file: "FPV-Hangar-v0.13.0-mac.zip", sha256: sum.toUpperCase(), notes: "- Something new", windows: { file: "FPV-Hangar-v0.13.0-win64.zip", sha256: sum } };
@@ -42,4 +42,13 @@ test("the Windows swap waits for the app, keeps the old copy, and has a way back
   // Nothing in it waits on the keyboard: it runs where there is none.
   assert.ok(!/\btimeout\b|\bpause\b/.test(script));
   assert.ok(windowsSwap({ app: "a", fresh: "b", old: "c", program: "d.exe", pid: 1 }).includes('start "" "%APP%\\%EXE%"\r\nexit /b 0'));
+});
+
+test("updates: on Windows the swap script is started hidden, through PowerShell, whatever its folder is called", () => {
+  const script = "C:\\Users\\Pilot O'Test\\AppData\\Local\\Temp\\fpv-hangar-update-x\\swap.cmd";
+  const [program, parts] = hiddenStart(script);
+  assert.equal(program, "powershell.exe");
+  assert.deepEqual(parts.slice(0, 3), ["-NoProfile", "-NonInteractive", "-EncodedCommand"]);
+  const command = Buffer.from(parts[3], "base64").toString("utf16le");
+  assert.equal(command, "Start-Process -FilePath $env:ComSpec -ArgumentList '/c', '\"C:\\Users\\Pilot O''Test\\AppData\\Local\\Temp\\fpv-hangar-update-x\\swap.cmd\"' -WindowStyle Hidden");
 });

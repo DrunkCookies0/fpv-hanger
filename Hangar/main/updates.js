@@ -13,7 +13,7 @@ import { accessSync, constants, createWriteStream, existsSync, mkdirSync, mkdtem
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { argument, config, setConfig } from "./paths.js";
-import { releaseFor, windowsSwap } from "../shared/updates.js";
+import { releaseFor, windowsSwap, hiddenStart } from "../shared/updates.js";
 
 /** Where packaged versions are published. */
 export const releasesPage = "https://github.com/DrunkCookies0/fpv-hanger/releases";
@@ -145,7 +145,11 @@ export async function install(release, { heard = () => {}, after = [], aside = n
     if (theirs && theirs !== program) renameSync(join(fresh, theirs), join(fresh, program));
     const script = join(work, "swap.cmd");
     writeFileSync(script, windowsSwap({ app: here, fresh, old: aside ? join(aside, basename(here)) : `${here} (before update)`, program, pid: process.pid, after }));
-    spawn("cmd.exe", ["/c", script], { detached: true, stdio: "ignore", windowsHide: true, cwd: tmpdir() }).unref();
+    const [starter, parts] = hiddenStart(script);
+    const hidden = spawn(starter, parts, { detached: true, stdio: "ignore", windowsHide: true, cwd: tmpdir() });
+    // Without PowerShell it is started as it always was, which works, with a window or two showing.
+    hidden.once("error", () => spawn("cmd.exe", ["/c", script], { detached: true, stdio: "ignore", windowsHide: true, cwd: tmpdir() }).unref());
+    hidden.unref();
     // The script works from this folder after the app has closed, so it is left for it.
     keep = true;
     return null;
