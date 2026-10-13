@@ -26,9 +26,10 @@ export class SongSound {
 
   /**
    * Plays the song from `from` to `until` (seconds into it), starting `wait` seconds from now, at
-   * `speed` times its own pace.
+   * `speed` times its own pace. With `shape`, it is eased in and faded out as a finished video
+   * has it: { rise: [from, to], fall: [from, to] }, seconds into the song.
    */
-  play({ from, until = this.length, wait = 0, speed = 1 }) {
+  play({ from, until = this.length, wait = 0, speed = 1, shape = null }) {
     this.stop();
     const start = Math.max(0, from), end = Math.min(this.length, until);
     if (!(end - start > 0.005)) return;
@@ -38,10 +39,11 @@ export class SongSound {
     const volume = new GainNode(audio, { gain: SongSound.muted ? 0 : 1 });
     source.connect(volume).connect(audio.destination);
     const when = audio.currentTime + Math.max(0, wait);
+    if (shape && !SongSound.muted) loudness(volume.gain, shape, { when, start, speed });
     source.start(when, start, end - start);
     source.onended = () => { if (this.source === source) this.source = this.going = null; };
     this.source = source;
-    this.going = { when, from: start, until: end, speed };
+    this.going = { when, from: start, until: end, speed, shape };
   }
 
   stop() {
@@ -75,6 +77,22 @@ export class SongSound {
     const now = this.position();
     if (now === null || wanted < this.going.from - 0.001 || Math.abs(now - wanted) < 0.02) return;
     const audio = output();
-    this.play({ from: wanted + (audio.outputLatency || audio.baseLatency || 0) * speed, until, speed });
+    this.play({ from: wanted + (audio.outputLatency || audio.baseLatency || 0) * speed, until, speed, shape: this.going.shape });
+  }
+}
+
+/** How loud a shaped song is at a moment of it: rising to full, then falling to nothing. */
+function level({ rise, fall }, at) {
+  const up = rise[1] > rise[0] ? Math.min(1, Math.max(0, (at - rise[0]) / (rise[1] - rise[0]))) : 1;
+  const down = fall[1] > fall[0] ? Math.min(1, Math.max(0, (fall[1] - at) / (fall[1] - fall[0]))) : 1;
+  return up * down;
+}
+
+/** Sets a song's loudness to follow its shape from wherever in the song it starts. */
+function loudness(gain, shape, { when, start, speed }) {
+  const clock = (at) => when + (at - start) / speed;
+  gain.setValueAtTime(level(shape, start), when);
+  for (const at of [shape.rise[1], shape.fall[0], shape.fall[1]].sort((a, b) => a - b)) {
+    if (at > start) gain.linearRampToValueAtTime(level(shape, at), clock(at));
   }
 }

@@ -186,6 +186,27 @@ async function editor(tools) {
     // pausing parks on the one playing: so it may be a little ahead of the one read, never behind.
     say(played.during > played.from + 20 && !played.playing && played.parked >= played.during - 1 && played.parked <= played.during + 6, "it plays, and parks on a frame when paused", `from ${played.from}, at ${played.during} after 1.2 s, parked on ${played.parked}${played.sounding ? ", with its song" : ""}`);
 
+    // Preview plays the finished video: from where it starts to where it ends, wherever the playhead was.
+    const previewed = await js(`
+      const e = window.hangar_.app.editor, wait = (milliseconds) => new Promise((done) => setTimeout(done, milliseconds));
+      const kept = { videoStart: e.edit.videoStart, videoEnd: e.edit.videoEnd };
+      e.edit.videoStart = e.seconds(e.markers[1]);
+      e.edit.videoEnd = e.edit.videoStart + 1;
+      e.show(0);
+      for (let tries = 0; tries < 100 && !e.settled; tries += 1) await wait(20);
+      e.preview();
+      const started = { previewing: Boolean(e.previewing), frame: e.frame, button: document.querySelector('[data-probe="ed preview"]')?.textContent ?? null };
+      await wait(500);
+      const midway = e.frame;
+      for (let tries = 0; tries < 200 && e.playing; tries += 1) await wait(20);
+      for (let tries = 0; tries < 100 && !e.settled; tries += 1) await wait(20);
+      const result = { started, midway, playing: e.playing, previewing: e.previewing, parked: e.frame, from: e.frameAt(e.edit.videoStart), to: e.frameAt(e.edit.videoEnd - 0.5 / e.fps.value), button: document.querySelector('[data-probe="ed preview"]')?.textContent ?? null };
+      Object.assign(e.edit, kept);
+      e.drawSide?.();
+      return result;`);
+    say(previewed.started.previewing && previewed.started.frame === previewed.from && previewed.started.button === "Stop" && previewed.midway > previewed.from && previewed.midway <= previewed.to && !previewed.playing && previewed.previewing === null && previewed.parked === previewed.to && previewed.button === "Preview",
+      "Preview plays the finished video from its start, and stops on its last frame", `frames ${previewed.from} to ${previewed.to}: started on ${previewed.started.frame}, at ${previewed.midway} after 0.5 s, stopped on ${previewed.parked}`);
+
     // A song: chosen, listened to, a drop put on the start gate.
     const songs = await js(`return window.hangar_.app.editor.songs`);
     if (say(songs.length > 0, "the library's songs are offered", songs.join(", "))) {
@@ -202,6 +223,18 @@ async function editor(tools) {
       say(placed.silent.song === null && !placed.silent.sound, "No music takes the song away");
       say(placed.length > 1 && placed.tempo > 0, "the song is read and listened to", `${placed.length.toFixed(2)} s, ${placed.tempo?.toFixed(1)} beats a minute, ${placed.spots} drop${placed.spots === 1 ? "" : "s"}`);
       if (placed.spot !== undefined) say(placed.gate === 0 && Math.abs(placed.start + placed.spot - placed.crossing) < 0.0006, "a drop is put on the start gate", `the song starts ${placed.start} s into the clip`);
+
+      // Its preview has the music the finished video has: the same part of the song, faded out at its end.
+      const shaped = await js(`
+        const e = window.hangar_.app.editor;
+        e.preview();
+        await new Promise((done) => setTimeout(done, 300));
+        const going = e.sound?.going, plan = e.previewing?.music ?? null;
+        const result = { plan, going: going && { from: going.from, until: going.until, shape: going.shape } };
+        e.pause();
+        return result;`);
+      say(Boolean(shaped.plan) && Boolean(shaped.going) && Math.abs(shaped.going.until - shaped.plan.to) < 0.001 && shaped.going.from >= shaped.plan.from - 0.001 && shaped.going.shape?.fall[1] === shaped.plan.to && shaped.going.shape.fall[0] === shaped.plan.to - shaped.plan.fade,
+        "with a song, the preview plays the part of it the finished video has, faded out at its end", shaped.plan ? `${shaped.plan.from.toFixed(2)} s to ${shaped.plan.to.toFixed(2)} s into the song` : "no music planned");
 
       // The sound wave window.
       const wave = await js(`

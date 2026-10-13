@@ -9,6 +9,7 @@ import { lookFor, drawCornerTimer, picture, typefaceReady } from "../timer.js";
 import { SongSound } from "../sound.js";
 import { Race } from "../../shared/timing.js";
 import { clock, lapTime } from "../../shared/panel.js";
+import { musicPlan } from "../../shared/video.js";
 
 /** How long before lap 1 and after the finish a finished video runs when the stretch is left to the app. */
 const leadIn = 3, hold = 8;
@@ -59,6 +60,8 @@ export class Editor {
     /** The playhead, as a frame of the clip. */
     this.frame = 0;
     this.playing = false;
+    /** While the finished video is being previewed: the stretch it covers, and its music's plan. */
+    this.previewing = null;
     this.speed = 1;
     /** Gate crossings as frames of the clip, in order. The first starts lap 1. */
     this.markers = [];
@@ -319,11 +322,35 @@ export class Editor {
     if (this.phase !== "ready") return;
     if (this.playing) return this.pause();
     if (this.frame >= this.frameCount - 1) this.show(0);
+    this.run();
+  }
+
+  /**
+   * Plays the finished video as it will be: from where it starts to where it ends, whatever the
+   * playhead was on, with the music cut, eased in and faded out as the video has it. Pressed again,
+   * or Space, stops it.
+   */
+  preview() {
+    if (this.phase !== "ready") return;
+    const was = this.previewing;
+    this.pause();
+    const stretch = this.stretch;
+    if (was || !stretch) return;
+    this.show(this.frameAt(stretch.from));
+    const song = this.songSpan;
+    const plan = song && musicPlan({ start: stretch.from, end: stretch.to, songLength: this.songLength, songStart: song.from, musicIn: this.edit.musicIn, musicOut: this.edit.musicOut });
+    this.run({ ...stretch, music: plan ?? null });
+  }
+
+  /** Plays on from the playhead: the whole clip, or with `preview`, the finished video's stretch of it. */
+  run(preview = null) {
     this.playing = true;
+    this.previewing = preview;
     const video = this.video;
     video.playbackRate = this.speed;
     video.play().catch(() => {});
-    this.startMusic(this.seconds(this.frame));
+    if (preview) this.startPreviewMusic(preview.from);
+    else this.startMusic(this.seconds(this.frame));
     const each = (_now, shown) => {
       if (!this.playing || app.editor !== this) return;
       this.tick(shown.mediaTime);
@@ -334,6 +361,7 @@ export class Editor {
       // It ran off the end of the clip.
       if (!this.playing) return;
       this.playing = false;
+      this.previewing = null;
       this.sound?.stop();
       this.show(this.frameCount - 1);
       this.drawTransport();
@@ -353,9 +381,24 @@ export class Editor {
     this.sound.play({ from: start - song.from, until: until - song.from, wait: (start - clipTime) / this.speed, speed: this.speed });
   }
 
+  /** The music of a preview from a moment of the clip on: the part of the song the finished video
+   *  has, shaped as it has it. */
+  startPreviewMusic(clipTime) {
+    const plan = this.previewing?.music, song = this.songSpan;
+    if (!plan || !song) return;
+    // The song's own time, and the clip's, are `song.from` apart.
+    const from = Math.max(plan.from, clipTime - song.from);
+    if (!(plan.to - from > 0.05)) return;
+    this.sound.play({
+      from, until: plan.to, wait: Math.max(0, song.from + from - clipTime) / this.speed, speed: this.speed,
+      shape: { rise: [plan.from, plan.from + plan.ramp], fall: [plan.to - plan.fade, plan.to] },
+    });
+  }
+
   pause() {
     if (!this.playing) return;
     this.playing = false;
+    this.previewing = null;
     this.video.pause();
     this.sound?.stop();
     // Park on the frame that is showing.
@@ -369,10 +412,18 @@ export class Editor {
 
   tick(seconds) {
     if (!this.playing) return;
+    // A preview stops where the finished video does, on its last frame.
+    const preview = this.previewing;
+    if (preview && seconds >= preview.to - 0.5 / this.fps.value) {
+      this.pause();
+      this.show(this.frameAt(preview.to - 0.5 / this.fps.value));
+      return;
+    }
     const now = this.frameAt(seconds);
     // The song follows the picture, not the other way about.
     const song = this.songSpan;
-    if (song && this.sound.playing) this.sound.follow(seconds - song.from, { until: Math.min(song.to, this.duration, this.edit.musicOut ?? Infinity) - song.from, speed: this.speed });
+    const until = preview ? preview.music?.to ?? 0 : Math.min(song?.to ?? 0, this.duration, this.edit.musicOut ?? Infinity) - (song?.from ?? 0);
+    if (song && this.sound.playing) this.sound.follow(seconds - song.from, { until, speed: this.speed });
     if (now !== this.frame) {
       this.frame = now;
       this.keepInView(true);
@@ -385,7 +436,8 @@ export class Editor {
     if (this.playing) {
       this.video.playbackRate = speed;
       this.sound?.stop();
-      this.startMusic(this.video.currentTime);
+      if (this.previewing) this.startPreviewMusic(this.video.currentTime);
+      else this.startMusic(this.video.currentTime);
     }
     this.drawTransport();
   }
@@ -825,6 +877,7 @@ export class Editor {
     if (!command && !event.altKey && letter === "b") return take(), this.addSongMarkHere();
     if (!command && !event.altKey && letter === "i") return take(), this.setVideoStart();
     if (!command && !event.altKey && letter === "o") return take(), this.setVideoEnd();
+    if (!command && !event.altKey && letter === "p") return take(), this.preview();
     if (command && letter === "z") return take(), this.undo();
   }
 
@@ -882,7 +935,7 @@ export class Editor {
       h("div.ed-overview-holder", this.overview),
       h("div.ed-lanes-row", h("div.ed-lane-names", h("span", { style: { top: `${lanes.lapsTop + 9}px` } }, "LAPS"), h("span", { style: { top: `${lanes.videoTop + 3}px` } }, "VIDEO"), h("span", { style: { top: `${lanes.musicTop + 15}px` } }, "MUSIC")), this.lanes),
       h("div.ed-hints",
-        h("span.ed-hint", `Space play  ·  ← → one frame  ·  M mark  ·  ${keys("delete")} remove  ·  ${keys("cmd", "left")} ${keys("cmd", "right")} move marker  ·  ↑ ↓ markers  ·  I O video start, end  ·  B mark the music  ·  double-click the music for its sound wave  ·  right-click for more`),
+        h("span.ed-hint", `Space play  ·  ← → one frame  ·  M mark  ·  ${keys("delete")} remove  ·  ${keys("cmd", "left")} ${keys("cmd", "right")} move marker  ·  ↑ ↓ markers  ·  I O video start, end  ·  P preview the video  ·  B mark the music  ·  double-click the music for its sound wave  ·  right-click for more`),
         h("span.spacer"),
         secondary("Whole clip", () => this.showAll()),
         this.runButton = secondary("The run", () => this.showRun()),
@@ -941,6 +994,10 @@ export class Editor {
       secondary("+1 s", () => this.step(second), { help: `Forward one second (${keys("alt", "right")})` }),
       button("skipForward", "Next marker (↓)", () => this.jump(1)),
       h("span.spacer"),
+      secondary(this.previewing ? "Stop" : "Preview", () => this.preview(), {
+        icon: this.previewing ? "pause" : "film", disabled: !this.stretch, probe: "ed preview",
+        help: "Play the finished video as it will be: from its start to its end, with its music (P)",
+      }),
       secondary(speeds.find(([speed]) => speed === this.speed)?.[2] ?? "1×", (event) => menu(event.currentTarget, speeds.map(([speed, title]) => ({ title, action: () => this.setSpeed(speed) }))), { help: "Playback speed" }),
       secondary("", () => {
         this.showsTimer = !this.showsTimer;
@@ -998,6 +1055,7 @@ export class Editor {
         secondary("Start here", () => this.setVideoStart(), { help: "Start the finished videos on this frame (I)" }),
         secondary("End here", () => this.setVideoEnd(), { help: "End the finished videos on this frame (O)" }),
         secondary("Automatic", () => this.automaticVideo(), { disabled: !custom }),
+        secondary("Preview", () => this.preview(), { disabled: !stretch, help: "Play the finished video as it will be: from its start to its end, with its music (P)" }),
       ),
     );
 

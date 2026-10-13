@@ -2,6 +2,11 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.20.0 (13 October 2026)
+
+- **Preview** in Markers & music plays the finished video as it will be: from where the video starts to where it ends, wherever the playhead was, and it stops on the video's last frame. The music is the part of the song the video has, eased in and faded out at the end as it is in the video. It is beside the playback speed, and under Finished video, and P does the same. Press it again, or Space, to stop.
+- Play still plays the whole clip from the playhead, for marking laps.
+
 ## v0.19.0 (13 October 2026)
 
 - Upload to YouTube, YouTube Shorts, TikTok and Instagram from the app. In a run's files, each finished video has an **Upload** button, and the menu of the run's video button has the same: the 16:9 video goes to YouTube, the 9:16 video to YouTube Shorts, TikTok or Instagram. The **Upload** tile on the first screen takes any video.
