@@ -56,7 +56,7 @@ npm test            # its tests
 | `Hangar/test/` | The tests. Their pilots, times and links are made up |
 | `VERSION`, `CHANGELOG.md` | The version number, used by everything, and what changed in each version |
 | `package.sh`, `publish.sh` | Package both apps for release, and start a release |
-| `.github/workflows/release.yml` | Builds and publishes a release when a version tag is pushed, or when it is run by hand with Publish ticked |
+| `.github/workflows/release.yml` | Builds a release, has the Mac app try itself out on a Mac and the Windows app on Windows, and publishes it when both pass: when a version tag is pushed, or when it is run by hand with Publish ticked |
 | `Dashboard/`, `Lap Timer/` | The first Mac app, in Swift, as it was at v0.12.1. Releases are no longer built from it. A copy of it updates into the new app by itself |
 
 The library is a folder, `FPV Hangar` in your Movies or Videos folder unless you choose another. Each event is a folder in it with its tracks inside, and a track's recordings, markers and finished videos are plain files. `dashboard.json` and `settings.json` hold what the app remembers.
