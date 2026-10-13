@@ -1270,7 +1270,8 @@ async function updating() {
     const marked = copy(now, fresh) && mark(fresh, { numbered: later });
     const zipped = mac
       ? run("/usr/bin/ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", staged, join(feed, archive)])
-      : run("tar.exe", ["-a", "-cf", join(feed, archive), "--options", "zip:compression=store", "-C", dirname(staged), basename(staged)]);
+      // As the Windows download is packed: the app's folder at the top (see package.sh).
+      : run("tar.exe", ["-a", "-cf", join(feed, archive), "--options", "zip:compression=store", "-C", staged, basename(fresh)]);
     if (!say(marked && zipped.status === 0 && existsSync(join(feed, archive)), `the same again is packed as v${later}`, zipped.status === 0 ? `${Math.round(statSync(join(feed, archive)).size / 2 ** 20)} MB` : (zipped.stderr || zipped.error?.message || "").slice(-300))) return;
     const sum = createHash("sha256");
     for await (const piece of createReadStream(join(feed, archive))) sum.update(piece);
