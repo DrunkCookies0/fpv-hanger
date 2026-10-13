@@ -2,6 +2,12 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.23.0 (13 October 2026)
+
+- Each run shows how many views its YouTube and YouTube Shorts videos have: **on YouTube · 1,234 views** under its laps, and the likes and comments too under **Uploaded** in its files.
+- It needs a YouTube key of your own, which is free: **Views on YouTube** in Pilot & settings has the three steps for making one in Google Cloud, and buttons that open the pages. Paste the key and press **Use this key**; YouTube is asked first whether it works. The key only reads what anyone can see on YouTube, and nothing is signed in to.
+- The counts are read when you open a race's page, at most every ten minutes, and again whenever you press **Refresh**. Without a key, a run with a YouTube link says where to add one.
+
 ## v0.22.0 (13 October 2026)
 
 - A run keeps a log of where its videos went up. Under **Uploaded**, at the bottom of a run's files, each site the run is on has its link, with when it was kept, and **Open**, **Copy link**, change and take off. The run itself says **on YouTube**, **on TikTok** and so on under its laps; click one to open the video.

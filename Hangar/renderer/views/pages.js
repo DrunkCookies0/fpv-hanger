@@ -3,6 +3,7 @@
 import { app, ask, goBack, backTitle, render, eventFolder, trackName, loadBoards } from "../core.js";
 import { h, icon, label, primary, secondary, plain, field, when, comingSoonBadge } from "../ui.js";
 import { placeOf, ordinal, sheet as boardSheet } from "../../shared/leaderboard.js";
+import { keyPages } from "../../shared/counts.js";
 import { bin, fileBrowser, season, comingSoon, guide } from "../words.js";
 import * as act from "../actions.js";
 import { showNote, showSetUp } from "./notes.js";
@@ -263,6 +264,60 @@ function versionCard() {
   );
 }
 
+/** What trying the YouTube key last said: { kind, text }, or null. */
+let youtubeSaid = null;
+
+/** The pilot's own key for YouTube's data service, for each run's views, likes and comments. */
+function youtubeCard() {
+  const saved = app.state.settings.youtubeKey ?? "";
+  const typed = () => app.drafts.get("youtubeKey") ?? saved;
+  let use = null;
+  const save = async () => {
+    const key = typed().trim();
+    use.disabled = true;
+    youtubeSaid = { kind: "dim", text: "Trying it with YouTube…" };
+    render();
+    const answer = await ask("setYouTubeKey", key);
+    if (answer?.state) app.state = answer.state;
+    if (answer?.problem) youtubeSaid = { kind: "warn", text: answer.problem };
+    else {
+      youtubeSaid = { kind: "good", text: key === "" ? "The key is taken out." : "The key works. Each run's YouTube videos show their views." };
+      app.drafts.delete("youtubeKey");
+      app.counts.clear();
+    }
+    render();
+  };
+  use = secondary("Use this key", save, { disabled: typed() === saved, probe: "use youtube key" });
+  const step = (number, text) => h("div.step", h("span.step-number", String(number)), h("div.step-text", text));
+  return h("div.card.spaced",
+    label("VIEWS ON YOUTUBE"),
+    h("p.dim.small", "With a key of your own from Google, each run shows how many views its YouTube and Shorts videos have, and its files show their likes and comments too. It's free, and the key only reads what anyone can see on YouTube: nothing is signed in to."),
+    h("div.row.form-row",
+      h("input.field.grow", {
+        type: "text", key: "youtubeKey", value: typed(), spellcheck: false, autocomplete: "off", placeholder: "Paste your YouTube key",
+        oninput: (event) => {
+          app.drafts.set("youtubeKey", event.target.value);
+          use.disabled = event.target.value === saved;
+        },
+        onkeydown: (event) => { if (event.key === "Enter" && !use.disabled) save(); },
+      }),
+      use,
+    ),
+    youtubeSaid ? h(`p.small.${youtubeSaid.kind}`, youtubeSaid.text) : saved !== "" && h("p.small.good", "A key is in. Each run's YouTube videos show their views."),
+    saved === "" && [
+      h("div.key-steps",
+        step(1, "Press Turn on the YouTube Data API. Google Cloud opens in your browser: sign in with your Google account, make a project if it asks (any name will do, such as FPV Hangar), and press Enable."),
+        step(2, "Press Make a key, then Create credentials and API key. Copy the key it shows."),
+        step(3, "Paste it above and press Use this key."),
+      ),
+      h("div.row.tight",
+        secondary("Turn on the YouTube Data API", () => act.openLink(keyPages.service), { icon: "arrowUpRight" }),
+        secondary("Make a key", () => act.openLink(keyPages.keys), { icon: "arrowUpRight" }),
+      ),
+    ],
+  );
+}
+
 export function settings() {
   const state = app.state;
   const corners = [["tl", "Top left"], ["tr", "Top right"], ["bl", "Bottom left"], ["br", "Bottom right"]];
@@ -304,6 +359,7 @@ export function settings() {
       timerPreview(),
       h("p.dim.small", "The colour is for the timer's highlights on your videos: the lap bars, the labels, your ID, and the fill when your time is set. The app itself stays yellow."),
     ),
+    youtubeCard(),
     h("div.card",
       label("LIBRARY"),
       h("div.path.dim", state.library),

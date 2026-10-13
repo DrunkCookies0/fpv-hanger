@@ -255,6 +255,10 @@ code { font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace; backgroun
 .run-uploads { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--stroke); }
 .run-uploads-head { display: flex; align-items: center; gap: 10px; }
 .run-upload-link { user-select: text; cursor: text; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-count { margin-left: 10px; font: 600 12px var(--face); color: var(--dim); font-variant-numeric: tabular-nums; }
+.run-count.views { color: var(--good); }
+.run-counts-note { margin-top: 4px; }
+.key-steps { display: flex; flex-direction: column; gap: 10px; }
 .run-time { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex: none; }
 .run-best { font: 900 30px/1.15 var(--face); font-variant-numeric: tabular-nums; }
 .run-best.first { color: var(--accent); }

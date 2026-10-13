@@ -12,7 +12,7 @@
 // entry form). On YouTube, the link is taken in by itself when the pilot copies it there and comes
 // back. While the upload is open it takes over the window, the way a tool does.
 
-import { app, ask, hangar, render, loadTrack } from "../core.js";
+import { app, ask, hangar, render, loadTrack, loadCounts } from "../core.js";
 import { h, icon, label, primary, secondary, plain, fill } from "../ui.js";
 import { confirm, menu, showSheet } from "../sheets.js";
 import { fileBrowser } from "../words.js";
@@ -312,8 +312,8 @@ class UploadView {
     window.removeEventListener("resize", this.onResize);
     fill(document.getElementById("tool"));
     document.getElementById("stage").removeAttribute("inert");
-    // A link that was kept shows on the run's page, and in its entry form.
-    if (this.video.track) loadTrack(this.video.track).then(render);
+    // A link that was kept shows on the run's page, with its views, and in its entry form.
+    if (this.video.track) loadTrack(this.video.track).then(render).then(() => loadCounts(this.video.track));
     else render();
     this.after?.();
   }

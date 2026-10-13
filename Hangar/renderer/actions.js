@@ -1,6 +1,6 @@
 // What the buttons do: the things that change the library, each asking first where that is called for.
 
-import { app, ask, take, say, render, go, settle, loadTrack, loadForm, loadCards, trackName, hangar } from "./core.js";
+import { app, ask, take, say, render, go, settle, loadTrack, loadForm, loadCards, loadCounts, trackName, hangar } from "./core.js";
 import { question, confirm, showSheet } from "./sheets.js";
 import { h, icon, primary, secondary } from "./ui.js";
 import { bin, Bin } from "./words.js";
@@ -364,6 +364,7 @@ export async function keepUploadLink(track, run, site) {
   }
   await loadTrack(track);
   render();
+  loadCounts(track);
 }
 
 /** Takes a site's link off a run, asking first. */

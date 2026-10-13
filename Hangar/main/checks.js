@@ -33,8 +33,10 @@
 //            itself, named, and not into one only for pictures, a page that is still busy holds
 //            the pilot back from leaving, and from closing the window, until they say so, and
 //            Google turning away a sign-in is told. A link pasted on TikTok's page, or added on
-//            the run afterwards, is kept with the run. Nothing of YouTube's, TikTok's,
-//            Instagram's or Google's is called on.
+//            the run afterwards, is kept with the run. With a key, a run's YouTube video shows
+//            its views, likes and comments, from a made-up service standing in for YouTube's; a
+//            key YouTube doesn't know isn't kept. Nothing of YouTube's, TikTok's, Instagram's or
+//            Google's is called on.
 
 import { app, clipboard, session } from "electron";
 import { spawn, spawnSync } from "node:child_process";
@@ -700,7 +702,23 @@ async function uploads(tools) {
     made.push(file);
   }
   const [landscape, upright] = made;
-  const kept = library.state(track).links?.[run.name], logged = library.state(track).uploads?.[run.name], ownBefore = library.store.uploadLines;
+  const kept = library.state(track).links?.[run.name], logged = library.state(track).uploads?.[run.name], ownBefore = library.store.uploadLines, keyBefore = library.settings.youtubeKey;
+  // YouTube's data service, made up: it knows one key, and one video.
+  const youtube = createServer((asked, answer) => {
+    const url = new URL(asked.url, "http://here");
+    const reply = (status, body) => {
+      answer.writeHead(status, { "content-type": "application/json" });
+      answer.end(JSON.stringify(body));
+    };
+    const key = url.searchParams.get("key");
+    if (key === "used-up-key") return reply(403, { error: { code: 403, errors: [{ reason: "quotaExceeded" }] } });
+    if (key !== "made-up-key") return reply(400, { error: { code: 400, message: "API key not valid. Please pass a valid API key.", details: [{ reason: "API_KEY_INVALID" }] } });
+    if (url.searchParams.get("chart") === "mostPopular") return reply(200, { items: [{ id: "Popular_123" }] });
+    const ids = (url.searchParams.get("id") ?? "").split(",");
+    reply(200, { items: ids.filter((id) => id === "NewVideo_12").map((id) => ({ id, statistics: { viewCount: "1234", likeCount: "56", commentCount: "7" } })) });
+  });
+  await new Promise((done) => youtube.listen(0, "127.0.0.1", done));
+  api.useCountsStandIn(`http://127.0.0.1:${youtube.address().port}/youtube/v3/`);
   const named = [];
   const frame = () => js(`return (() => { const at = document.querySelector(".upload .tool-frame")?.getBoundingClientRect(); return at && { x: Math.round(at.left), y: Math.round(at.top), width: Math.round(at.width), height: Math.round(at.height) }; })()`);
   const until = async (test, tries = 60) => {
@@ -869,6 +887,27 @@ ${run.name}`)}); await window.showForSnapshot(${JSON.stringify(`files:${track}`)
     await api.keepUpload(track, run.name, "tiktok", "");
     say(Boolean(wrongSite.problem) && library.state(track).uploads?.[run.name]?.instagram?.link === gramLink && !library.state(track).uploads?.[run.name]?.tiktok, "another site's link isn't kept, and a link taken off goes", wrongSite.problem ?? "kept");
 
+    // Without a key, the run says where to get one for its YouTube views.
+    const keyless = await api.youtubeCounts(track);
+    const asksForKey = await until(() => js(`return Boolean(document.querySelector('[data-probe="add youtube key"]'))`), 20);
+    say(keyless.needsKey && Boolean(asksForKey), "without a YouTube key, the run says where to add one", JSON.stringify(keyless));
+    // A key YouTube doesn't know isn't kept. One it knows, put in on Pilot & settings, is.
+    const wrongKey = await api.setYouTubeKey("not-a-key");
+    await js(`await window.showForSnapshot("settings")`);
+    await js(`const box = document.querySelector('[data-key="youtubeKey"]'); box.value = "made-up-key"; box.dispatchEvent(new Event("input")); document.querySelector('[data-probe="use youtube key"]').click()`);
+    const keyKept = await until(() => library.settings.youtubeKey === "made-up-key", 40);
+    const keySaid = await until(() => js(`return document.querySelector(".card .small.good")?.textContent ?? null`), 20);
+    say(/doesn't know that key/.test(wrongKey.problem ?? "") && Boolean(keyKept) && /key works/.test(keySaid ?? ""), "a YouTube key YouTube doesn't know isn't kept, and one it knows is", `${wrongKey.problem} / ${keySaid}`);
+    // The run shows its views, and its files the likes and comments too.
+    await js(`await window.showForSnapshot(${JSON.stringify(`files:${track}`)})`);
+    const viewsShown = await until(() => js(`return document.querySelector('[data-probe="uploaded youtube ${run.name}"]')?.textContent ?? null`).then((text) => (text?.includes("views") ? text : null)), 40);
+    const countsShown = await js(`return [...document.querySelectorAll(".run-uploads .run-count")].map((one) => one.textContent)`);
+    say(viewsShown === "on YouTube · 1,234 views" && JSON.stringify(countsShown) === JSON.stringify(["1,234 views", "56 likes", "7 comments"]), "the run shows its YouTube video's views, and its files the likes and comments", `${viewsShown} / ${JSON.stringify(countsShown)}`);
+    // A key that has used up its day says so.
+    library.settings.youtubeKey = "used-up-key";
+    const usedUp = await api.youtubeCounts(track, { again: true });
+    say(/used up/.test(usedUp.problem ?? ""), "a key that has used up its day says so", usedUp.problem ?? "nothing said");
+
     // Only the sites it knows, and only videos in the library or chosen by the pilot.
     const place0 = { x: 0, y: 0, width: 10, height: 10 };
     say((await api.openUpload("elsewhere", place0, { file: landscape })).problem !== null && api.uploadIsOpen() === null, "only the sites the app knows can be opened");
@@ -876,6 +915,11 @@ ${run.name}`)}); await window.showForSnapshot(${JSON.stringify(`files:${track}`)
   } finally {
     await api.closeUpload({ force: true });
     api.useUploadStandIn(null);
+    api.useCountsStandIn(null);
+    youtube.close();
+    if (keyBefore === undefined) delete library.settings.youtubeKey;
+    else library.settings.youtubeKey = keyBefore;
+    library.saveSettings();
     instagram.protocol.unhandle("https");
     await js(`await window.hangar_.app.tool?.close(); document.querySelectorAll("#sheets .backdrop, .menu").forEach((one) => one.remove())`);
     library.update(track, (state) => {

@@ -22,6 +22,8 @@ import { latest, install, checkIsDue } from "./updates.js";
 import { makeTools } from "./tools.js";
 import { makeUploads } from "./uploads.js";
 import { sites, linkFor, uploadsOf, videoLinkIn } from "../shared/uploads.js";
+import { makeCounts } from "./counts.js";
+import { videoIdOf } from "../shared/counts.js";
 import { makePrograms } from "./components.js";
 import { makeDriveCopy } from "./drive.js";
 import { measure, moveFolder } from "./move.js";
@@ -129,6 +131,8 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
   const outside = makeTools({ window, tell, still: quiet && !process.argv.includes("--live") }), kept = makePrograms({ tell, quiet });
   /** A finished video going up through a site's own upload page. Its link there is kept with its run. */
   const uploads = makeUploads({ window, tell, quiet, staging: join(cache, "Uploading"), still: quiet && !process.argv.includes("--live"), keepLink: (track, run, site, link) => api.keepUpload(track, run, site, link ?? "") });
+  /** How many views, likes and comments the runs' YouTube videos have, with the pilot's own key. */
+  const counts = makeCounts({ key: () => library.settings.youtubeKey ?? "", quiet });
   /** A video from anywhere that the pilot chose to upload. Any other has to be in the library. */
   let chosenToUpload = null;
   /** The copy of the library kept in Google Drive, when the pilot has asked for one. */
@@ -861,6 +865,35 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
       return uploads.openUpload(site, place, { file: path, name, track: ofRun ? track : null, run: ofRun ? run : null, link });
     },
 
+    /**
+     * How many views, likes and comments the YouTube and YouTube Shorts videos of a track's runs
+     * have: { counts: { [video id]: { views, likes, comments, read } }, problem, needsKey }.
+     * YouTube is only asked again after ten minutes, or with `again`.
+     */
+    async youtubeCounts(track, { again = false } = {}) {
+      if (!library.tracks.includes(track)) return { counts: {}, problem: null, needsKey: false };
+      const state = library.state(track);
+      const runs = Object.keys({ ...(state.uploads ?? {}), ...(state.links ?? {}) });
+      const ids = runs.flatMap((run) => {
+        const done = uploadsOf(state, run);
+        return ["youtube", "shorts"].map((site) => videoIdOf(done[site]?.link)).filter(Boolean);
+      });
+      if (ids.length === 0) return { counts: {}, problem: null, needsKey: false };
+      return counts.countsOf(ids, { again });
+    },
+
+    /** Keeps the pilot's YouTube key, once YouTube has said it works. An empty one takes it away. */
+    async setYouTubeKey(key) {
+      const mine = String(key ?? "").trim();
+      const problem = await counts.tryKey(mine);
+      if (problem) return { problem, state: api.state() };
+      if (mine === "") delete library.settings.youtubeKey;
+      else library.settings.youtubeKey = mine;
+      library.saveSettings();
+      counts.forget();
+      return { problem: null, state: api.state() };
+    },
+
     /** Lines of the pilot's own that go on every upload's description, such as their gear or links. */
     setUploadLines(text) {
       library.store.uploadLines = String(text ?? "");
@@ -1306,6 +1339,9 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
     summaries.clear();
     await api.refresh();
   }
+
+  // Only a copy that is trying itself out can stand a page of its own in for YouTube's service.
+  if (quiet) api.useCountsStandIn = (address) => counts.useStandIn(address);
 
   summariseAll();
   drive.start();

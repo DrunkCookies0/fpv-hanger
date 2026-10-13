@@ -12,6 +12,10 @@ import { driveWord } from "./drive.js";
 import { addClips, cardNote } from "./cards.js";
 import { uploadItems, uploadMenu, aboutRun } from "./upload.js";
 import { sites, uploadsOf } from "../../shared/uploads.js";
+import { videoIdOf, countWords } from "../../shared/counts.js";
+
+/** A video's counts on YouTube, as last read for a track's page, or null. */
+const countsOf = (track, link) => app.counts.get(track)?.counts?.[videoIdOf(link)] ?? null;
 
 const busy = () => Boolean(app.state.job);
 
@@ -240,6 +244,12 @@ function runFiles(track, data, run) {
 function runUploads(track, data, run) {
   const done = uploadsOf(data.state, run.name);
   const left = Object.keys(sites).filter((site) => !done[site]);
+  const read = app.counts.get(track);
+  const onYouTube = Boolean(done.youtube || done.shorts);
+  const counted = (link) => {
+    const counts = countsOf(track, link);
+    return counts ? [countWords(counts.views, "view"), countWords(counts.likes, "like"), countWords(counts.comments, "comment")].filter(Boolean) : [];
+  };
   return h("div.run-uploads",
     h("div.run-uploads-head",
       label("UPLOADED"),
@@ -250,7 +260,9 @@ function runUploads(track, data, run) {
     ),
     Object.entries(done).map(([site, { link, at }]) => h("div.file",
       icon("upload", 14, { class: "file-icon" }),
-      h("div.file-words", h("div.file-name", sites[site].title), h("div.file-detail.run-upload-link", at ? `${link} · ${when(at)}` : link)),
+      h("div.file-words",
+        h("div.file-name", sites[site].title, ...counted(link).map((words, at) => h(`span.run-count${at === 0 ? ".views" : ""}`, words))),
+        h("div.file-detail.run-upload-link", at ? `${link} · ${when(at)}` : link)),
       h("span.spacer"),
       secondary("Open", () => act.openLink(link), { icon: "arrowUpRight", help: `Open it on ${sites[site].title}, in your browser.` }),
       secondary("Copy link", () => ask("copyText", link), { icon: "copies" }),
@@ -258,6 +270,11 @@ function runUploads(track, data, run) {
       secondary("", () => act.forgetUpload(track, run.name, site), { icon: "trash", help: "Take this link off the run. The video stays up.", "aria-label": `Take the link on ${sites[site].title} off this run` }),
     )),
     Object.keys(done).length === 0 && h("p.dim.small", "Nothing yet. Uploading from here keeps each video's link when you put it in, or add one you uploaded another way."),
+    // Views on YouTube need a key of the pilot's own.
+    onYouTube && read?.needsKey && h("div.row.tight.run-counts-note",
+      h("p.dim.small.grow", "See how many views, likes and comments it has on YouTube: add a YouTube key in Pilot & settings. It's free."),
+      secondary("Add a key", () => open({ name: "settings" }), { probe: "add youtube key" })),
+    onYouTube && read?.problem && h("p.small.warn", read.problem),
   );
 }
 
@@ -277,14 +294,17 @@ function runCard(track, data, run, rank) {
     run.song && h("span.run-note.accent", { help: "The finished videos use this as their sound, placed where you put it in Markers & music." }, icon("music"), run.song),
     run.coarseStep > 0 && h("span.run-note.warn", { help: `Every marker sits on a ${run.coarseStep}-frame step, so these times are approximate. Open Markers & music and move each one onto the exact frame of its gate crossing.` }, icon("warning"), "markers not on exact frames"),
     submitted && h("span.run-note.good", icon("seal"), `submitted ${submitted.time}`),
-    // Where its videos went up, each opening the video in the browser.
-    ...Object.entries(uploadsOf(data.state, run.name)).map(([site, { link }]) => h("button.run-note.good.run-uploaded", {
-      type: "button", probe: `uploaded ${site} ${run.name}`, help: `Open it on ${sites[site].title}: ${link}`,
-      onclick: (event) => {
-        event.stopPropagation();
-        act.openLink(link);
-      },
-    }, icon("upload"), `on ${sites[site].title}`)),
+    // Where its videos went up, each opening the video in the browser, with its views on YouTube.
+    ...Object.entries(uploadsOf(data.state, run.name)).map(([site, { link }]) => {
+      const views = countWords(countsOf(track, link)?.views, "view");
+      return h("button.run-note.good.run-uploaded", {
+        type: "button", probe: `uploaded ${site} ${run.name}`, help: `Open it on ${sites[site].title}: ${link}`,
+        onclick: (event) => {
+          event.stopPropagation();
+          act.openLink(link);
+        },
+      }, icon("upload"), `on ${sites[site].title}${views ? ` · ${views}` : ""}`);
+    }),
   ].filter(Boolean);
   const toggle = () => {
     if (isOpen) app.expanded.delete(id);

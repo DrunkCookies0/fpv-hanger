@@ -54,6 +54,8 @@ export const app = {
   boardsReading: false,
   /** The cards plugged in, as seen from the track that is showing: { track, cards }. */
   cards: null,
+  /** Each track's YouTube counts as last read: { counts: { [video id]: { views, likes, comments } }, problem, needsKey }. */
+  counts: new Map(),
 };
 
 /** Reads the season's leaderboards, again if told to, and draws the page when they arrive. */
@@ -128,6 +130,16 @@ export async function loadForm(track, again = false) {
   if (app.page.name === "track" && app.page.track === track) render();
 }
 
+/** Reads how many views its runs' YouTube videos have, for a track's page. YouTube is only asked
+ *  again after a while, unless `again`. */
+export async function loadCounts(track, again = false) {
+  const read = await ask("youtubeCounts", track, { again });
+  if (!read) return;
+  const before = JSON.stringify(app.counts.get(track) ?? null);
+  app.counts.set(track, read);
+  if (app.page.name === "track" && app.page.track === track && JSON.stringify(read) !== before) render();
+}
+
 /** Looks for a card from the goggles, for the track that is showing. The page is drawn again
  *  when what is plugged in, or what is new on it, has changed. */
 export async function loadCards(track, again = false) {
@@ -148,6 +160,7 @@ export function go(page) {
     if (app.state) app.state.lastTrack = page.track;
     loadTrack(page.track).then(() => loadForm(page.track));
     loadCards(page.track);
+    loadCounts(page.track);
   }
   // Drive may have been set up since the app was opened.
   if (page.name === "settings" && app.state?.drive?.kind === "off") {
@@ -206,6 +219,8 @@ export async function refresh({ quietly = false } = {}) {
     loadForm(app.page.track);
     // A card may have been plugged in while the pilot was elsewhere.
     loadCards(app.page.track, true);
+    // Pressing Refresh asks YouTube again; coming back to the window only when it's been a while.
+    loadCounts(app.page.track, !quietly);
   }
   render();
 }
