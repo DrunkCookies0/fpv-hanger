@@ -1217,7 +1217,7 @@ async function updating() {
       mkdirSync(inside, { recursive: true });
       const done = join(inside, "done.txt");
       writeFileSync(join(inside, "helper.cmd"), `@echo off\r\necho it ran> "%~dp0done.txt"\r\n`);
-      startScript(join(inside, "helper.cmd"));
+      await startScript(join(inside, "helper.cmd"));
       for (let tries = 0; tries < 60 && !existsSync(done); tries += 1) await pause(500);
       say(existsSync(done), "the update's helper is started out of sight, and runs", existsSync(done) ? readFileSync(done, "utf8").trim() : "it never ran");
     } finally {
@@ -1299,7 +1299,10 @@ async function updating() {
     const ended = await new Promise((done) => {
       // On Windows a program started from this one is held with it, which a copy of the app may not
       // start under. Started on its own, as the update starts the new version, it is free of that.
-      const child = spawn(program, ["--update-feed", address, "--check", "update", "--root", join(drill, "library"), "--user-data", join(drill, "memory"), "--report", report, "--drill-said", said, "--drill-aside", old, "--enable-logging=stderr"], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true, detached: !mac });
+      // The feed's address comes last: on Windows, Electron won't start at all (it leaves at once
+      // with -1) when anything follows an address on its command line, against links that would
+      // slip switches in.
+      const child = spawn(program, ["--check", "update", "--root", join(drill, "library"), "--user-data", join(drill, "memory"), "--report", report, "--drill-said", said, "--drill-aside", old, "--enable-logging=stderr", "--update-feed", address], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true, detached: !mac });
       for (const stream of [child.stdout, child.stderr]) stream.on("data", (piece) => { output = (output + piece).slice(-6000); });
       const timer = setTimeout(() => child.kill(), 240000);
       child.once("exit", (code) => {

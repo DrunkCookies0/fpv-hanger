@@ -33,17 +33,17 @@ export function isNewer(one, other) {
 }
 
 /**
- * How the app starts that script on Windows so that nothing shows. Started straight from the app,
- * on its own and with no window, cmd.exe has no console, so every program the script runs while it
- * waits (tasklist, find, ping, robocopy) opens a console window of its own, one after another.
- * PowerShell, started the same way, starts cmd.exe with a console whose window is hidden, and the
- * script's programs share that one. The command is given encoded, so no folder name can upset it.
- * Gives the program and what it is started with.
+ * How the app starts that script on Windows, so that it outlives the app and nothing of it shows.
+ * A program the app starts is ended along with the app, unless it is started on its own, and one
+ * started on its own has no console: then every program the script runs while it waits (tasklist,
+ * find, ping, robocopy) opens a console window of its own, one after another. So cmd.exe is started
+ * with a console whose window is hidden, and it starts the script in a second cmd.exe sharing that
+ * console. The second isn't ended with the app, being only the first one's, and nothing the
+ * script runs shows. Gives the command line for cmd.exe, word for word: /s takes what is between
+ * the first and the last quote as it is.
  */
 export function hiddenStart(script) {
-  const quoted = script.replace(/'/g, "''");
-  const command = `Start-Process -FilePath $env:ComSpec -ArgumentList '/c', '"${quoted}"' -WindowStyle Hidden`;
-  return ["powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(command, "utf16le").toString("base64")]];
+  return `/d /s /c "start "" /b cmd.exe /d /c "${script}""`;
 }
 
 /**

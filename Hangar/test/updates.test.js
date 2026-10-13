@@ -44,11 +44,7 @@ test("the Windows swap waits for the app, keeps the old copy, and has a way back
   assert.ok(windowsSwap({ app: "a", fresh: "b", old: "c", program: "d.exe", pid: 1 }).includes('start "" "%APP%\\%EXE%"\r\nexit /b 0'));
 });
 
-test("updates: on Windows the swap script is started hidden, through PowerShell, whatever its folder is called", () => {
+test("updates: on Windows the swap script is handed to a second cmd.exe in a hidden console", () => {
   const script = "C:\\Users\\Pilot O'Test\\AppData\\Local\\Temp\\fpv-hangar-update-x\\swap.cmd";
-  const [program, parts] = hiddenStart(script);
-  assert.equal(program, "powershell.exe");
-  assert.deepEqual(parts.slice(0, 3), ["-NoProfile", "-NonInteractive", "-EncodedCommand"]);
-  const command = Buffer.from(parts[3], "base64").toString("utf16le");
-  assert.equal(command, "Start-Process -FilePath $env:ComSpec -ArgumentList '/c', '\"C:\\Users\\Pilot O''Test\\AppData\\Local\\Temp\\fpv-hangar-update-x\\swap.cmd\"' -WindowStyle Hidden");
+  assert.equal(hiddenStart(script), `/d /s /c "start "" /b cmd.exe /d /c "${script}""`);
 });
