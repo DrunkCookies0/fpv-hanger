@@ -589,7 +589,7 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
         filters: [{ name: "Songs", extensions: [...audioExtensions] }],
       });
       if (picked.canceled) return { name: null, problem: null };
-      const kept = library.keepSong(picked.filePaths[0]);
+      const kept = await library.keepSong(picked.filePaths[0]);
       return { name: kept.name, problem: kept.problem ? `${kept.name} couldn't be added to your songs: ${kept.problem}` : null };
     },
 
@@ -598,7 +598,7 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
       // A song that is only in this track's folder, from before there was a library, joins the
       // library when it is used, so the next track has it too. The track's copy is left where it is.
       const own = join(library.folder(track, "music"), name);
-      if (existsSync(own)) library.keepSong(own, name);
+      if (existsSync(own)) await library.keepSong(own, name);
       const sound = await soundOf(library.songFile(name, track), ffmpeg);
       return sound ?? { problem: `${name} isn't among your songs any more, or can't be read.` };
     },

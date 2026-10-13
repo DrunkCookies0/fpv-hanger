@@ -21,6 +21,7 @@ import { argument, ffmpegPath, libraryPath, cachePath, log, version } from "./pa
 import { takeUpWhatTheOldAppKept } from "./updates.js";
 import { FFmpeg } from "./ffmpeg.js";
 import { Library } from "./library.js";
+import { clearStaging } from "./landing.js";
 import { VideoMaker } from "./videos.js";
 import { makeApi } from "./api.js";
 
@@ -162,7 +163,10 @@ app.whenReady().then(async () => {
   log(`FPV Hangar ${version()} started on ${process.platform} ${process.arch}${unseen ? ", showing no window" : ""}`);
   // A Mac that had the app before this one: where its library is, and the rest of what it remembered.
   if (!unseen) takeUpWhatTheOldAppKept();
-  const library = new Library(libraryPath(), { ffmpeg, cache, trash: (path) => shell.trashItem(path) });
+  // Files on their way into the library are written here first (see landing.js).
+  const staging = join(cache, "Arriving");
+  clearStaging(staging);
+  const library = new Library(libraryPath(), { ffmpeg, cache, staging, trash: (path) => shell.trashItem(path) });
   backUp(library);
   const videos = new VideoMaker({ ffmpeg: ffmpegPath(), temp: join(cache, "Working") });
   const api = makeApi({ library, ffmpeg, videos, cache, window: () => window, tell, fixed: Boolean(argument("--root")), quiet: unseen });

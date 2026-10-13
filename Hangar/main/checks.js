@@ -1125,7 +1125,7 @@ async function everything(tools) {
   // A song with a beat twice a second that gets bigger eight seconds in.
   const song = join(cache, "Test song.wav");
   const sung = await ffmpeg.run(["-v", "error", "-y", "-f", "lavfi", "-i", "aevalsrc='0.5*sin(2*PI*55*t)*exp(-7*mod(t,0.5))*(1+1.2*gt(t,8))+0.25*sin(2*PI*440*t)*gt(t,8)*exp(-3*mod(t,0.5))':s=44100:d=24", song]);
-  say(sung.code === 0 && library.keepSong(song).problem === null, "a song is kept in the song library", sung.code === 0 ? "" : sung.said.slice(-300));
+  say(sung.code === 0 && (await library.keepSong(song)).problem === null, "a song is kept in the song library", sung.code === 0 ? "" : sung.said.slice(-300));
   rmSync(recording, { force: true });
   rmSync(song, { force: true });
   note();

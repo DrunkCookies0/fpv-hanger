@@ -108,7 +108,7 @@ test("a library from nothing to a timed run, and what the Mac app makes of it", 
     // A song is kept in the library, once. A logo is kept with its event.
     const song = join(scratch, "song.wav");
     assert.equal((await ffmpeg.run(["-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", song])).code, 0);
-    assert.deepEqual(library.keepSong(song), { name: "song.wav", problem: null });
+    assert.deepEqual(await library.keepSong(song), { name: "song.wav", problem: null });
     assert.deepEqual(library.songs(track, "clip_0001"), { songs: ["song.wav"], premiere: null });
     assert.equal(library.songFile("song.wav", track), join(root, "Songs", "song.wav"));
     const picture = join(scratch, "badge.jpg");

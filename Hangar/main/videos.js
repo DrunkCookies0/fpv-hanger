@@ -2,8 +2,10 @@
 // draws the timer and feeds FFmpeg. This starts that window when it is first needed and hands it jobs.
 
 import { BrowserWindow, ipcMain } from "electron";
+import { rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, extname, join } from "node:path";
+import { place } from "./landing.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -34,11 +36,17 @@ export class VideoMaker {
     const id = this.#next++;
     const window = await this.#worker();
     if (onProgress) this.#watching.set(id, onProgress);
+    // Made in the app's own folder and moved into the library whole, so that a library in Google
+    // Drive never sees a video being written (see landing.js).
+    const made = join(this.temp, `video-${id}${extname(job.output)}`);
     try {
-      return await window.webContents.executeJavaScript(`makeVideo(${JSON.stringify({ ...job, id, ffmpeg: this.ffmpeg, temp: this.temp })})`);
+      const answer = await window.webContents.executeJavaScript(`makeVideo(${JSON.stringify({ ...job, output: made, id, ffmpeg: this.ffmpeg, temp: this.temp })})`);
+      if (answer.ok) await place(made, job.output);
+      return answer;
     } catch (error) {
       return { ok: false, problem: error.message };
     } finally {
+      rmSync(made, { force: true });
       this.#watching.delete(id);
     }
   }

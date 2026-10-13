@@ -23,6 +23,7 @@ import { decodeText, crossingsIn, markersAreInClipTime, Race, FrameRate, coarseS
 import * as series from "../shared/series.js";
 import { merge, same } from "../shared/merge.js";
 import { isInDrive } from "../shared/drive.js";
+import { land, landNow } from "./landing.js";
 
 export const videoExtensions = new Set(["ts", "mts", "m2ts", "mp4", "m4v", "mov", "mkv", "avi", "mxf"]);
 export const audioExtensions = new Set(["mp3", "m4a", "aac", "wav", "aif", "aiff", "caf", "flac", "ogg", "opus"]);
@@ -98,9 +99,12 @@ export class Library {
    * @param {string} tools.cache a folder for what can be made again
    * @param {(path: string) => Promise<void>} tools.trash moves something to the Trash
    * @param {typeof fetch} [tools.fetch]
+   * @param {string} [tools.staging] a folder of the app's own where files are written before they are
+   *   moved into the library (see landing.js)
    */
-  constructor(root, { ffmpeg, cache, trash, fetch: fetcher = globalThis.fetch }) {
+  constructor(root, { ffmpeg, cache, trash, fetch: fetcher = globalThis.fetch, staging = null }) {
     this.root = root;
+    this.staging = staging;
     this.ffmpeg = ffmpeg;
     this.cache = cache;
     this.trash = trash;
@@ -135,10 +139,7 @@ export class Library {
   }
 
   #write(file, value) {
-    mkdirSync(dirname(file), { recursive: true });
-    const part = `${file}.part`;
-    writeFileSync(part, JSON.stringify(value, null, 2) + "\n");
-    renameSync(part, file);
+    landNow(file, JSON.stringify(value, null, 2) + "\n");
   }
 
   // Every field the Mac app expects is always there, so a file written here always loads there.
@@ -626,8 +627,7 @@ export class Library {
           await this.trash(old);
           replaced.push(name);
         }
-        writeFileSync(`${file}.part`, markerFile(frames, fps));
-        renameSync(`${file}.part`, file);
+        await land(file, (first) => writeFileSync(first, markerFile(frames, fps)), { staging: this.staging });
       } catch (error) {
         return { problem: `The markers couldn't be saved: ${error.message}` };
       }
@@ -677,12 +677,11 @@ export class Library {
   }
 
   /** Puts a copy of a sound file in the song library, unless one of that name is there. */
-  keepSong(file, name = basename(file)) {
+  async keepSong(file, name = basename(file)) {
     const destination = join(this.songLibrary, name);
     if (file === destination || existsSync(destination)) return { name, problem: null };
     try {
-      mkdirSync(this.songLibrary, { recursive: true });
-      copyFileSync(file, destination);
+      await land(destination, (first) => copyFileSync(file, first), { staging: this.staging });
       return { name, problem: null };
     } catch (error) {
       return { name, problem: error.message };
@@ -727,15 +726,17 @@ export class Library {
   /** Keeps a copy of a picture as an event's logo, as a PNG, which keeps any see-through background. */
   async setLogo(event, picture) {
     if (event === "") return { problem: "Give these tracks an event of their own first. The logo is kept in the event's folder." };
-    const place = join(this.root, event), file = join(place, "Logo.png"), part = join(place, ".logo.part.png");
-    const made = await this.ffmpeg.run(["-v", "error", "-y", "-i", picture, "-frames:v", "1", "-pix_fmt", "rgba", part]);
-    if (made.code !== 0 || !existsSync(part)) {
-      rmSync(part, { force: true });
-      return { problem: `${basename(picture)} can't be read as a picture.` };
+    const file = join(this.root, event, "Logo.png"), old = this.logo(event);
+    try {
+      await land(file, async (first) => {
+        const made = await this.ffmpeg.run(["-v", "error", "-y", "-i", picture, "-frames:v", "1", "-pix_fmt", "rgba", "-c:v", "png", "-f", "image2", "-update", "1", first]);
+        if (made.code !== 0 || !existsSync(first)) throw Object.assign(new Error(`${basename(picture)} can't be read as a picture.`), { code: "UNREADABLE" });
+        // The old logo goes before the new one takes its place, which may have its name.
+        if (old && old !== picture && existsSync(old)) await this.trash(old).catch(() => {});
+      }, { staging: this.staging });
+    } catch (error) {
+      return { problem: error.code === "UNREADABLE" ? error.message : `The logo couldn't be kept: ${error.message}` };
     }
-    const old = this.logo(event);
-    if (old && old !== picture) await this.trash(old).catch(() => {});
-    renameSync(part, file);
     return { problem: null };
   }
 
@@ -789,7 +790,7 @@ export class Library {
     try {
       const old = this.bookends(event)[shape][which];
       if (old && old.file !== file) await this.trash(old.file);
-      if (file !== to) copyFileSync(file, to);
+      if (file !== to) await land(to, (first) => copyFileSync(file, first), { staging: this.staging });
       return { problem: null };
     } catch (error) {
       return { problem: `${basename(file)} couldn't be kept: ${error.message}` };
@@ -862,29 +863,32 @@ export class Library {
           number += 1;
         } while (existsSync(target));
       }
-      // Written under a hidden name first, so a half-copied clip is never taken for a whole one.
-      const part = join(destination, `.${basename(target)}.part`);
+      // Written somewhere else first and moved in whole, so a half-copied clip is never taken for a
+      // whole one, and a library in Google Drive never sees one being written (see landing.js).
+      const before = done;
       try {
-        await new Promise((resolve, reject) => {
-          const from = createReadStream(file), to = createWriteStream(part);
-          from.on("data", (chunk) => {
-            done += chunk.length;
-            onProgress?.(total > 0 ? done / total : 1);
+        await land(target, async (first) => {
+          done = before;
+          await new Promise((resolve, reject) => {
+            const from = createReadStream(file), to = createWriteStream(first);
+            from.on("data", (chunk) => {
+              done += chunk.length;
+              onProgress?.(total > 0 ? done / total : 1);
+            });
+            from.on("error", reject);
+            to.on("error", reject);
+            to.on("finish", resolve);
+            from.pipe(to);
           });
-          from.on("error", reject);
-          to.on("error", reject);
-          to.on("finish", resolve);
-          from.pipe(to);
-        });
-        // Keep the recording's own date, which is when it was flown.
-        try {
-          const flown = statSync(file);
-          utimesSync(part, flown.atime, flown.mtime);
-        } catch {}
-        renameSync(part, target);
+          // Keep the recording's own date, which is when it was flown.
+          try {
+            const flown = statSync(file);
+            utimesSync(first, flown.atime, flown.mtime);
+          } catch {}
+        }, { staging: this.staging });
         added.push(basename(target));
       } catch (error) {
-        rmSync(part, { force: true });
+        done = before + size(file);
         failed.push(`${basename(file)} couldn't be added: ${error.message}`);
       }
     }
