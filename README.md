@@ -56,7 +56,7 @@ npm test            # its tests
 | `Hangar/test/` | The tests. Their pilots, times and links are made up |
 | `VERSION`, `CHANGELOG.md` | The version number, used by everything, and what changed in each version |
 | `package.sh`, `publish.sh` | Package both apps for release, and start a release |
-| `.github/workflows/release.yml` | Builds and publishes a release when a version tag is pushed |
+| `.github/workflows/release.yml` | Builds and publishes a release when a version tag is pushed, or when it is run by hand with Publish ticked |
 | `Dashboard/`, `Lap Timer/` | The first Mac app, in Swift, as it was at v0.12.1. Releases are no longer built from it. A copy of it updates into the new app by itself |
 
 The library is a folder, `FPV Hangar` in your Movies or Videos folder unless you choose another. Each event is a folder in it with its tracks inside, and a track's recordings, markers and finished videos are plain files. `dashboard.json` and `settings.json` hold what the app remembers.
@@ -75,10 +75,11 @@ The library is a folder, `FPV Hangar` in your Movies or Videos folder unless you
 Versions are `0.MINOR.PATCH`: the middle number for something new, the last for fixes.
 
 1. Put the new number in `VERSION` and add an entry to `CHANGELOG.md`.
-2. Commit, then `./publish.sh`. It pushes `main` and a `v<version>` tag.
-3. The tag starts the release workflow, which runs `./package.sh` on GitHub and publishes a release with the Mac zip, the Windows zip and `latest.json` attached. Copies of the app read `latest.json` to find a newer version.
+2. Commit and push `main`.
+3. On the Actions page, open Release, press Run workflow on `main` and tick Publish. Or run `./publish.sh`, which pushes `main` and a `v<version>` tag that starts the same workflow.
+4. The workflow runs the tests and `./package.sh` on GitHub, and once they pass it publishes a release with the Mac zip, the Windows zip and `latest.json` attached, making the tag itself when there isn't one. Copies of the app read `latest.json` to find a newer version.
 
-`./package.sh` also works on your own Mac, to try the packages before releasing them. It writes into `Releases/`, which is not part of the repository. Run from the Actions page by hand, the workflow does everything but publish.
+`./package.sh` also works on your own Mac, to try the packages before releasing them. It writes into `Releases/`, which is not part of the repository. Run from the Actions page with Publish left unticked, the workflow does everything but publish.
 
 FFmpeg is free software under the GNU General Public License. It is carried inside the app as a separate program, with its licence, and its source is at https://ffmpeg.org. The typeface is Inter, under the SIL Open Font License.
 

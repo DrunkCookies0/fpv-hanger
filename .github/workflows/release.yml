@@ -1,15 +1,25 @@
-# Publishes a release when a version tag (v0.13.0, say) is pushed: packages the app for Mac and for
-# Windows the same way package.sh does on a Mac, and attaches the two zips and latest.json, which is
-# what copies of the app read to find a newer version.
+# Publishes a release: packages the app for Mac and for Windows the same way package.sh does on a
+# Mac, and attaches the two zips and latest.json, which is what copies of the app read to find a
+# newer version.
 #
-# Run by hand from the Actions page, it does everything but publish: the packages are kept with the
-# run for a few days, to look at before a real release.
+# It starts in one of two ways:
+# - A version tag (v0.13.0, say) pushed to GitHub, which is what publish.sh does.
+# - By hand from the Actions page: Release, then Run workflow. Left as it is, that does everything
+#   but publish, and the packages are kept with the run for a few days, to look at first. With
+#   Publish ticked, on main, it publishes the version in VERSION once everything has passed, making
+#   its tag itself, so a release needs no tag pushed from a computer. A run that fails publishes
+#   nothing and leaves no tag.
 name: Release
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the version in VERSION once everything has passed (from main only)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -19,6 +29,19 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check it can be published
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(cat VERSION)"
+          [[ "$GITHUB_REF" == refs/heads/main ]] || { echo "::error::A release is published from main, and this run is on $GITHUB_REF_NAME."; exit 1; }
+          grep -q "^## v$VERSION " CHANGELOG.md || { echo "::error::CHANGELOG.md has no entry for v$VERSION."; exit 1; }
+          if gh release view "v$VERSION" >/dev/null 2>&1 || git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::v$VERSION has already been released. Put a new number in VERSION."
+            exit 1
+          fi
 
       - uses: actions/setup-node@v4
         with:
@@ -60,10 +83,11 @@ jobs:
           retention-days: 5
 
       - name: Publish
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.publish)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="$(cat VERSION)"
+          # Run by hand, the tag doesn't exist yet: it is made here, on the commit that was packaged.
           gh release create "v$VERSION" "Releases/FPV-Hangar-v$VERSION-mac.zip" "Releases/FPV-Hangar-v$VERSION-win64.zip" Releases/latest.json \
-            --title "FPV Hangar v$VERSION" --notes-file Releases/notes.md
+            --target "$GITHUB_SHA" --title "FPV Hangar v$VERSION" --notes-file Releases/notes.md
