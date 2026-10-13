@@ -172,7 +172,9 @@ async function editor(tools) {
       e.pause();
       for (let tries = 0; tries < 100 && !e.settled; tries += 1) await new Promise((done) => setTimeout(done, 20));
       return { from, during, parked: e.frame, sounding, playing: e.playing };`);
-    say(played.during > played.from + 20 && !played.playing && Math.abs(played.parked - played.during) <= 2, "it plays, and parks on a frame when paused", `from ${played.from}, at ${played.during} after 1.2 s, parked on ${played.parked}${played.sounding ? ", with its song" : ""}`);
+    // The frame last shown can be a few behind the one playing, more so on a slow machine, and
+    // pausing parks on the one playing: so it may be a little ahead of the one read, never behind.
+    say(played.during > played.from + 20 && !played.playing && played.parked >= played.during - 1 && played.parked <= played.during + 6, "it plays, and parks on a frame when paused", `from ${played.from}, at ${played.during} after 1.2 s, parked on ${played.parked}${played.sounding ? ", with its song" : ""}`);
 
     // A song: chosen, listened to, a drop put on the start gate.
     const songs = await js(`return window.hangar_.app.editor.songs`);
