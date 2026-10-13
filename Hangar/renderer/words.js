@@ -28,7 +28,7 @@ export const season = "RaceGOW6";
 export const comingSoon = {
   anyFootage: {
     title: "Video Creator for any footage", icon: "filmStack",
-    detail: "The same clipping, lap timer and music for any FPV footage, without a race series or an entry form. For now, the Video Creator under RaceGOW takes any recording: make an event for it.",
+    detail: "The same clipping, lap timer and music for any FPV footage, without a race series or an entry form. For now, the Video Creator under RaceGOW takes any recording: make a group for it.",
   },
   upload: {
     title: "Upload to YouTube, TikTok and Instagram", icon: "upload",
@@ -93,7 +93,7 @@ export const readMeFor = (mac) => ({
       title: "Getting started",
       items: [
         ["step", `Answer the two questions the app asks first: your pilot name, and whether you fly ${season}. If you do, it finds your registration number on the series' pilot list. Both go on every timer and video and into the entry form, and both can be changed in Pilot & settings.`],
-        ["step", `On the first screen, open Video Creator, under RaceGOW. If you fly ${season} its open tracks are there already. Otherwise press New event, then New track. Press Add clips and choose your recordings, or drop them onto the track's page.`],
+        ["step", `On the first screen, open Video Creator, under RaceGOW. If you fly ${season} its open tracks are there already. Otherwise press New group, name it, then name the race and give its date. Press Add clips and choose your recordings, or drop them onto the race's page.`],
         ["step", "Press Mark laps on a clip. A recording you add by itself opens there straight away. Step to the frame where you cross the start/finish gate and press M. Do that for every crossing, then press Done, which saves it."],
         ["step", "Press Make 16:9 video for YouTube, or Make 9:16 video for Shorts, TikTok and Reels. Markers & music lets you add a song, put one of its drops on the start gate, and choose where the video starts and ends."],
         ["step", `Upload your video to YouTube and press Submit this run. The app fills the track's entry form in, and you press Submit on the form yourself. A ${season} track has its form already. For any other, paste its Google Form link on the track page first.`],
@@ -125,7 +125,7 @@ export const readMeFor = (mac) => ({
     {
       title: "Good to know",
       items: [
-        ["point", "Flying another race or series, or just out flying? Press New event in the Video Creator. Each event has its own tracks, its own name on the timer and its own ID, and no event needs an entry form."],
+        ["point", "Flying with a club, or another series? Press New group in the Video Creator, and New race under it for each race, with its name and date. Each group has its own name on the timer, its own ID and its own logo. Only RaceGOW's tracks have an entry form: no other race needs one."],
         ["point", "Lap times are as exact as your markers: one video frame, which is about 0.017 seconds at 60 frames a second."],
         ["point", "It has been used most with HDZero recordings (.ts). An .mp4 recording has been tested once. Other formats have not been tried."],
         ["point", `If you fly ${season}, its tracks appear by themselves: each one on the day it opens, with its deadline and, once the series posts it, its entry form. Every track has a form of its own.`],

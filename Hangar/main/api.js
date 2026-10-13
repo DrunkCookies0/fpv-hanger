@@ -285,6 +285,7 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
                 submissions: kept.submissions.length,
                 submitted: kept.submissions.at(-1) ?? null,
                 deadline: season?.deadline ?? null,
+                date: kept.date ?? null,
               };
             }),
           };
@@ -456,6 +457,24 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
       return { ...made, state: api.state() };
     },
 
+    /** Makes a race in a group, with its name and the day it was flown. */
+    newRace(event, name, date = "") {
+      const made = library.newRace(event, name, date);
+      return { ...made, state: api.state() };
+    },
+
+    /** Gives a race another name, date or group. What was read about it under its old name goes. */
+    moveRace(track, change) {
+      if (job) return busy();
+      const made = library.moveRace(track, change);
+      if (made.track && made.track !== track) {
+        summaries.delete(track);
+        if (config().lastTrack === track) setConfig({ lastTrack: made.track });
+        summariseAll();
+      }
+      return { ...made, state: api.state() };
+    },
+
     /** Deletes a track. An empty one goes straight away. One with anything in it comes back as a
      *  question, and goes once its phrase has been typed. */
     async removeTrack(track, typed = null) {
@@ -482,7 +501,7 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
       if (!one || event === "") return { state: api.state() };
       const name = library.details(event).name;
       if (one.tracks.length > 0) {
-        return { notice: `${name} still has ${one.tracks.length === 1 ? "a track" : `${one.tracks.length} tracks`} in it. Delete ${one.tracks.length === 1 ? "that" : "those"} first, then the event.`, state: api.state() };
+        return { notice: `${name} still has ${one.tracks.length === 1 ? "a track" : `${one.tracks.length} tracks`} in it. Delete ${one.tracks.length === 1 ? "that" : "those"} first, then the group.`, state: api.state() };
       }
       if (library.holdsAnything(join(library.root, event), library.logo(event))) {
         const question = {
@@ -750,7 +769,7 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
     async chooseLogo(event) {
       const picked = await dialog.showOpenDialog(window(), {
         title: "Choose a logo",
-        message: "Choose a picture for this event's logo. A copy is kept with the event. One with a see-through background looks best.",
+        message: "Choose a picture for this group's logo. A copy is kept with the group. One with a see-through background looks best.",
         properties: ["openFile"],
         filters: [{ name: "Pictures", extensions: [...pictureExtensions] }],
       });
@@ -933,7 +952,7 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
       const shaped = shape === "upright" ? "9:16" : "16:9";
       const picked = await dialog.showOpenDialog(window(), {
         title: `${which === "before" ? "Before" : "After"} the ${shaped} video`,
-        message: `Choose a short clip or a picture to put ${which} every ${shaped} video of this event. A copy is kept with the event.`,
+        message: `Choose a short clip or a picture to put ${which} every ${shaped} video of this group. A copy is kept with the group.`,
         properties: ["openFile"],
         filters: [{ name: "Clips and pictures", extensions: [...videoExtensions, ...bookendPictures] }],
       });

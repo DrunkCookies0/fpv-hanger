@@ -11,6 +11,7 @@ import { showNote, showSetUp } from "./views/notes.js";
 import { heardDrive } from "./views/drive.js";
 import { closeSheets } from "./sheets.js";
 import { typefaceReady } from "./timer.js";
+import * as act from "./actions.js";
 import { SongSound } from "./sound.js";
 
 const stage = document.getElementById("stage");
@@ -111,7 +112,8 @@ const started = (async () => {
  *
  *   home, creator, track, track:<path>, files (a track with its first run's files showing),
  *   settings, guide, leaderboard, welcome, whatsnew, setup, setup:<pilot name> (the second
- *   question, looked up), trackview, tool:<which>, program:<which>, notice:<words>
+ *   question, looked up), race (the sheet for renaming or moving a race), trackview,
+ *   tool:<which>, program:<which>, notice:<words>
  */
 /** For the mode that writes the read-me a download goes out with (`--read-me`). */
 window.readMeText = async (platform) => {
@@ -144,6 +146,11 @@ window.showForSnapshot = async (which) => {
   else if (name === "welcome") await showNote({ kind: "welcome" });
   else if (name === "whatsnew") await showNote({ kind: "whatsNew", since: detail || null });
   else if (name === "setup") await showSetUp({ lookingUp: detail || null });
+  else if (name === "race") {
+    // The sheet for renaming or moving a race, over its page. It waits for an answer, so it isn't waited for.
+    await showTrack();
+    if (app.page.name === "track") act.editRace(app.page.track);
+  }
   else if (name === "editor" || name === "wave" || name === "mark") {
     // The marker editor, on the first run or the one named. "mark" is a clip with no markers yet.
     await showTrack();

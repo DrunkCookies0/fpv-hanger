@@ -264,8 +264,11 @@ export class Library {
         loose.push(name);
         continue;
       }
-      const inside = folders(folder).filter((track) => isTrack(join(folder, track)));
-      if (inside.length > 0 || this.store.events?.[name]) found.push({ folder: name, tracks: inside.map((track) => `${name}/${track}`) });
+      // Races in the order they were flown, and any without a date after them, by name.
+      const day = (track) => this.store.tracks?.[track]?.date ?? "";
+      const inside = folders(folder).filter((track) => isTrack(join(folder, track))).map((track) => `${name}/${track}`)
+        .sort((a, b) => (day(a) && day(b) ? day(a).localeCompare(day(b)) : day(a) ? -1 : day(b) ? 1 : 0) || natural(a, b));
+      if (inside.length > 0 || this.store.events?.[name]) found.push({ folder: name, tracks: inside });
     }
     if (loose.length > 0) found.unshift({ folder: "", tracks: loose });
     // Anything put back from the Trash brings what was remembered about it.
@@ -327,28 +330,100 @@ export class Library {
     this.saveStore();
   }
 
-  /** Whether a name will do for an event's folder. What is wrong with it, or null. */
-  #problemWithEventName(name) {
-    if (name === "") return "Give the event a name.";
+  /** Whether a name will do for a folder: a group's or a race's. What is wrong with it, or null. */
+  #problemWithName(name, what = "group") {
+    if (name === "") return `Give the ${what} a name.`;
     if (/[\\/:*?"<>|]/.test(name) || name.startsWith(".") || name.endsWith(".") || name.endsWith(" ")) {
-      return 'An event\'s name can\'t have any of \\ / : * ? " < > | in it, or start or end with a full stop.';
+      return `A ${what}'s name can't have any of \\ / : * ? " < > | in it, or start or end with a full stop.`;
     }
     return null;
   }
 
-  /** Makes an event, with a first track in it. Returns what is wrong with the name, or null. */
+  /** Whether a race's date will do: a day as YYYY-MM-DD, or none. What is wrong with it, or null. */
+  #problemWithDate(date) {
+    if (date === "" || date === null || date === undefined) return null;
+    const found = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date));
+    const day = found && new Date(Date.UTC(Number(found[1]), Number(found[2]) - 1, Number(found[3])));
+    return day && day.getUTCDate() === Number(found[3]) && day.getUTCMonth() === Number(found[2]) - 1 ? null : "That isn't a date the app can read.";
+  }
+
+  /** Makes a group: a race series or a club, with a folder of its own. The season's group comes with
+   *  its open tracks; any other starts empty, for its races. Returns { event }, { track } or { problem }. */
   newEvent(raw, now = new Date()) {
     if (this.away) return { problem: this.whyAway() };
     const name = raw.trim();
-    const problem = this.#problemWithEventName(name);
+    const problem = this.#problemWithName(name, "group");
     if (problem) return { problem };
-    if (sameName(name, songsFolder)) return { problem: `${songsFolder} is the folder your song library is kept in. Give the event another name.` };
+    if (sameName(name, songsFolder)) return { problem: `${songsFolder} is the folder your song library is kept in. Give the group another name.` };
     if (existsSync(join(this.root, name))) return { problem: `There is already a folder called ${name} in your library.` };
-    // Two events with one name would be two headings nobody can tell apart.
-    if (this.events.some((event) => sameName(this.details(event.folder).name, name))) return { problem: `You already have an event called ${name}. New track under it adds a track.` };
+    // Two groups with one name would be two headings nobody can tell apart.
+    if (this.events.some((event) => sameName(this.details(event.folder).name, name))) return { problem: `You already have a group called ${name}. New race under it adds a race.` };
     this.store.events = { ...(this.store.events ?? {}), [name]: {} };
     this.saveStore();
-    return this.newTrack(name, now);
+    if (sameName(name, series.season)) return this.newTrack(name, now);
+    mkdirSync(join(this.root, name), { recursive: true });
+    this.findTracks();
+    return { event: name };
+  }
+
+  /** Makes a race in a group: a folder named after it, and the day it was flown, if given.
+   *  Returns { track } or { problem }. */
+  newRace(event, raw, date = "") {
+    if (this.away) return { problem: this.whyAway() };
+    const name = raw.trim();
+    const problem = this.#problemWithName(name, "race") ?? this.#problemWithDate(date);
+    if (problem) return { problem };
+    if (event !== "" && event === this.seasonEvent) return { problem: `${series.season}'s tracks come from the season itself.` };
+    const track = event === "" ? name : `${event}/${name}`;
+    if (existsSync(this.place(track))) return { problem: `There is already a race called ${name} in ${this.details(event).name || "your library"}.` };
+    for (const part of parts) mkdirSync(this.folder(track, part), { recursive: true });
+    if (date) this.update(track, (state) => { state.date = date; });
+    this.findTracks();
+    return { track };
+  }
+
+  /**
+   * Gives a race another name, another date, or another group. Its folder moves, and what is
+   * remembered about it goes with it: its entry form, its runs' music and the stretch each video
+   * shows. A track of the season keeps its name and its place. Returns { track }, where it is now,
+   * or { problem }.
+   */
+  moveRace(track, { name: raw, event, date }) {
+    if (this.away) return { problem: this.whyAway() };
+    if (!this.tracks.includes(track)) return { problem: "That race isn't in your library any more." };
+    const from = eventFolder(track);
+    if (from !== "" && from === this.seasonEvent) return { problem: `A ${series.season} track keeps its name and its place in the season.` };
+    if (event !== "" && event === this.seasonEvent) return { problem: `${series.season}'s tracks come from the season itself. Choose another group.` };
+    if (event !== "" && !this.events.some((one) => one.folder === event)) return { problem: "That group isn't in your library any more." };
+    const name = raw.trim();
+    const problem = this.#problemWithName(name, "race") ?? this.#problemWithDate(date);
+    if (problem) return { problem };
+    const to = event === "" ? name : `${event}/${name}`;
+    if (to !== track) {
+      // A name that only differs in its capitals is the same folder on most disks, and is just renamed.
+      if (existsSync(this.place(to)) && this.place(to).toLowerCase() !== this.place(track).toLowerCase()) {
+        return { problem: `There is already a race called ${name} in ${this.details(event).name || "your library"}.` };
+      }
+      try {
+        mkdirSync(dirname(this.place(to)), { recursive: true });
+        renameSync(this.place(track), this.place(to));
+      } catch (error) {
+        return { problem: `The race couldn't be moved: ${error.message}` };
+      }
+      if (this.store.tracks[track]) {
+        this.store.tracks[to] = this.store.tracks[track];
+        delete this.store.tracks[track];
+      }
+    }
+    if (date !== undefined) {
+      const kept = { ...(this.store.tracks[to] ?? {}) };
+      if (date) kept.date = date;
+      else delete kept.date;
+      this.store.tracks[to] = kept;
+    }
+    this.saveStore();
+    this.findTracks();
+    return { track: to };
   }
 
   /** Makes a track in an event. For the season's event it is the next of the season's tracks that
@@ -388,8 +463,8 @@ export class Library {
     const loose = this.#tracksOf("");
     if (loose.length === 0) return { problem: null, moved: {} };
     const name = (this.settings.event ?? "").trim();
-    const problem = this.#problemWithEventName(name);
-    if (problem) return { problem: name === "" ? "Give the event a name first: its folder is named after it." : problem, moved: {} };
+    const problem = this.#problemWithName(name, "group");
+    if (problem) return { problem: name === "" ? "Give the group a name first: its folder is named after it." : problem, moved: {} };
     const place = join(this.root, name);
     if (existsSync(place) && (!isFolder(place) || loose.some((track) => existsSync(join(place, track))))) {
       return { problem: `Something called ${name} is already in your library and is in the way.`, moved: {} };

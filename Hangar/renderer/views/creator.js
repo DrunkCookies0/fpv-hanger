@@ -29,16 +29,19 @@ function sidebar() {
         oncontextmenu: (click) => {
           click.preventDefault();
           menu(click, [
-            { title: "New track", action: () => act.newTrack(one.folder) },
-            // Only an event with a folder of its own can go, and only once its tracks have.
-            ...(one.folder === "" ? [] : [{ title: one.tracks.length === 0 ? `Move this event to ${bin}` : "Delete its tracks first to delete this event", disabled: one.tracks.length > 0, action: () => act.removeEvent(one.folder) }]),
+            { title: one.isSeason ? "New track" : "New race", action: () => act.newRace(one.folder) },
+            // Only a group with a folder of its own can go, and only once its races have.
+            ...(one.folder === "" ? [] : [{ title: one.tracks.length === 0 ? `Move this group to ${bin}` : `Delete its ${one.isSeason ? "tracks" : "races"} first to delete this group`, disabled: one.tracks.length > 0, action: () => act.removeEvent(one.folder) }]),
           ]);
         },
       }, title.toUpperCase()),
       one.tracks.map((track) => sidebarRow(track.name, track.best, app.page.name === "track" && app.page.track === track.path, () => go({ name: "track", track: track.path }), {
         oncontextmenu: (click) => {
           click.preventDefault();
-          menu(click, [{ title: `Move ${track.name} to ${bin}`, action: () => act.removeTrack(track.path) }]);
+          menu(click, [
+            ...(one.isSeason ? [] : [{ title: "Rename or move…", action: () => act.editRace(track.path) }]),
+            { title: `Move ${track.name} to ${bin}`, action: () => act.removeTrack(track.path) },
+          ]);
         },
       })),
     ];
@@ -51,7 +54,7 @@ function sidebar() {
       }, h("span.side-mark"), h("span.side-title", `Track ${one.next.number}`), h("span.spacer"),
         h("span.side-opens", `OPENS ${opens.toLocaleDateString(undefined, { month: "short", day: "numeric" }).toUpperCase()}`)));
     } else if (!one.hasSeason) {
-      rows.push(h("button.side-add", { type: "button", onclick: () => act.newTrack(one.folder) }, icon("plus"), "New track"));
+      rows.push(h("button.side-add", { type: "button", onclick: () => act.newRace(one.folder) }, icon("plus"), one.isSeason ? "New track" : "New race"));
     }
     return rows;
   });
@@ -63,7 +66,7 @@ function sidebar() {
     // Events and their tracks can outgrow the window, so this part scrolls.
     h("div.side-list", { "data-scroll": "side" },
       list,
-      !app.state.libraryAway && h("button.side-add.event", { type: "button", help: "Another race or series, with its own tracks, its own name on the timer and its own ID.", onclick: act.newEvent }, icon("folderPlus"), "New event"),
+      !app.state.libraryAway && h("button.side-add.event", { type: "button", help: "A race series or a club you fly with, with its own races, its own name on the timer and its own ID.", onclick: act.newEvent }, icon("folderPlus"), "New group"),
     ),
     sidebarRow("Pilot & settings", null, false, () => open({ name: "settings" }), { probe: "tool settings" }),
     sidebarRow("How it works", null, false, () => open({ name: "guide" }), { probe: "tool guide" }),
@@ -91,14 +94,18 @@ function noTracks() {
       h("p.dim", { "data-probe": "library away" }, app.state.libraryAway),
       h("div.row", secondary("Look again", () => refresh(), { probe: "library again" }), secondary("Pilot & settings", () => open({ name: "settings" }))),
     ] : events.length === 0 ? [
-      h("div.card-title", "No events yet"),
-      h("p.dim", "An event is a race, a series, or just somewhere you fly. It has its own tracks, and its name goes on the timer of every video you make in it."),
-      h("div.row", primary("New event", act.newEvent, { probe: "new event" }),
-        secondary(`I fly ${season}`, () => showSetUp(), { help: `Answer the setup questions: the app makes the ${season} event and looks up your registration number.` })),
-    ] : [
+      h("div.card-title", "No groups yet"),
+      h("p.dim", "A group is a race series or a club you fly with. Its races go inside it, and its name goes on the timer of every video you make in it."),
+      h("div.row", primary("New group", act.newEvent, { probe: "new event" }),
+        secondary(`I fly ${season}`, () => showSetUp(), { help: `Answer the setup questions: the app makes the ${season} group and looks up your registration number.` })),
+    ] : events[0]?.isSeason ? [
       h("div.card-title", "No tracks yet"),
-      h("p.dim", "A track is one course you fly in an event. Make one, add your recordings to it, and mark the laps on them."),
-      h("div.row", primary("New track", () => act.newTrack(events[0]?.folder ?? ""), { probe: "new track" })),
+      h("p.dim", `${season}'s tracks appear here by themselves, each on the day it opens.`),
+      h("div.row", primary("New track", () => act.newRace(events[0].folder), { probe: "new track" })),
+    ] : [
+      h("div.card-title", "No races yet"),
+      h("p.dim", "A race is one day's racing: its recordings, laps and videos are kept together. Make one, add your recordings to it, and mark the laps on them."),
+      h("div.row", primary("New race", () => act.newRace(events[0]?.folder ?? ""), { probe: "new track" })),
     ]),
   ));
 }
@@ -302,16 +309,20 @@ function trackPage(track) {
   const summary = data.summary;
   const sent = data.state.submissions.at(-1) ?? null;
   const bestLap = summary.runs.map((run) => run.bestLap).sort((a, b) => Number(a) - Number(b))[0] ?? "–";
+  const race = !event?.isSeason;
+  const day = data.state.date ? new Date(`${data.state.date}T12:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" }) : null;
+  const above = [event?.name, day].filter(Boolean).join("  ·  ");
   const head = h("div.track-head",
-    h("div", event?.name && label(event.name.toUpperCase()), h("h1.page-title", name.toUpperCase())),
+    h("div", above && label(above.toUpperCase()), h(`h1.page-title${name.length > 20 ? ".long" : ""}`, name.toUpperCase())),
     deadline && deadlinePill(deadline),
     h("span.spacer"),
     driveWord(),
     secondary(data.hasView ? "Track in 3D" : "Build the track in 3D", () => act.openTrackView(track), { icon: "cube", help: data.hasView ? "The track drawn in 3D, with the lap flown round it. Drag it to look from any side." : "Build this track in 3D: click its sections into place, then draw the line the lap is flown along." }),
-    secondary("Add clips…", (event) => addClips(track, event.currentTarget), { disabled: busy(), probe: "add clips", help: "Copy recordings into this track, from a card or from anywhere else. You can also drop them onto this page." }),
+    secondary("Add clips…", (event) => addClips(track, event.currentTarget), { disabled: busy(), probe: "add clips", help: `Copy recordings into this ${race ? "race" : "track"}, from a card or from anywhere else. You can also drop them onto this page.` }),
     secondary("Refresh", () => refresh()),
     secondary("Open folder", () => act.openFolder(data.folder)),
-    secondary("", () => act.removeTrack(track), { icon: "trash", disabled: busy(), "aria-label": `Move this track to ${bin}`, help: `Move this track to ${bin}. If there is anything in it, you are asked to type I UNDERSTAND first.` }),
+    race && secondary("", () => act.editRace(track), { icon: "pencil", disabled: busy(), probe: "edit race", "aria-label": "Rename or move this race", help: "Change this race's name or date, or move it to another group. Everything in it goes with it." }),
+    secondary("", () => act.removeTrack(track), { icon: "trash", disabled: busy(), "aria-label": `Move this ${race ? "race" : "track"} to ${bin}`, help: `Move this ${race ? "race" : "track"} to ${bin}. If there is anything in it, you are asked to type I UNDERSTAND first.` }),
   );
   const entries = takesEntries(track, data);
   const page = h("div.track-page",

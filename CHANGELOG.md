@@ -2,6 +2,13 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.18.0 (13 October 2026)
+
+- Groups and races. What were events are groups now: a race series or a club you fly with, such as Circle City FPV. **New group** asks for its name, then for its first race. Each race in a group has a name of its own and the day it was flown: **New race** asks for both, and today is filled in for you. Races are listed in the order they were flown, and a race's page shows its group and its date above its name.
+- RaceGOW6 works as it did: its tracks appear by themselves, numbered, with their dates and their entry forms. It is the only group with an entry form.
+- **Rename or move** a race with the pencil on its page, or by right-clicking it in the sidebar: change its name or its date, or move it to another group. Its recordings, markers, music and videos go with it, and so does everything the app remembered about it. A race that was made as an event of its own, with a Track 1 inside, can be moved into its group this way and given its own name; the empty group it leaves can then be deleted.
+- Long names fit on the timer. On a 16:9 video, a group and a race whose names are too long for one line get a line each in the timer box. On a 9:16 video, the line above your name is made smaller to fit, keeping clear of the apps' buttons.
+
 ## v0.17.2 (13 October 2026)
 
 - A track that isn't in RaceGOW6 no longer shows the submission form, the Submitted box or Submit this run: a race or a day's flying of your own has no form to send. A track that already has a form link or an entry sent keeps them.

@@ -88,6 +88,7 @@ code { font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace; backgroun
 .row.baseline { align-items: baseline; }
 .icon { display: inline-flex; flex: none; line-height: 0; }
 .page-title { font: 900 40px/1.12 var(--face); letter-spacing: 0.5px; }
+.page-title.long { font-size: 28px; }
 .path { font: 12px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: rgba(255, 255, 255, 0.85); user-select: text; cursor: text; word-break: break-all; }
 
 .wordmark { font: 900 46px/1.08 var(--face); letter-spacing: 1.5px; white-space: nowrap; }
@@ -334,6 +335,11 @@ code { font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace; backgroun
 .alert-title { font: 800 15px/1.3 var(--face); }
 .alert-message { font-size: 13px; line-height: 1.38; color: rgba(255, 255, 255, 0.75); white-space: pre-line; word-break: break-word; }
 .alert .field { margin-top: 4px; }
+.sheet-field { display: flex; flex-direction: column; gap: 2px; font-size: 12px; font-weight: 600; color: var(--dim); }
+.sheet-field .field { color: #fff; }
+.date-field { color-scheme: dark; }
+.alert-message.warn { color: var(--warn); }
+.alert-message.warn:empty { display: none; }
 .alert-buttons { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
 .removal { display: flex; flex-direction: column; gap: 14px; width: 500px; padding: 24px; }
 .removal-title { display: flex; align-items: center; gap: 8px; font: 900 19px/1.25 var(--face); color: var(--warn); }

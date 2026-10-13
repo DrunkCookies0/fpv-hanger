@@ -1103,9 +1103,10 @@ async function everything(tools) {
 
   note("-- A library from nothing");
   library.finishSetUp({ pilot: "Test Pilot", fliesSeries: false, number: "" });
-  const made = api.newEvent("Self Test");
+  const group = api.newEvent("Self Test");
+  const made = group.event ? api.newRace(group.event, "Track 1", "2026-10-12") : group;
   const track = made.track ?? library.tracks[0];
-  if (!say(Boolean(track), "an event and its first track are made", made.problem ?? track)) return;
+  if (!say(Boolean(track) && group.event === "Self Test" && library.state(track).date === "2026-10-12", "a group and its first race are made, with the race's date", made.problem ?? group.problem ?? track)) return;
   // Twenty seconds of a test picture, in the kind of file the goggles record: HEVC in a transport
   // stream, sixty frames a second. If this computer's FFmpeg can't make that, H.264 will do.
   mkdirSync(cache, { recursive: true });
@@ -1207,7 +1208,7 @@ async function form(tools) {
 
 async function pages(tools) {
   const { js, errors } = await page(tools);
-  for (const which of ["home", "creator", "track", "files", "settings", "guide", "leaderboard", "welcome", "whatsnew", "setup", "submit", "editor", "wave", "trackview"]) {
+  for (const which of ["home", "creator", "track", "files", "settings", "guide", "leaderboard", "welcome", "whatsnew", "setup", "submit", "race", "editor", "wave", "trackview"]) {
     const before = errors.length;
     let problem = "";
     try {

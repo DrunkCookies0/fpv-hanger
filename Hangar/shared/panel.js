@@ -105,6 +105,14 @@ class Pen {
     return width;
   }
 
+  /** The size spaced-out text has to be to fit its room, no bigger than `size`: the spacing between
+   *  letters stays as it is, and only the letters get smaller. */
+  spacedSize(text, size, weight, room, kern) {
+    const font = this.font(size, weight);
+    if (this.width(text, font, { kern }) <= room) return size;
+    return Math.max(1, (size * (room - kern * [...text].length)) / this.width(text, font));
+  }
+
   /** A font no bigger than asked, made smaller when the text would be wider than its room. */
   fitted(text, size, weight, room, options = {}) {
     const font = this.font(size, weight);
@@ -116,6 +124,14 @@ class Pen {
 /** The timer box. `layout` is "stack", the corner box of a 16:9 frame, or "wide", the box under the
  *  picture of an upright video. */
 export class Panel {
+  /** About how wide a name is in the capitals of the corner box's strip, in reference points, for
+   *  laying the box out before anything is drawn. Drawing then fits it exactly. */
+  static #roughWidth(text) {
+    let width = 0;
+    for (const character of text) width += character === " " ? 5.5 : 11.2;
+    return width;
+  }
+
   /** How wide the wide box is, in reference points. Its scale is whatever makes that the width `upright` gives it. */
   static wideWidth = 600;
   /** The smaller laps in the wide box go three to a row. */
@@ -147,7 +163,10 @@ export class Panel {
     this.pad = 24;
     this.fit = 1;
     if (layout === "stack") {
-      this.stripHeight = event === null && track === null ? 0 : 36;
+      // The group and the race share a line, or have a line each when their names are too long for
+      // one: a race's own name can be, where a track's number never was.
+      this.stripLines = event !== null && track && Panel.#roughWidth(`${event}${track}`) + 24 > 400 - 2 * 24 ? 2 : 1;
+      this.stripHeight = event === null && track === null ? 0 : this.stripLines === 2 ? 58 : 36;
       this.titleHeight = title === null && badge === null ? 0 : 44;
       this.rows = Math.min(race.lapCount, Math.max(0, maxRows));
       this.width = 400;
@@ -232,14 +251,20 @@ export class Panel {
     }
 
     if (this.stripHeight > 0) {
-      const font = pen.font(13, 800);
       context.fillStyle = white(0.09);
       context.fillRect(0, y, width, this.stripHeight);
-      // With both, the event sits left and the track right. One alone sits left.
-      const first = this.event ?? this.track;
-      if (first) pen.put(first.toUpperCase(), font, accent, { x: pad, centerY: y + this.stripHeight / 2 + 1, kern: 1.8 });
-      if (this.event !== null && this.track) {
-        pen.put(this.track.toUpperCase(), font, white(0.9), { x: width - pad, centerY: y + this.stripHeight / 2 + 1, kern: 1.8, align: "right" });
+      const room = width - 2 * pad, kern = 1.8;
+      const first = (this.event ?? this.track)?.toUpperCase(), second = this.event !== null && this.track ? this.track.toUpperCase() : null;
+      if (this.stripLines === 2) {
+        // A line each, the group above the race, each made smaller if it is still too long.
+        pen.put(first, pen.font(pen.spacedSize(first, 13, 800, room, kern), 800), accent, { x: pad, centerY: y + 20, kern });
+        pen.put(second, pen.font(pen.spacedSize(second, 13, 800, room, kern), 800), white(0.9), { x: pad, centerY: y + 39, kern });
+      } else {
+        // With both, the group sits left and the race right, 24 apart, and are made smaller together
+        // if they would meet. One alone sits left.
+        const font = pen.font(second ? pen.spacedSize(`${first}${second}`, 13, 800, room - 24, kern) : pen.spacedSize(first ?? "", 13, 800, room, kern), 800);
+        if (first) pen.put(first, font, accent, { x: pad, centerY: y + this.stripHeight / 2 + 1, kern });
+        if (second) pen.put(second, font, white(0.9), { x: width - pad, centerY: y + this.stripHeight / 2 + 1, kern, align: "right" });
       }
       y += this.stripHeight;
     }
@@ -453,7 +478,18 @@ export function drawHeading(context, { title = null, badge = null, eyebrow = nul
     wordsEnd = Math.max(wordsEnd, x + pen.put(text, font, color, { x, centerY, kern }));
   };
   const side = upright.side;
-  if (eyebrow !== null) put(eyebrow.toUpperCase(), pen.font(30, 800), white(0.85), 4, side + 3, 24);
+  if (eyebrow !== null) {
+    // The group and race in a line, made smaller to fit, as far as it reads; past that, cut short.
+    // With a logo, room is left at the right for it.
+    const room = width - 2 * side - 3 - (logo ? 196 : 0);
+    let text = eyebrow.toUpperCase(), size = pen.spacedSize(text, 30, 800, room, 4);
+    if (size < 18) {
+      size = 18;
+      while (text.length > 1 && pen.width(`${text}…`, pen.font(size, 800), { kern: 4 }) > room) text = text.slice(0, -1).trimEnd();
+      text = `${text}…`;
+    }
+    put(text, pen.font(size, 800), white(0.85), 4, side + 3, 24);
+  }
   if (title !== null) put(title, pen.font(76, 800), white(1), 0, side, lift + (badge === null ? 75 : 46));
   if (badge !== null) put(badge.toUpperCase(), pen.font(30, 800), css(accent), 3, side + 3, lift + (title === null ? 75 : 120));
   if (logo) {

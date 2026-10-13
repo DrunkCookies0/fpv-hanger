@@ -183,19 +183,19 @@ function eventFields(event) {
   const count = event.tracks.length;
   const logo = loose ? null : h("div.row.logo-row", event.logo ? [
     h("span.logo-holder", h("img", { src: event.logo, alt: "" })),
-    h("p.dim.small.grow", "This logo goes on this event's videos: at the head of the timer box on 16:9, and at the top beside your name on 9:16."),
+    h("p.dim.small.grow", "This logo goes on this group's videos: at the head of the timer box on 16:9, and at the top beside your name on 9:16."),
     secondary("Change…", () => act.chooseLogo(event.folder)),
     secondary("", () => act.removeLogo(event.folder), { icon: "trash", help: `Move the logo to ${bin}. The videos go back to having none.`, "aria-label": "Remove the logo" }),
   ] : [
     label("LOGO"),
-    h("p.dim.small.grow", "None. Choose a picture, such as the series' own logo, and it goes on this event's videos: at the head of the timer box on 16:9, and at the top beside your name on 9:16."),
+    h("p.dim.small.grow", "None. Choose a picture, such as the series' or the club's own logo, and it goes on this group's videos: at the head of the timer box on 16:9, and at the top beside your name on 9:16."),
     secondary("Choose a picture…", () => act.chooseLogo(event.folder)),
   ]);
   // A clip or a picture before and after every video of the event: a title card, say, or a sign-off.
   // Each shape of video has its own pair, so one made for 16:9 isn't left small in a 9:16 video.
   const ends = loose ? null : h("div.bookends",
     label("BEFORE AND AFTER"),
-    h("p.dim.small", "A short clip or a picture put before or after every video you make in this event, such as a title card or a sign-off. Each shape of video has its own, so make one to fit each. It is fitted into the frame, on black where it doesn't fill it. A clip keeps its own sound."),
+    h("p.dim.small", "A short clip or a picture put before or after every video you make in this group, such as a title card or a sign-off. Each shape of video has its own, so make one to fit each. It is fitted into the frame, on black where it doesn't fill it. A clip keeps its own sound."),
     [["landscape", "16:9 videos"], ["upright", "9:16 videos"]].map(([shape, title]) => [
       h("div.row.tight.bookend-shape", icon(shape === "landscape" ? "landscape" : "portrait", 13), title),
       ["before", "after"].map((which) => {
@@ -219,10 +219,10 @@ function eventFields(event) {
       h("span.event-name", loose ? (event.name === "" ? "Tracks" : event.name) : event.folder),
       h("span.faint.small", count === 0 ? "no tracks yet" : `${count} track${count === 1 ? "" : "s"}`),
       h("span.spacer"),
-      loose && secondary("Give it its own folder", act.gatherLooseTracks, { help: "These tracks sit loose in your library, from before there were events. This moves them into a folder named after the event, like any other. If their clips are in a Premiere project, Premiere will ask where they went." }),
+      loose && secondary("Give it its own folder", act.gatherLooseTracks, { help: "These tracks sit loose in your library, from before there were groups. This moves them into a folder named after the group, like any other. If their clips are in a Premiere project, Premiere will ask where they went." }),
       !loose && secondary("", () => act.removeEvent(event.folder), {
-        icon: "trash", disabled: Boolean(app.state.job) || count > 0, "aria-label": `Move this event to ${bin}`,
-        help: count === 0 ? `Move this event to ${bin}.` : "An event can only be deleted once its tracks are. Delete those first.",
+        icon: "trash", disabled: Boolean(app.state.job) || count > 0, "aria-label": `Move this group to ${bin}`,
+        help: count === 0 ? `Move this group to ${bin}.` : "A group can only be deleted once its races are. Delete those first.",
       }),
     ),
     h("div.row.fields",
@@ -288,9 +288,9 @@ export function settings() {
       ),
     ),
     h("div.card.spaced",
-      label("EVENTS"),
+      label("GROUPS"),
       state.events.map(eventFields),
-      h("p.dim.small", "An event is a race or a series: a folder in your library with its tracks inside. Its name goes on the timer of every track in it, next to the track's name, and your ID for it goes beside your name and into its entry forms. New event in the Video Creator makes another."),
+      h("p.dim.small", "A group is a race series or a club you fly with: a folder in your library with its races inside. Its name goes on the timer of every race in it, next to the race's name, and your ID for it goes beside your name and into its entry forms. New group in the Video Creator makes another."),
     ),
     h("div.card",
       label("THE TIMER ON YOUR VIDEOS"),

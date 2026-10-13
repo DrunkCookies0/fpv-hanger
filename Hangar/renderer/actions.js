@@ -7,25 +7,121 @@ import { bin, Bin } from "./words.js";
 
 const busy = () => Boolean(app.state?.job);
 
-/** Asks for a new event's name and makes it, with a first track in it. */
+/** Asks for a new group's name and makes it. Any group but the season's then asks for its first race. */
 export async function newEvent() {
   const answer = await question({
-    title: "New event",
-    message: "An event is a race, a series, or just somewhere you fly. It gets its own folder in your library, with its own tracks, its own name on the timer and its own ID.",
-    field: { placeholder: "Its name, such as RaceGOW7" },
+    title: "New group",
+    message: "A group is a race series or a club you fly with. Its races go inside it, and its name goes on the timer of every video you make in it, with your ID and its logo if it has them.",
+    field: { placeholder: "Its name, such as Circle City FPV" },
     buttons: [{ title: "Cancel", value: false, kind: "secondary", cancel: true }, { title: "Create", value: true, kind: "primary", default: true }],
   });
   if (!answer.value) return;
   const made = take(await ask("newEvent", answer.text));
-  if (made.track) go({ name: "track", track: made.track });
-  else render();
+  if (made.track) return go({ name: "track", track: made.track });
+  render();
+  if (made.event) await newRace(made.event);
 }
 
-/** Makes the next track in an event and goes to it. */
+/** Makes the season's next track in its group and goes to it. */
 export async function newTrack(event) {
   const made = take(await ask("newTrack", event));
   if (made.track) go({ name: "track", track: made.track });
   else render();
+}
+
+/** Today, as a race's date is kept: YYYY-MM-DD, on this computer's calendar. */
+function today() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+/** The sheet for a race's name and date, and, given `group`, the group it is in. `save` is given
+ *  what was typed and comes back with what is wrong with it, which the sheet shows, or nothing once
+ *  it is done. Gives true when it was saved. */
+function raceSheet({ title, message, name = "", date = "", group = null, groups = [], button, save }) {
+  return new Promise((done) => {
+    let close = () => {};
+    const finish = (value) => {
+      close();
+      done(value);
+    };
+    const nameField = h("input.field", { type: "text", value: name, placeholder: "Its name, such as Zero Traction Open Whoop Race #5", spellcheck: false, "data-first": true, "aria-label": "Name" });
+    const dateField = h("input.field.date-field", { type: "date", value: date, "aria-label": "Date" });
+    const groupField = group === null ? null : h("select.field", { "aria-label": "Group" }, groups.map((one) => h("option", { value: one.folder, selected: one.folder === group }, one.name || "Loose tracks")));
+    const said = h("div.alert-message.warn", { "data-probe": "race problem" });
+    let saving = false;
+    const go = async () => {
+      if (saving) return;
+      saving = true;
+      const problem = await save({ name: nameField.value, date: dateField.value, event: groupField ? groupField.value : null });
+      saving = false;
+      if (problem) said.textContent = problem;
+      else finish(true);
+    };
+    nameField.addEventListener("keydown", (key) => { if (key.key === "Enter") go(); });
+    close = showSheet(h("div.alert",
+      h("div.alert-title", title),
+      message && h("div.alert-message", message),
+      h("label.sheet-field", h("span", "Name"), nameField),
+      h("label.sheet-field", h("span", "Date"), dateField),
+      groupField && h("label.sheet-field", h("span", "Group"), groupField),
+      said,
+      h("div.alert-buttons", secondary("Cancel", () => finish(false)), primary(button, go, { "data-default": true, probe: "race save" })),
+    ), { onEscape: () => finish(false), small: true });
+  });
+}
+
+/** Asks for a race's name and the day it was flown, and makes it. The season's group makes its next
+ *  track instead: its tracks, their names and their dates come from the season. */
+export async function newRace(event) {
+  const group = app.state.events.find((one) => one.folder === event);
+  if (group?.isSeason) return newTrack(event);
+  let made = null;
+  const done = await raceSheet({
+    title: "New race",
+    message: `A race in ${group?.name || "your library"}. Its recordings, laps and videos are kept together, and its name goes on the timer beside the group's.`,
+    date: today(),
+    button: "Create",
+    save: async ({ name, date }) => {
+      const answer = await ask("newRace", event, name, date);
+      if (answer.problem) return answer.problem;
+      made = take(answer);
+      return null;
+    },
+  });
+  if (done && made?.track) go({ name: "track", track: made.track });
+  else render();
+}
+
+/** Gives a race another name, date or group, everything in it going with it. */
+export async function editRace(track) {
+  if (busy() || app.editor) return;
+  const groups = app.state.events.filter((one) => !one.isSeason);
+  let moved = null;
+  const done = await raceSheet({
+    title: "Rename or move this race",
+    message: "Its recordings, markers, music and videos go with it.",
+    name: trackName(track),
+    date: app.tracks.get(track)?.state.date ?? "",
+    group: track.includes("/") ? track.slice(0, track.indexOf("/")) : "",
+    groups,
+    button: "Save",
+    save: async (change) => {
+      const answer = await ask("moveRace", track, change);
+      if (answer.problem) return answer.problem;
+      moved = take(answer);
+      return null;
+    },
+  });
+  if (!done || !moved?.track) return;
+  if (moved.track === track) {
+    await loadTrack(track);
+    render();
+    return;
+  }
+  app.tracks.delete(track);
+  app.forms.delete(track);
+  go({ name: "track", track: moved.track });
 }
 
 /** The question before a track or event with something in it goes: the button only works once the
