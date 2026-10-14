@@ -260,6 +260,8 @@ function versionCard() {
         update.kind === "available" && primary(`Update to v${update.version}`, () => act.installUpdate()),
         secondary("Check for updates", () => act.checkForUpdates(), { disabled: updating }),
         h("label.check", h("input", { type: "checkbox", checked: state.automaticUpdates, onchange: (event) => ask("remember", { noAutomaticUpdates: !event.target.checked }) }), "Check when the app opens"),
+        h("span.spacer"),
+        plain("Show what went wrong", () => ask("showLog"), { help: "The app writes down anything that goes wrong, such as a clip playing unevenly. This shows that file, to send to whoever is fixing it." }),
       ),
   );
 }

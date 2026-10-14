@@ -2,7 +2,7 @@
 // stretch its finished videos show, and the song laid under them. It takes over the whole window.
 
 import { app, ask, hangar, render, loadTrack, trackName } from "../core.js";
-import { h, fill, redraw, icon, label, primary, secondary } from "../ui.js";
+import { h, fill, redraw, icon, label, primary, secondary, plain } from "../ui.js";
 import { menu, confirm, sheetIsOpen } from "../sheets.js";
 import { keys, mac, fileBrowser } from "../words.js";
 import { lookFor, drawCornerTimer, picture, typefaceReady } from "../timer.js";
@@ -205,19 +205,8 @@ export class Editor {
   async load() {
     window.addEventListener("keydown", this.onKey, true);
     window.addEventListener("resize", this.onResize);
-    // Whether this computer's player can show the recording's own pictures decides which copy is made.
-    let opened = await ask("openClip", this.target.clip, { plain: false });
-    if (!opened.problem && opened.kind === "wrapped" && !(await this.plays(opened))) {
-      this.note = "Making a copy this computer can play…";
-      this.drawBody();
-      const heard = hangar.hear("copy", (fraction) => {
-        this.note = `Making a copy this computer can play… ${Math.floor(fraction * 100)}%`;
-        if (this.phase === "loading") this.drawBody();
-      });
-      opened = await ask("openClip", this.target.clip, { plain: true });
-      heard();
-      if (!opened.problem && !(await this.plays(opened))) opened = { problem: `${this.target.clip.split(/[\\/]/).pop()} can't be played.` };
-    }
+    // A computer that has played recordings unevenly plays a lighter copy of each from then on.
+    const opened = app.state.lightPlayback ? await this.openLight() : await this.openFull();
     if (app.editor !== this) return;
     if (opened.problem) {
       this.phase = "failed";
@@ -225,6 +214,8 @@ export class Editor {
       return this.drawBody();
     }
     const facts = opened.facts;
+    this.facts = facts;
+    this.kind = opened.kind;
     this.fps = facts.fps;
     this.frameCount = Math.max(1, facts.frames);
     this.markers = [...new Set(this.target.crossings.map((crossing) => Math.min(Math.max(Math.round(crossing * this.fps.value), 0), this.frameCount - 1)))].sort((a, b) => a - b);
@@ -238,6 +229,92 @@ export class Editor {
     this.phase = "ready";
     this.drawBody();
     this.show(this.frame, false);
+  }
+
+  /** The clip as it is, in the player, when this computer's player can show the recording's own
+   *  pictures, or else a copy made that it can. */
+  async openFull() {
+    let opened = await ask("openClip", this.target.clip, { plain: false });
+    if (!opened.problem && opened.kind === "wrapped" && !(await this.plays(opened))) {
+      opened = await this.making("Making a copy this computer can play…", () => ask("openClip", this.target.clip, { plain: true }));
+      if (!opened.problem && !(await this.plays(opened))) opened = { problem: `${this.target.clip.split(/[\\/]/).pop()} can't be played.` };
+    }
+    return opened;
+  }
+
+  /** A lighter copy of the clip in the player, for a computer that plays the recording unevenly. */
+  async openLight() {
+    let opened = await this.making("Making a lighter copy, for smooth playing on this computer…", () => ask("openClip", this.target.clip, { light: true }));
+    if (!opened.problem && !(await this.plays(opened))) opened = { problem: `${this.target.clip.split(/[\\/]/).pop()} can't be played.` };
+    return opened;
+  }
+
+  /** Waits for a copy to be made, saying how far along it is. */
+  async making(words, make) {
+    const say = (text) => {
+      this.note = text;
+      if (this.phase === "loading") this.drawBody();
+      else this.drawHead();
+    };
+    say(words);
+    const heard = hangar.hear("copy", (fraction) => say(`${words.replace(/…$/, "")}… ${Math.floor(fraction * 100)}%`));
+    try {
+      return await make();
+    } finally {
+      heard();
+      this.note = null;
+    }
+  }
+
+  /** Changes to the lighter copy, or back to the full picture, on the same frame. This computer
+   *  keeps to it for every clip from then on. */
+  async useLight(on) {
+    if (this.switching || this.phase !== "ready") return;
+    this.switching = true;
+    this.pause();
+    const frame = this.frame;
+    app.state.lightPlayback = on;
+    ask("remember", { lightPlayback: on });
+    const opened = on ? await this.openLight() : await this.openFull();
+    this.switching = false;
+    if (app.editor !== this) return;
+    if (opened.problem) this.message = opened.problem;
+    else this.kind = opened.kind;
+    this.uneven = null;
+    this.drawHead();
+    this.show(frame, false);
+  }
+
+  /**
+   * How evenly the clip played since it was started. When this computer dropped frames of it, the
+   * lighter copy is offered, and what happened is written down, once for each clip, so whoever is
+   * fixing it can tell why.
+   */
+  measure() {
+    const started = this.watching;
+    this.watching = null;
+    if (!started || typeof this.video.getVideoPlaybackQuality !== "function") return;
+    const now = this.video.getVideoPlaybackQuality();
+    const frames = now.totalVideoFrames - started.quality.totalVideoFrames;
+    const dropped = now.droppedVideoFrames - started.quality.droppedVideoFrames;
+    const seconds = (performance.now() - started.at) / 1000;
+    if (seconds < 2 || frames < 30 || dropped / frames < 0.05) return;
+    if (this.kind !== "light") {
+      this.uneven = { dropped, frames };
+      this.drawHead();
+    }
+    if (this.reported) return;
+    this.reported = true;
+    const facts = this.facts;
+    const codec = { h264: 'avc1.640028', hevc: 'hvc1.1.6.L120.90' }[facts.codec];
+    const hardware = codec && navigator.mediaCapabilities
+      ? navigator.mediaCapabilities.decodingInfo({ type: "file", video: { contentType: `video/mp4; codecs="${codec}"`, width: facts.width, height: facts.height, bitrate: 20000000, framerate: this.fps.value } })
+        .then((info) => (info.supported ? (info.powerEfficient ? "yes" : "no") : "can't")).catch(() => "unknown")
+      : Promise.resolve("unknown");
+    hardware.then((said) => ask("playbackReport", {
+      clip: this.target.clip.split(/[\\/]/).pop(), kind: this.kind, codec: facts.codec, width: facts.width, height: facts.height, fps: this.fps.label,
+      frames, dropped, seconds, hardware: said, window: [window.innerWidth, window.innerHeight, window.devicePixelRatio],
+    }));
   }
 
   /** Puts a copy of the clip in the player and says whether it can be played. */
@@ -348,6 +425,7 @@ export class Editor {
     this.previewing = preview;
     const video = this.video;
     video.playbackRate = this.speed;
+    if (typeof video.getVideoPlaybackQuality === "function") this.watching = { quality: video.getVideoPlaybackQuality(), at: performance.now() };
     video.play().catch(() => {});
     if (preview) this.startPreviewMusic(preview.from);
     else this.startMusic(this.seconds(this.frame));
@@ -363,6 +441,7 @@ export class Editor {
       this.playing = false;
       this.previewing = null;
       this.sound?.stop();
+      this.measure();
       this.show(this.frameCount - 1);
       this.drawTransport();
     };
@@ -401,6 +480,7 @@ export class Editor {
     this.previewing = null;
     this.video.pause();
     this.sound?.stop();
+    this.measure();
     // Park on the frame that is showing.
     this.show(this.showing());
     this.drawTransport();
@@ -914,9 +994,20 @@ export class Editor {
     if (this.message) status = h("span.warn", this.message);
     else if (this.dirty) status = h("span.dim", "Not saved yet. Done saves it.");
     else if (this.saved) status = h("span.good.ed-saved", icon("checkCircle"), "Saved");
+    // How the clip is playing on this computer: a lighter copy to change to when it drops frames.
+    let playing = null;
+    if (this.note && this.phase === "ready") playing = h("span.dim", this.note);
+    else if (this.kind === "light") {
+      playing = [h("span.dim", "Playing a lighter copy, for smooth playing on this computer."),
+        plain("Full picture", () => this.useLight(false), { probe: "ed full picture", help: "Play the recording itself again, at its full size. Every clip opens that way from now on." })];
+    } else if (this.uneven) {
+      playing = [h("span.warn", `This computer is playing it unevenly: ${this.uneven.dropped} of ${this.uneven.frames} frames were dropped.`),
+        secondary("Play a lighter copy", () => this.useLight(true), { probe: "ed lighter", help: "Make a smaller copy of the clip that plays smoothly here, with every frame where it is, so the laps are marked just as exactly. Every clip opens that way on this computer from now on." })];
+    }
     redraw(this.head,
       secondary(track, () => this.done(), { icon: "chevronLeft" }),
       h("div", h("div.ed-name", this.target.name), label("MARKERS & MUSIC")),
+      playing && h("div.ed-play-note", playing),
       h("span.spacer"),
       h("div.ed-status", status),
       // One button finishes: it saves and goes back. Leaving without saving is the other choice,

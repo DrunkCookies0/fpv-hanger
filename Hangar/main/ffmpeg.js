@@ -142,6 +142,22 @@ export class FFmpeg {
     { onLine: onProgress ? (line) => { const frame = /frame=\s*(\d+)/.exec(line); if (frame) onProgress(Math.min(1, Number(frame[1]) / facts.frames)); } : null });
   }
 
+  /**
+   * A lighter copy, for a computer that plays the recording itself unevenly: the same frames at the
+   * same times (frame n at n / fps), at most 1280 by 720, in H.264 made to be quick to decode, with
+   * a whole frame every 15 so stepping back and forth stays quick. `onProgress` is told how far
+   * along it is, from 0 to 1.
+   */
+  async lightCopy(file, to, facts, onProgress = null) {
+    const rate = `${facts.fps.num}/${facts.fps.den}`;
+    return this.#write(to, (part) => ["-v", "error", "-stats", "-y", "-i", file, "-map", "0:v:0", "-an",
+      "-vf", `settb=${facts.fps.den}/${facts.fps.num},setpts=N,scale=w='min(1280,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,${colours(facts)},format=yuv420p`,
+      "-fps_mode", "cfr", "-r", rate,
+      "-c:v", "libx264", "-preset", "superfast", "-tune", "fastdecode", "-crf", "23", "-g", "15", "-bf", "0",
+      ...tags, "-movflags", "+faststart", "-f", "mp4", part],
+    { onLine: onProgress ? (line) => { const frame = /frame=\s*(\d+)/.exec(line); if (frame) onProgress(Math.min(1, Number(frame[1]) / facts.frames)); } : null });
+  }
+
   /** Writes under another name first, so a half-made file is never taken for a whole one. */
   async #write(to, args, options = {}) {
     mkdirSync(dirname(to), { recursive: true });

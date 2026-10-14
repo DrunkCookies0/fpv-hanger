@@ -443,6 +443,7 @@ p.warn { color: var(--warn); }
 .ed-head { display: flex; align-items: center; gap: 14px; padding: 38px 24px 14px; flex: none; }
 .ed-name { font: 900 24px/1.15 var(--face); margin-bottom: 1px; }
 .ed-status { max-width: 460px; text-align: right; font: 600 12px/1.38 var(--face); }
+.ed-play-note { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 540px; margin-left: 12px; font: 600 12px/1.35 var(--face); }
 .ed-saved { display: inline-flex; align-items: center; gap: 5px; --knock: var(--background); }
 .ed-body { display: flex; flex: 1 1 0; min-height: 0; }
 .ed-waiting { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; flex: 1; font: 600 14px var(--face); }

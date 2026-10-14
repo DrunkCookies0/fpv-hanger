@@ -142,6 +142,47 @@ async function editor(tools) {
     const off = shown.filter(([frame, got, at]) => got !== frame || at !== frame);
     say(off.length === 0, `${wanted.length} frames asked for were the frames shown`, off.map(([frame, got]) => `${frame} gave ${got}`).join(", "));
 
+    // A computer that drops frames playing it is offered a lighter copy, and it is written down.
+    const lightBefore = config().lightPlayback;
+    const logBefore = existsSync(logFile()) ? readFileSync(logFile(), "utf8").length : 0;
+    const offered = await js(`
+      const e = window.hangar_.app.editor;
+      e.watching = { quality: { totalVideoFrames: 0, droppedVideoFrames: 0 }, at: performance.now() - 5000 };
+      const real = e.video.getVideoPlaybackQuality.bind(e.video);
+      e.video.getVideoPlaybackQuality = () => ({ totalVideoFrames: 300, droppedVideoFrames: 90 });
+      e.measure();
+      e.video.getVideoPlaybackQuality = real;
+      return { note: document.querySelector(".ed-play-note")?.textContent ?? null, button: Boolean(document.querySelector('[data-probe="ed lighter"]')) };`);
+    let noted = "";
+    for (let tries = 0; tries < 50 && !/unevenly: 90 of 300 frames/.test(noted); tries += 1) {
+      await pause(100);
+      noted = existsSync(logFile()) ? readFileSync(logFile(), "utf8").slice(logBefore) : "";
+    }
+    say(offered.button && /90 of 300 frames were dropped/.test(offered.note ?? "") && /unevenly: 90 of 300 frames dropped in 5\.\d s/.test(noted), "dropping frames while playing offers a lighter copy, and is written down with what the graphics can do", `${offered.note} / ${noted.trim().split("\n").at(-1) ?? ""}`);
+    // The lighter copy shows every frame where it was, and the full picture comes back.
+    await js(`document.querySelector('[data-probe="ed lighter"]').click()`);
+    const light = await js(`
+      const e = window.hangar_.app.editor;
+      for (let tries = 0; tries < 600 && (e.kind !== "light" || e.switching); tries += 1) await new Promise((done) => setTimeout(done, 50));
+      const out = [];
+      for (const frame of ${JSON.stringify(wanted)}) {
+        const seen = new Promise((done) => e.video.requestVideoFrameCallback((_now, data) => done(data.mediaTime)));
+        e.show(frame);
+        const time = await Promise.race([seen, new Promise((done) => setTimeout(() => done(null), 3000))]);
+        for (let tries = 0; tries < 100 && !e.settled; tries += 1) await new Promise((done) => setTimeout(done, 20));
+        out.push([frame, time === null ? null : Math.round(time * e.fps.value), e.frame]);
+      }
+      return { kind: e.kind, src: e.video.currentSrc, width: e.video.videoWidth, out, note: document.querySelector(".ed-play-note")?.textContent ?? null };`);
+    const lightOff = light.out.filter(([frame, got, at]) => got !== frame || at !== frame);
+    say(light.kind === "light" && light.src.includes("-light") && light.width <= 1280 && lightOff.length === 0 && config().lightPlayback === true && /lighter copy/.test(light.note ?? ""), "the lighter copy shows every frame asked for, and is kept to for every clip", `${light.kind}, ${light.width} wide, ${lightOff.map(([frame, got]) => `${frame} gave ${got}`).join(", ") || "every frame right"}`);
+    await js(`document.querySelector('[data-probe="ed full picture"]').click()`);
+    const full = await js(`
+      const e = window.hangar_.app.editor;
+      for (let tries = 0; tries < 600 && (e.kind === "light" || e.switching); tries += 1) await new Promise((done) => setTimeout(done, 50));
+      return { kind: e.kind, src: e.video.currentSrc };`);
+    say(full.kind !== "light" && !full.src.includes("-light") && config().lightPlayback === false, "Full picture plays the recording itself again", full.kind);
+    setConfig({ lightPlayback: lightBefore });
+
     // Stepping, as the arrow keys do it.
     const stepped = await js(`
       const e = window.hangar_.app.editor;

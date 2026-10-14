@@ -205,13 +205,13 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
   /** A recording's copy for the player and for making videos from: the same pictures in an MP4 with
    *  exact frame times, or a plainer one when that can't be made or the player can't show it. The
    *  three used most recently are kept. */
-  async function copyOf(clip, facts, { plain = false, onProgress = null } = {}) {
+  async function copyOf(clip, facts, { plain = false, light = false, onProgress = null } = {}) {
     const file = statSync(clip);
     const folder = join(cache, "Clip copies");
     mkdirSync(folder, { recursive: true });
     const stamp = `${basename(clip, extname(clip))}-${file.size}-${Math.round(file.mtimeMs)}`;
     const canWrap = !facts.reorders && ["hevc", "h264"].includes(facts.codec);
-    const kind = plain || !canWrap ? "plain" : "wrapped";
+    const kind = light ? "light" : plain || !canWrap ? "plain" : "wrapped";
     const to = join(folder, `${stamp}-${kind}.mp4`);
     if (!existsSync(to)) {
       // The copy is about as big as the clip.
@@ -219,7 +219,7 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
         const disk = statfsSync(folder);
         if (Number(disk.bavail) * Number(disk.bsize) < file.size * 1.2) return { problem: `There isn't enough free disk space to open this clip. It needs about ${bytes(file.size)}.` };
       } catch {}
-      const made = kind === "wrapped" ? await ffmpeg.rewrap(clip, to, facts) : await ffmpeg.plainCopy(clip, to, facts, onProgress);
+      const made = kind === "wrapped" ? await ffmpeg.rewrap(clip, to, facts) : kind === "light" ? await ffmpeg.lightCopy(clip, to, facts, onProgress) : await ffmpeg.plainCopy(clip, to, facts, onProgress);
       if (!made.ok) return { problem: made.problem };
     }
     const now = new Date();
@@ -283,6 +283,8 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
         showsTimer: config().showsTimer !== false,
         update,
         automaticUpdates: config().noAutomaticUpdates !== true,
+        /** This computer plays the marker editor's lighter copies, having played recordings unevenly. */
+        lightPlayback: config().lightPlayback === true,
         programs: kept.programsNow(),
         drive: drive.now(),
         job,
@@ -593,12 +595,13 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
       });
     },
 
-    /** Gets a recording ready for the marker editor: what it holds, and a copy the player can open. */
-    async openClip(clip, { plain = false } = {}) {
+    /** Gets a recording ready for the marker editor: what it holds, and a copy the player can open:
+     *  `light` for a lighter one, for a computer that plays the recording itself unevenly. */
+    async openClip(clip, { plain = false, light = false } = {}) {
       if (!existsSync(clip)) return { problem: `${basename(clip)} isn't there any more. Press Refresh.` };
       const facts = await library.facts(clip);
       if (!facts) return { problem: `${basename(clip)} can't be read as a video.` };
-      const copy = await copyOf(clip, facts, { plain, onProgress: (fraction) => tell("copy", fraction) });
+      const copy = await copyOf(clip, facts, { plain, light, onProgress: (fraction) => tell("copy", fraction) });
       if (copy.problem) return { problem: `${basename(clip)} couldn't be made ready: ${copy.problem}` };
       return {
         problem: null, kind: copy.kind, url: pathToFileURL(copy.file).href,
@@ -661,6 +664,20 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
 
     beep() {
       shell.beep();
+    },
+
+    /** A clip played unevenly in the marker editor: written down with what the computer's graphics
+     *  can do, so whoever is fixing it can tell why. */
+    async playbackReport(report) {
+      let device = "";
+      try {
+        const info = await app.getGPUInfo("basic");
+        const gpu = info.gpuDevice?.find((one) => one.active) ?? info.gpuDevice?.[0];
+        if (gpu) device = `, graphics ${Number(gpu.vendorId).toString(16)}:${Number(gpu.deviceId).toString(16)}${gpu.driverVersion ? ` driver ${gpu.driverVersion}` : ""}`;
+      } catch {}
+      const status = app.getGPUFeatureStatus();
+      const said = (value) => String(value ?? "unknown").slice(0, 40);
+      log(`Playing ${said(report.clip)} unevenly: ${Number(report.dropped)} of ${Number(report.frames)} frames dropped in ${Number(report.seconds).toFixed(1)} s, from the ${said(report.kind)} copy (${said(report.codec)}, ${Number(report.width)}x${Number(report.height)} at ${said(report.fps)}). Decoded by the graphics card: ${said(report.hardware)}. Video decoding ${said(status.video_decode)}, compositing ${said(status.gpu_compositing)}${device}. Window ${Number(report.window?.[0])}x${Number(report.window?.[1])} at ${Number(report.window?.[2])}x.`);
     },
 
     /** Something went wrong in a page: it is written down with everything else that has. */

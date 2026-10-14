@@ -2,6 +2,11 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.24.1 (14 October 2026)
+
+- Marking laps on a computer that plays recordings unevenly. When a clip you play in Markers & music drops frames, the app says so above it, with **Play a lighter copy**: a smaller copy of the clip, at most 1280×720, made to play smoothly, with every frame where it is in the recording, so the laps are marked just as exactly. That computer keeps to lighter copies for every clip from then on, and **Full picture** goes back. The finished videos are always made from the recording itself.
+- When a clip plays unevenly, the app writes down what the computer's graphics can do, in What went wrong.txt. **Show what went wrong**, in Pilot & settings beside Check for updates, shows that file, to send.
+
 ## v0.24.0 (13 October 2026)
 
 - The Video Creator tells groups and races apart. Your groups sit down the left as badges: a group's logo when it has one, or its initials in a colour of its own. Choose one, and its races are listed beside it, each with its date and best time, under the group's name and what it is (a series and its tracks, or a group and its races). The + under the groups makes a new group, and New race under its races makes a race. Right-click a group or a race for the rest, as before.
