@@ -1,7 +1,7 @@
 // Everything the app's pages can ask the main process to do, by name. A page has no access to
 // files or programs of its own: it asks for one of these and gets an answer back.
 
-import { app, dialog, shell, clipboard, WebContentsView } from "electron";
+import { app, dialog, shell, clipboard, screen, WebContentsView } from "electron";
 import { spawn } from "node:child_process";
 import { existsSync, statSync, statfsSync, readdirSync, readFileSync, writeFileSync, rmSync, utimesSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -675,9 +675,22 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
         const gpu = info.gpuDevice?.find((one) => one.active) ?? info.gpuDevice?.[0];
         if (gpu) device = `, graphics ${Number(gpu.vendorId).toString(16)}:${Number(gpu.deviceId).toString(16)}${gpu.driverVersion ? ` driver ${gpu.driverVersion}` : ""}`;
       } catch {}
+      let hertz = "unknown";
+      try {
+        const shown = window();
+        const frequency = shown && !shown.isDestroyed() ? screen.getDisplayMatching(shown.getBounds()).displayFrequency : 0;
+        if (frequency > 0) hertz = `${Math.round(frequency)} Hz`;
+      } catch {}
       const status = app.getGPUFeatureStatus();
       const said = (value) => String(value ?? "unknown").slice(0, 40);
-      log(`Playing ${said(report.clip)} unevenly: ${Number(report.dropped)} of ${Number(report.frames)} frames dropped in ${Number(report.seconds).toFixed(1)} s, from the ${said(report.kind)} copy (${said(report.codec)}, ${Number(report.width)}x${Number(report.height)} at ${said(report.fps)}). Decoded by the graphics card: ${said(report.hardware)}. Video decoding ${said(status.video_decode)}, compositing ${said(status.gpu_compositing)}${device}. Window ${Number(report.window?.[0])}x${Number(report.window?.[1])} at ${Number(report.window?.[2])}x.`);
+      const count = (value) => (Number.isFinite(Number(value)) ? Math.round(Number(value)) : 0);
+      const ms = (value) => (value !== null && value !== undefined && Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)} ms` : "unknown");
+      const most = Array.isArray(report.most) ? report.most : [];
+      log(`Played ${said(report.clip)} ${report.because ? `unevenly (${said(report.because)})` : "evenly"} for ${Number(report.seconds).toFixed(1)} s at ${Number(report.speed)}x, from the ${said(report.kind)} copy (${said(report.codec)}, ${count(report.width)}x${count(report.height)} at ${said(report.fps)}): `
+        + `${count(report.decoded)} frames, ${count(report.dropped)} dropped, ${count(report.held)} up too long (longest one up ${ms(report.longest)}), ${count(report.skipped)} never shown, ${count(report.waits)} waits for the recording (${ms(report.waited)}). `
+        + `The window was drawn every ${ms(report.every)} (most between ${ms(most[0])} and ${ms(most[1])}), ${count(report.late)} of ${count(report.draws)} draws late (longest ${ms(report.longestDraw)}). `
+        + `The editor took ${ms(report.drawing)} a frame to draw (longest ${ms(report.drawingMost)}); the page was held up ${count(report.holdUps)} times (longest ${ms(report.longestHoldUp)}). `
+        + `Screen ${hertz}. Decoded by the graphics card: ${said(report.hardware)}. Video decoding ${said(status.video_decode)}, compositing ${said(status.gpu_compositing)}${device}. Window ${count(report.window?.[0])}x${count(report.window?.[1])} at ${Number(report.window?.[2])}x.`);
     },
 
     /** Something went wrong in a page: it is written down with everything else that has. */
