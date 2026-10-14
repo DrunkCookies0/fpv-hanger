@@ -54,9 +54,19 @@ diff -rq "$APP/Contents/Resources/app" "$WIN/resources/app" >/dev/null || { echo
 if grep -rIl -e "/Users/" -e "/home/" "$APP/Contents/Resources/app" "$STAGE/Read Me First.txt" "$WIN/READ ME FIRST.txt"; then echo "A home folder path is in the app."; exit 1; fi
 
 # It works: the app tries itself out from start to finish, on a recording it makes for the purpose,
-# and ends by updating a copy of itself. PACKAGE_UNTRIED=1 leaves this out.
+# and ends by updating a copy of itself. PACKAGE_UNTRIED=1 leaves this out. It takes about five
+# minutes: one still going after 25 is stopped, and its report, written as it goes, says where it was.
 if [[ -z "$PACKAGE_UNTRIED" ]]; then
-  "$PROGRAM" --self-test --report "$WORK/self-test.txt" >/dev/null 2>&1 || { cat "$WORK/self-test.txt"; echo "The app didn't pass its own test."; exit 1 }
+  "$PROGRAM" --self-test --report "$WORK/self-test.txt" >/dev/null 2>&1 &
+  TESTING=$!
+  ( for second in {1..1500}; do sleep 1; kill -0 $TESTING 2>/dev/null || exit 0; done
+    kill $TESTING 2>/dev/null && echo "stopped" > "$WORK/self-test-stopped" ) &
+  WATCHING=$!
+  wait $TESTING
+  TESTED=$?
+  wait $WATCHING
+  if [[ -f "$WORK/self-test-stopped" ]]; then cat "$WORK/self-test.txt"; echo "The app's own test was still going after 25 minutes, and was stopped where its report above ends."; exit 1; fi
+  (( TESTED == 0 )) || { cat "$WORK/self-test.txt"; echo "The app didn't pass its own test."; exit 1 }
   grep -q "^Everything passed\.$" "$WORK/self-test.txt" || { cat "$WORK/self-test.txt"; echo "The app's own test didn't finish."; exit 1 }
   echo "The app passed its own test ($(grep -c '^ok ' "$WORK/self-test.txt") things)."
 fi

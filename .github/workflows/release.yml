@@ -31,6 +31,9 @@ jobs:
   release:
     name: Package, and try the Mac app
     runs-on: macos-latest
+    # It takes about ten minutes. The app's own test is stopped after 25 by package.sh, so this is
+    # only for something else that hangs.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
