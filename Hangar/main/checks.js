@@ -164,6 +164,9 @@ async function editor(tools) {
     const light = await js(`
       const e = window.hangar_.app.editor;
       for (let tries = 0; tries < 600 && (e.kind !== "light" || e.switching); tries += 1) await new Promise((done) => setTimeout(done, 50));
+      // The change lands on the frame it was on: that is let finish before anything else is asked for.
+      for (let tries = 0; tries < 100 && !e.settled; tries += 1) await new Promise((done) => setTimeout(done, 20));
+      await new Promise((done) => setTimeout(done, 200));
       const out = [];
       for (const frame of ${JSON.stringify(wanted)}) {
         const seen = new Promise((done) => e.video.requestVideoFrameCallback((_now, data) => done(data.mediaTime)));
