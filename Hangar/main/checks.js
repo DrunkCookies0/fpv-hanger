@@ -142,23 +142,61 @@ async function editor(tools) {
     const off = shown.filter(([frame, got, at]) => got !== frame || at !== frame);
     say(off.length === 0, `${wanted.length} frames asked for were the frames shown`, off.map(([frame, got]) => `${frame} gave ${got}`).join(", "));
 
-    // A computer that drops frames playing it is offered a lighter copy, and it is written down.
+    // A computer that drops frames playing it is offered a lighter copy, and how it played is written down.
     const lightBefore = config().lightPlayback;
     const logBefore = existsSync(logFile()) ? readFileSync(logFile(), "utf8").length : 0;
+    const speedItem = `
+      document.querySelector('[data-probe="ed speed"]').click();
+      const item = [...document.querySelectorAll(".menu-item")].at(-1)?.textContent ?? null;
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));`;
     const offered = await js(`
       const e = window.hangar_.app.editor;
-      e.watching = { quality: { totalVideoFrames: 0, droppedVideoFrames: 0 }, at: performance.now() - 5000 };
+      ${speedItem}
+      e.watch();
+      Object.assign(e.watching, { at: performance.now() - 5000, quality: { totalVideoFrames: 0, droppedVideoFrames: 0 } });
       const real = e.video.getVideoPlaybackQuality.bind(e.video);
       e.video.getVideoPlaybackQuality = () => ({ totalVideoFrames: 300, droppedVideoFrames: 90 });
       e.measure();
       e.video.getVideoPlaybackQuality = real;
+      return { item, note: document.querySelector(".ed-play-note")?.textContent ?? null, button: Boolean(document.querySelector('[data-probe="ed lighter"]')) };`);
+    const logSince = async (pattern) => {
+      let noted = "";
+      for (let tries = 0; tries < 50 && !pattern.test(noted); tries += 1) {
+        await pause(100);
+        noted = existsSync(logFile()) ? readFileSync(logFile(), "utf8").slice(logBefore) : "";
+      }
+      return noted;
+    };
+    let noted = await logSince(/unevenly \(dropped\)/);
+    say(offered.button && /90 of 300 frames were dropped/.test(offered.note ?? "") && /Played \S+ unevenly \(dropped\) for 5\.\d s at 1x, from the \w+ copy .*: 300 frames, 90 dropped.* Screen (\d+ Hz|unknown)\. Decoded by the graphics card/.test(noted),
+      "dropping frames while playing offers a lighter copy, and is written down with what the graphics can do", `${offered.note} / ${noted.trim().split("\n").at(-1) ?? ""}`);
+    say(offered.item === "Play a lighter copy", "the speed menu has the lighter copy, whether or not the clip played unevenly", offered.item);
+    // Every frame shown, but some held up on the screen too long: uneven as well.
+    const late = await js(`
+      const e = window.hangar_.app.editor;
+      e.reported = false;
+      e.uneven = null;
+      e.watch();
+      const w = e.watching;
+      Object.assign(w, { at: performance.now() - 5000, quality: { totalVideoFrames: 0, droppedVideoFrames: 0 } });
+      // 300 frames at 60 a second, on a screen drawn 60 times a second, every tenth up three draws too long.
+      let at = 0;
+      for (let frame = 0; frame < 300; frame += 1) {
+        at += 1000 / 60 + (frame % 10 === 5 ? 50 : 0);
+        w.shown.push({ at, media: frame / 60, presented: frame + 1 });
+      }
+      for (let draw = 0; draw < 400; draw += 1) w.draws.push((draw * 1000) / 60);
+      const real = e.video.getVideoPlaybackQuality.bind(e.video);
+      e.video.getVideoPlaybackQuality = () => ({ totalVideoFrames: 300, droppedVideoFrames: 0 });
+      const fps = e.fps;
+      e.fps = { ...fps, value: 60 };
+      e.measure();
+      e.fps = fps;
+      e.video.getVideoPlaybackQuality = real;
       return { note: document.querySelector(".ed-play-note")?.textContent ?? null, button: Boolean(document.querySelector('[data-probe="ed lighter"]')) };`);
-    let noted = "";
-    for (let tries = 0; tries < 50 && !/unevenly: 90 of 300 frames/.test(noted); tries += 1) {
-      await pause(100);
-      noted = existsSync(logFile()) ? readFileSync(logFile(), "utf8").slice(logBefore) : "";
-    }
-    say(offered.button && /90 of 300 frames were dropped/.test(offered.note ?? "") && /unevenly: 90 of 300 frames dropped in 5\.\d s/.test(noted), "dropping frames while playing offers a lighter copy, and is written down with what the graphics can do", `${offered.note} / ${noted.trim().split("\n").at(-1) ?? ""}`);
+    noted = await logSince(/unevenly \(held\)/);
+    say(late.button && /30 of 299 frames came up late or not at all/.test(late.note ?? "") && /unevenly \(held\).*: 300 frames, 0 dropped, 30 up too long/.test(noted),
+      "frames shown at the wrong moment, with none dropped, offer the lighter copy too", `${late.note} / ${noted.trim().split("\n").at(-1) ?? ""}`);
     // The lighter copy shows every frame where it was, and the full picture comes back.
     await js(`document.querySelector('[data-probe="ed lighter"]').click()`);
     const light = await js(`
@@ -175,9 +213,10 @@ async function editor(tools) {
         for (let tries = 0; tries < 100 && !e.settled; tries += 1) await new Promise((done) => setTimeout(done, 20));
         out.push([frame, time === null ? null : Math.round(time * e.fps.value), e.frame]);
       }
-      return { kind: e.kind, src: e.video.currentSrc, width: e.video.videoWidth, out, note: document.querySelector(".ed-play-note")?.textContent ?? null };`);
+      ${speedItem}
+      return { kind: e.kind, src: e.video.currentSrc, width: e.video.videoWidth, out, item, note: document.querySelector(".ed-play-note")?.textContent ?? null };`);
     const lightOff = light.out.filter(([frame, got, at]) => got !== frame || at !== frame);
-    say(light.kind === "light" && light.src.includes("-light") && light.width <= 1280 && lightOff.length === 0 && config().lightPlayback === true && /lighter copy/.test(light.note ?? ""), "the lighter copy shows every frame asked for, and is kept to for every clip", `${light.kind}, ${light.width} wide, ${lightOff.map(([frame, got]) => `${frame} gave ${got}`).join(", ") || "every frame right"}`);
+    say(light.kind === "light" && light.src.includes("-light") && light.width <= 1280 && lightOff.length === 0 && config().lightPlayback === true && /lighter copy/.test(light.note ?? "") && light.item === "Play the full picture", "the lighter copy shows every frame asked for, and is kept to for every clip", `${light.kind}, ${light.width} wide, ${lightOff.map(([frame, got]) => `${frame} gave ${got}`).join(", ") || "every frame right"}, the speed menu has ${light.item}`);
     await js(`document.querySelector('[data-probe="ed full picture"]').click()`);
     const full = await js(`
       const e = window.hangar_.app.editor;

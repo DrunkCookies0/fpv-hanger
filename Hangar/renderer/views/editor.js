@@ -10,9 +10,12 @@ import { SongSound } from "../sound.js";
 import { Race } from "../../shared/timing.js";
 import { clock, lapTime } from "../../shared/panel.js";
 import { musicPlan } from "../../shared/video.js";
+import { evenness, unevenBecause } from "../../shared/smoothness.js";
 
 /** How long before lap 1 and after the finish a finished video runs when the stretch is left to the app. */
 const leadIn = 3, hold = 8;
+/** At most how many frames and draws of the window are noted while a clip plays: a few minutes' worth. */
+const noted = 30000;
 const span = (seconds) => `${Math.abs(seconds).toFixed(1)} s`;
 /** A time into a song such as 0:44.16. */
 export const songClock = (seconds) => {
@@ -102,6 +105,10 @@ export class Editor {
     this.pointer = null;
     this.onKey = (event) => this.key(event);
     this.onResize = () => this.drawAll();
+    // A clip played while the window is out of sight isn't drawn evenly, and says nothing about this computer.
+    this.onHidden = () => {
+      if (document.hidden && this.watching) this.watching.hidden = true;
+    };
     this.build();
     this.load();
   }
@@ -205,6 +212,7 @@ export class Editor {
   async load() {
     window.addEventListener("keydown", this.onKey, true);
     window.addEventListener("resize", this.onResize);
+    document.addEventListener("visibilitychange", this.onHidden);
     // A computer that has played recordings unevenly plays a lighter copy of each from then on.
     const opened = app.state.lightPlayback ? await this.openLight() : await this.openFull();
     if (app.editor !== this) return;
@@ -281,26 +289,67 @@ export class Editor {
     if (opened.problem) this.message = opened.problem;
     else this.kind = opened.kind;
     this.uneven = null;
+    // How the new copy plays is written down as well.
+    this.reported = false;
     this.drawHead();
     this.show(frame, false);
   }
 
   /**
-   * How evenly the clip played since it was started. When this computer dropped frames of it, the
-   * lighter copy is offered, and what happened is written down, once for each clip, so whoever is
-   * fixing it can tell why.
+   * Starts noting how evenly the clip plays: what the player says as it puts each frame up, when
+   * the window is drawn, how long the player waits for the recording, and how long the editor's
+   * own drawing and the page's other work take.
+   */
+  watch() {
+    const video = this.video;
+    this.watching = null;
+    if (typeof video.getVideoPlaybackQuality !== "function") return;
+    const watching = {
+      quality: video.getVideoPlaybackQuality(), at: performance.now(), speed: this.speed, hidden: document.hidden,
+      shown: [], draws: [], waits: 0, waited: 0, since: null, drawing: 0, ticks: 0, drawingMost: 0, holdUps: 0, longestHoldUp: 0,
+    };
+    this.watching = watching;
+    const draw = (time) => {
+      if (this.watching !== watching) return;
+      if (watching.draws.length < noted) watching.draws.push(time);
+      requestAnimationFrame(draw);
+    };
+    requestAnimationFrame(draw);
+  }
+
+  /** The player has stopped to wait for more of the recording, or has started again. */
+  waiting(now) {
+    const watching = this.watching;
+    if (!watching || watching.shown.length === 0) return;
+    if (now && watching.since === null) {
+      watching.waits += 1;
+      watching.since = performance.now();
+    } else if (!now && watching.since !== null) {
+      watching.waited += performance.now() - watching.since;
+      watching.since = null;
+    }
+  }
+
+  /**
+   * How evenly the clip played since it was started. A computer can drop frames, or show every
+   * frame but some at the wrong moment, or stop to wait for the recording: any of them is uneven,
+   * and the lighter copy is offered. How it played is written down once for each copy of each clip,
+   * evenly or not, so whoever is fixing it can tell why.
    */
   measure() {
-    const started = this.watching;
+    const watching = this.watching;
     this.watching = null;
-    if (!started || typeof this.video.getVideoPlaybackQuality !== "function") return;
+    if (!watching) return;
+    this.waiting(false);
     const now = this.video.getVideoPlaybackQuality();
-    const frames = now.totalVideoFrames - started.quality.totalVideoFrames;
-    const dropped = now.droppedVideoFrames - started.quality.droppedVideoFrames;
-    const seconds = (performance.now() - started.at) / 1000;
-    if (seconds < 2 || frames < 30 || dropped / frames < 0.05) return;
-    if (this.kind !== "light") {
-      this.uneven = { dropped, frames };
+    const decoded = now.totalVideoFrames - watching.quality.totalVideoFrames;
+    const dropped = now.droppedVideoFrames - watching.quality.droppedVideoFrames;
+    const seconds = (performance.now() - watching.at) / 1000;
+    if (seconds < 2 || decoded < 30 || watching.hidden) return;
+    const even = evenness({ shown: watching.shown, draws: watching.draws, fps: this.fps.value, speed: watching.speed });
+    const because = unevenBecause({ decoded, dropped, ...even, waited: watching.waited });
+    if (because && this.kind !== "light") {
+      this.uneven = { because, decoded, dropped, late: even.held + even.skipped, frames: even.frames, waits: watching.waits };
       this.drawHead();
     }
     if (this.reported) return;
@@ -313,7 +362,10 @@ export class Editor {
       : Promise.resolve("unknown");
     hardware.then((said) => ask("playbackReport", {
       clip: this.target.clip.split(/[\\/]/).pop(), kind: this.kind, codec: facts.codec, width: facts.width, height: facts.height, fps: this.fps.label,
-      frames, dropped, seconds, hardware: said, window: [window.innerWidth, window.innerHeight, window.devicePixelRatio],
+      speed: watching.speed, seconds, decoded, dropped, ...even, waits: watching.waits, waited: watching.waited, because,
+      drawing: watching.ticks > 0 ? watching.drawing / watching.ticks : 0, drawingMost: watching.drawingMost,
+      holdUps: watching.holdUps, longestHoldUp: watching.longestHoldUp,
+      hardware: said, window: [window.innerWidth, window.innerHeight, window.devicePixelRatio],
     }));
   }
 
@@ -340,6 +392,8 @@ export class Editor {
   close() {
     window.removeEventListener("keydown", this.onKey, true);
     window.removeEventListener("resize", this.onResize);
+    document.removeEventListener("visibilitychange", this.onHidden);
+    this.holdUps?.disconnect();
     this.closeSoundWave();
     this.sound?.stop();
     this.video.pause();
@@ -425,13 +479,21 @@ export class Editor {
     this.previewing = preview;
     const video = this.video;
     video.playbackRate = this.speed;
-    if (typeof video.getVideoPlaybackQuality === "function") this.watching = { quality: video.getVideoPlaybackQuality(), at: performance.now() };
+    this.watch();
     video.play().catch(() => {});
     if (preview) this.startPreviewMusic(preview.from);
     else this.startMusic(this.seconds(this.frame));
     const each = (_now, shown) => {
       if (!this.playing || app.editor !== this) return;
+      const watching = this.watching, started = performance.now();
+      if (watching && watching.shown.length < noted) watching.shown.push({ at: shown.expectedDisplayTime, media: shown.mediaTime, presented: shown.presentedFrames });
       this.tick(shown.mediaTime);
+      if (watching && this.watching === watching) {
+        const took = performance.now() - started;
+        watching.drawing += took;
+        watching.ticks += 1;
+        watching.drawingMost = Math.max(watching.drawingMost, took);
+      }
       video.requestVideoFrameCallback(each);
     };
     video.requestVideoFrameCallback(each);
@@ -515,6 +577,8 @@ export class Editor {
     this.speed = speed;
     if (this.playing) {
       this.video.playbackRate = speed;
+      // How evenly it plays is noted afresh at the new speed.
+      this.watch();
       this.sound?.stop();
       if (this.previewing) this.startPreviewMusic(this.video.currentTime);
       else this.startMusic(this.video.currentTime);
@@ -965,6 +1029,20 @@ export class Editor {
 
   build() {
     this.video = h("video.ed-video", { muted: true, playsInline: true, preload: "auto", disablePictureInPicture: true });
+    this.video.addEventListener("waiting", () => this.waiting(true));
+    this.video.addEventListener("playing", () => this.waiting(false));
+    // The page held up by other work while the clip plays is noted with how evenly it played.
+    if (typeof PerformanceObserver === "function" && PerformanceObserver.supportedEntryTypes?.includes("longtask")) {
+      this.holdUps = new PerformanceObserver((list) => {
+        const watching = this.watching;
+        if (!watching) return;
+        for (const entry of list.getEntries()) {
+          watching.holdUps += 1;
+          watching.longestHoldUp = Math.max(watching.longestHoldUp, entry.duration);
+        }
+      });
+      this.holdUps.observe({ type: "longtask" });
+    }
     this.timer = h("canvas.ed-timer");
     this.timerNote = h("div.ed-timer-note");
     this.pictureBox = h("div.ed-picture", { onclick: () => this.togglePlay() }, this.video, this.timer, this.timerNote);
@@ -1001,7 +1079,11 @@ export class Editor {
       playing = [h("span.dim", "Playing a lighter copy, for smooth playing on this computer."),
         plain("Full picture", () => this.useLight(false), { probe: "ed full picture", help: "Play the recording itself again, at its full size. Every clip opens that way from now on." })];
     } else if (this.uneven) {
-      playing = [h("span.warn", `This computer is playing it unevenly: ${this.uneven.dropped} of ${this.uneven.frames} frames were dropped.`),
+      const { because, dropped, decoded, late, frames, waits } = this.uneven;
+      const what = because === "dropped" ? `${dropped} of ${decoded} frames were dropped`
+        : because === "held" ? `${late} of ${frames} frames came up late or not at all`
+        : `it stopped ${waits === 1 ? "once" : `${waits} times`} to wait for the recording`;
+      playing = [h("span.warn", `This computer is playing it unevenly: ${what}.`),
         secondary("Play a lighter copy", () => this.useLight(true), { probe: "ed lighter", help: "Make a smaller copy of the clip that plays smoothly here, with every frame where it is, so the laps are marked just as exactly. Every clip opens that way on this computer from now on." })];
     }
     redraw(this.head,
@@ -1089,7 +1171,14 @@ export class Editor {
         icon: this.previewing ? "pause" : "film", disabled: !this.stretch, probe: "ed preview",
         help: "Play the finished video as it will be: from its start to its end, with its music (P)",
       }),
-      secondary(speeds.find(([speed]) => speed === this.speed)?.[2] ?? "1×", (event) => menu(event.currentTarget, speeds.map(([speed, title]) => ({ title, action: () => this.setSpeed(speed) }))), { help: "Playback speed" }),
+      secondary(speeds.find(([speed]) => speed === this.speed)?.[2] ?? "1×", (event) => menu(event.currentTarget, [
+        ...speeds.map(([speed, title]) => ({ title, action: () => this.setSpeed(speed) })),
+        "-",
+        // The lighter copy, for a computer that plays the recording unevenly, whether or not that was noticed.
+        this.kind === "light"
+          ? { title: "Play the full picture", action: () => this.useLight(false), disabled: this.switching }
+          : { title: "Play a lighter copy", action: () => this.useLight(true), disabled: this.switching },
+      ]), { help: "Playback speed, and a lighter copy for a computer that plays clips unevenly", probe: "ed speed" }),
       secondary("", () => {
         this.showsTimer = !this.showsTimer;
         app.state.showsTimer = this.showsTimer;
