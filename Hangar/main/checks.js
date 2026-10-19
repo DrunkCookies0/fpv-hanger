@@ -398,6 +398,51 @@ async function video(tools) {
     console.log(`      ${basename(file)}: ${(statSync(file).size / 1e6).toFixed(1)} MB in ${((Date.now() - started) / 1000).toFixed(1)} s`);
     if (!process.argv.includes("--keep")) rmSync(file, { force: true });
   }
+  if (!argument("--shape") || argument("--shape") === "landscape") await songLongerThanItSays(tools, { track, run, edit, length });
+}
+
+/**
+ * A song that says it is shorter than it is: an MP3 without its length in its header, which
+ * FFmpeg guesses from the bitrate of its first moments. Loud noise first and a quiet tone after
+ * make that guess far too short. Put under a run from the start of its video, its music still
+ * lasts to the end of the video.
+ */
+async function songLongerThanItSays({ library, api, ffmpeg, cache }, { track, run, edit, length }) {
+  const real = Math.ceil(length) + 6;
+  const made = join(cache, "Song longer than it says.mp3");
+  const wrote = await ffmpeg.run(["-v", "error", "-y", "-f", "lavfi", "-i", "anoisesrc=d=4:c=white:a=0.5", "-f", "lavfi", "-i", `sine=frequency=440:duration=${real - 4}`,
+    "-filter_complex", "[0:a]aformat=sample_rates=44100:channel_layouts=stereo[a];[1:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=0.3[b];[a][b]concat=n=2:v=0:a=1",
+    "-c:a", "libmp3lame", "-q:a", "0", "-write_xing", "0", made]);
+  if (wrote.code !== 0) {
+    console.log("      (A song without its length in its header couldn't be made here: this FFmpeg has no MP3 encoder.)");
+    return;
+  }
+  const said = /Duration: (\d+):(\d+):([\d.]+)/.exec((await ffmpeg.run(["-i", made])).said);
+  const header = said ? Number(said[1]) * 3600 + Number(said[2]) * 60 + Number(said[3]) : null;
+  const measured = await ffmpeg.soundLength(made);
+  say(Math.abs(measured - real) < 0.1 && header !== null && header < length, "a song's length is read from its sound, not from what its file says", `${measured?.toFixed(2)} s of ${real} s; its file says ${header?.toFixed(2)} s`);
+  // The run is given the song, from the start of its video, and put back as it was after.
+  const kept = readFileSync(library.storeFile);
+  const name = basename(made);
+  let file = null;
+  try {
+    await library.keepSong(made, name);
+    const start = Math.max(0, edit.videoStart ?? run.crossings[0] - 3);
+    await library.saveRun(track, run.name, { edit: { ...edit, song: name, songStart: start, musicIn: null, musicOut: null } });
+    const video = await api.makeVideo(track, run.name, "landscape");
+    file = video?.made?.path ?? null;
+    if (!say(Boolean(file) && existsSync(file), "a 16:9 video is made with it", video?.notice?.split("\n")[0] ?? "")) return;
+    // Two seconds from the end, before the music fades out, it is still playing.
+    const heard = await ffmpeg.run(["-ss", String(Math.max(0, length - 2.5)), "-i", file, "-t", "1", "-map", "0:a:0", "-af", "volumedetect", "-f", "null", "-"]);
+    const loudness = /mean_volume: (-?[\d.]+) dB/.exec(heard.said);
+    say(loudness !== null && Number(loudness[1]) > -60, "its music lasts to the end of the video", loudness ? `${loudness[1]} dB two seconds from the end` : "no sound two seconds from the end");
+  } finally {
+    await library.saveRun(track, run.name, { edit });
+    writeFileSync(library.storeFile, kept);
+    rmSync(library.songFile(name, track), { force: true });
+    rmSync(made, { force: true });
+    if (file && !process.argv.includes("--keep")) rmSync(file, { force: true });
+  }
 }
 
 /** Puts a picture before and a clip after an event's videos, makes a video, and measures it. */

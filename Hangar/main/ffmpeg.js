@@ -185,8 +185,18 @@ export class FFmpeg {
     return samples;
   }
 
-  /** How long a sound file is, in seconds. */
+  /**
+   * How long a sound file is, in seconds: how long its sound really lasts, found by reading it
+   * through. The length a file says it is can be far out. An MP3 without one in its header has it
+   * guessed from the bitrate of its first moments, which can make a 3:33 song about a minute long
+   * and cut a video's music short. Reading a song through takes a moment. Only when it can't be
+   * read through is what the file says taken instead.
+   */
   async soundLength(file) {
+    const read = await this.run(["-v", "error", "-nostats", "-i", file, "-map", "0:a:0", "-f", "null", "-progress", "pipe:1", "-"]);
+    const times = [...read.out.matchAll(/^out_time_us=(\d+)$/gm)];
+    const seconds = times.length > 0 ? Number(times.at(-1)[1]) / 1e6 : 0;
+    if (read.code === 0 && seconds > 0) return seconds;
     const told = await this.run(["-i", file]);
     const length = /Duration: (\d+):(\d+):([\d.]+)/.exec(told.said);
     return length && /Audio:/.test(told.said) ? Number(length[1]) * 3600 + Number(length[2]) * 60 + Number(length[3]) : null;

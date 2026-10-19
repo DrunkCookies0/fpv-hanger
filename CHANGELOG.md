@@ -2,8 +2,9 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
-## v0.24.2 (14 October 2026)
+## v0.24.2 (19 October 2026)
 
+- A finished video's music no longer stops early when the song's file doesn't say how long it is. Some MP3s have no length written in them, and the length was guessed from how the song starts: a song of three and a half minutes could be taken for about one, and the music stopped there, though Markers & music showed it running to the end. Each song is now measured by reading it through, as Markers & music already did. Make the video again to get all its music.
 - A clip can stutter without dropping a frame: every frame is shown, but some stay on the screen too long. Markers & music now notices that as well, and a player that stops to wait for the recording, and offers **Play a lighter copy** for them too.
 - **Play a lighter copy** is in the speed menu (the **1×** button) whenever you want it, not only when the app has noticed something, and **Play the full picture** goes back.
 - Each clip you play for two seconds or more writes down how it played, evenly or not, in What went wrong.txt: frames dropped or up too long, how often the window was drawn, how long the editor took to draw, the screen's refresh rate and what the graphics can do. **Show what went wrong**, in Pilot & settings, shows that file, to send.
