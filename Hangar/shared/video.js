@@ -291,15 +291,19 @@ export function plan(job) {
     graph.push(`${order.map((name) => `[${name}_picture]${heard ? `[${name}_sound]` : ""}`).join("")}concat=n=${order.length}:v=1:a=${heard ? 1 : 0}[whole]${heard ? "[whole_sound]" : ""}`);
     picture = "whole";
     sound = heard ? "whole_sound" : null;
+  } else {
+    // The video is cut at its last frame here too. Told to stop after so many frames instead
+    // (-frames:v), FFmpeg 6.0, the one the Mac app has, stopped the music seconds early as well.
+    graph.push(`[out]trim=end_frame=${count}[cut]`);
+    picture = "cut";
   }
   const maps = ["-map", `[${picture}]`];
   if (sound) maps.push("-map", `[${sound}]`, "-c:a", "aac", "-b:a", "192k", "-ar", String(soundRate), "-ac", "2");
 
   const args = [
     "-v", "error", "-y", ...inputs, "-filter_complex", graph.join(";"), ...maps,
-    // With nothing joined on, the video is exactly its frames. With bookends the cut is made in the
-    // graph, and the video ends when the last of them does.
-    ...(ends.length > 0 ? [] : ["-frames:v", String(count)]), "-r", rate,
+    // The cut is made in the graph, so the video ends with its last frame, or with the last of its bookends.
+    "-r", rate,
     ...encoderArguments(job.encoder ?? "libx264", shape.bitrate), "-g", "120",
     "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv",
     "-movflags", "+faststart", "-f", "mp4", job.output,

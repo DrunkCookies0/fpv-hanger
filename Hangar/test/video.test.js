@@ -56,7 +56,10 @@ test("a 16:9 video: whole frames, one clock, the box in its corner", () => {
   assert.ok(graph.includes("maskedmerge"));
   assert.ok(graph.includes(`overlay=${1920 - 400 - 54}:54`));
   assert.equal(made.canvas.width % 2 + made.canvas.height % 2, 0);
-  assert.equal(made.args[made.args.indexOf("-frames:v") + 1], "4220");
+  // It is cut at its last frame in the graph: FFmpeg 6.0 told to stop after so many frames stops the music early too.
+  assert.ok(graph.includes("[out]trim=end_frame=4220[cut]"));
+  assert.equal(made.args[made.args.indexOf("-map") + 1], "[cut]");
+  assert.ok(!made.args.includes("-frames:v"));
   assert.ok(!made.args.includes("-c:a"));
 });
 
