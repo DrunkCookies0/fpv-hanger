@@ -62,9 +62,11 @@ if [[ -z "$PACKAGE_UNTRIED" ]]; then
   ( for second in {1..1500}; do sleep 1; kill -0 $TESTING 2>/dev/null || exit 0; done
     kill $TESTING 2>/dev/null && echo "stopped" > "$WORK/self-test-stopped" ) &
   WATCHING=$!
-  wait $TESTING
-  TESTED=$?
-  wait $WATCHING
+  # A test that fails is caught here, not left to end the script on the spot (set -e), which
+  # would leave its report unshown.
+  TESTED=0
+  wait $TESTING || TESTED=$?
+  wait $WATCHING || true
   if [[ -f "$WORK/self-test-stopped" ]]; then cat "$WORK/self-test.txt"; echo "The app's own test was still going after 25 minutes, and was stopped where its report above ends."; exit 1; fi
   (( TESTED == 0 )) || { cat "$WORK/self-test.txt"; echo "The app didn't pass its own test."; exit 1 }
   grep -q "^Everything passed\.$" "$WORK/self-test.txt" || { cat "$WORK/self-test.txt"; echo "The app's own test didn't finish."; exit 1 }
