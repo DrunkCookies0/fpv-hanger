@@ -51,6 +51,7 @@ import { pathToFileURL } from "node:url";
 import { argument, config, setConfig, logFile, version } from "./paths.js";
 import { install, thisCopy, whatTheOldAppKept, startScript } from "./updates.js";
 import { markerFile, FrameRate } from "../shared/timing.js";
+import { musicPlan } from "../shared/video.js";
 import { Library } from "./library.js";
 import { copyName, libraryName } from "../shared/drive.js";
 import { fileName, sites } from "../shared/uploads.js";
@@ -435,7 +436,11 @@ async function songLongerThanItSays({ library, api, ffmpeg, cache }, { track, ru
     // Two seconds from the end, before the music fades out, it is still playing.
     const heard = await ffmpeg.run(["-ss", String(Math.max(0, length - 2.5)), "-i", file, "-t", "1", "-map", "0:a:0", "-af", "volumedetect", "-f", "null", "-"]);
     const loudness = /mean_volume: (-?[\d.]+) dB/.exec(heard.said);
-    say(loudness !== null && Number(loudness[1]) > -60, "its music lasts to the end of the video", loudness ? `${loudness[1]} dB two seconds from the end` : "no sound two seconds from the end");
+    // How long its sound lasts, to tell a video whose music ends early from one this can't hear.
+    const sound = await ffmpeg.soundLength(file);
+    const plan = musicPlan({ start, end: start + length, songLength: await ffmpeg.soundLength(library.songFile(name, track)), songStart: start });
+    say(loudness !== null && Number(loudness[1]) > -60, "its music lasts to the end of the video",
+      `${loudness ? `${loudness[1]} dB` : "no sound"} two seconds from the end; its sound lasts ${sound?.toFixed(2)} s of ${length.toFixed(2)} s, the song planned from ${plan?.from.toFixed(2)} s to ${plan?.to.toFixed(2)} s`);
   } finally {
     await library.saveRun(track, run.name, { edit });
     writeFileSync(library.storeFile, kept);
