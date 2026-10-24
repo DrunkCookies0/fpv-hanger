@@ -2,6 +2,11 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.24.4 (24 October 2026)
+
+- A finished video made on Windows straight from a recording has each of its frames once. Videos are made that way from a recording whose frames are stored out of order (B-frames), as some cameras store them, or from one that isn't HEVC or H.264; HDZero recordings are neither, and were right. Wherever the camera had dropped a frame, the video showed the frame before it twice, so it ran a frame longer than the stretch chosen and, from there on, a frame behind its music. After a longer gap it stopped for a moment and then skipped frames. The timer stayed with the picture. Videos made on the Mac were right. Make the video again to get it right.
+- Every release is now also tried on a recording with B-frames and dropped frames, on Windows and on a Mac: a video made from it has to have each of its frames once.
+
 ## v0.24.3 (24 October 2026)
 
 - A finished video made on Windows from an MP4 recording starts where you set it, and its timer starts as you cross the gate. It could start many seconds away from there, with the timer running over the wrong part of the flight, though Markers & music and Preview showed it right. The copy of the recording that videos are made from had its frames in the wrong places: the FFmpeg the Windows app has reads the times in an MP4 differently from the Mac's. Recordings in a transport stream (.ts), and videos made on the Mac, were right. Make the video again to get it right: the copy is made again by itself.
