@@ -45,11 +45,11 @@ fi
 # FFmpeg for Windows. The builder keeps a dated build for about two weeks, so this address is moved
 # on when a release is made after that: see vendor/README.txt.
 if [[ ! -f vendor/win32-x64/ffmpeg.exe ]]; then
-  fetch ffmpeg-win/ffmpeg-n8.1.3-14-g330caae0c1-win64-gpl-8.1.zip \
-    https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-08-13-05/ffmpeg-n8.1.3-14-g330caae0c1-win64-gpl-8.1.zip \
-    6e63b4f8aae35949f4a5b471784f97a51b29b2466038769e3f8ecf513316ec6c
+  fetch ffmpeg-win/ffmpeg-n8.1.3-24-g92611900bb-win64-gpl-8.1.zip \
+    https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-24-13-02/ffmpeg-n8.1.3-24-g92611900bb-win64-gpl-8.1.zip \
+    0b1a903367bfbe906125aad78069e3b9dfecac74ea76db05ada2e667c80ac2c9
   mkdir -p vendor/win32-x64
-  unzip -q -j -o vendor/downloads/ffmpeg-win/ffmpeg-n8.1.3-14-g330caae0c1-win64-gpl-8.1.zip "*/bin/ffmpeg.exe" "*/LICENSE.txt" -d vendor/win32-x64
+  unzip -q -j -o vendor/downloads/ffmpeg-win/ffmpeg-n8.1.3-24-g92611900bb-win64-gpl-8.1.zip "*/bin/ffmpeg.exe" "*/LICENSE.txt" -d vendor/win32-x64
   mv vendor/win32-x64/LICENSE.txt vendor/win32-x64/FFmpeg-LICENSE.txt
 fi
 
