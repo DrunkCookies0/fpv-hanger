@@ -194,6 +194,13 @@ export function plan(job) {
   // Every stream is put on one clock that counts whole frames, so that frame n of the clip meets
   // frame n of the box. Left on their own clocks, FFmpeg pairs each picture with the box before it.
   const clock = `settb=${fps.den}/${fps.num},setpts=N`;
+  // The clip's frames are also made to last a frame each. Numbered afresh, each still lasts as long
+  // as it did in the recording, and FFmpeg 6.1 and later, told a steady rate (-r), go by that: a
+  // frame before a gap in the recording's times, where the camera dropped one, was written twice,
+  // and the video ran a frame longer and a frame behind its music from there. Frames already a
+  // frame apart pass through fps one for one. -r stays, as the video chips' encoders work out
+  // their bitrate from it.
+  const clipClock = `${clock},fps=${rate}`;
   const first = Math.max(0, Math.round(job.start * fps.value));
   const count = Math.max(1, Math.min(job.facts.frames - first, Math.round((job.end - job.start) * fps.value)));
   const look = job.look;
@@ -213,7 +220,7 @@ export function plan(job) {
     canvas = evenPlace({ ...at, width: panel.pixelWidth, height: panel.pixelHeight });
     // The whole frame, scaled to fit, on black, with the box in its corner.
     graph = [
-      `[0:v]${cut}${clock},${asTheMacShows(job.facts)},scale=${shape.width}:${shape.height}:force_original_aspect_ratio=decrease:${toVideo}:flags=bicubic,pad=${shape.width}:${shape.height}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p[base]`,
+      `[0:v]${cut}${clipClock},${asTheMacShows(job.facts)},scale=${shape.width}:${shape.height}:force_original_aspect_ratio=decrease:${toVideo}:flags=bicubic,pad=${shape.width}:${shape.height}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p[base]`,
       `[1:v]${clock}[box]`,
     ];
     layOver(graph, { under: "base", graphics: "box", to: "out", ...canvas, last: true });
@@ -230,7 +237,7 @@ export function plan(job) {
     // its light (a touch more of the blue), as the Mac app does it. Blurred at quarter size to keep it cheap.
     const small = { width: shape.width / 4, height: shape.height / 4 };
     graph = [
-      `[0:v]${cut}${clock},${crop},${asTheMacShows(job.facts)},split=2[near][far]`,
+      `[0:v]${cut}${clipClock},${crop},${asTheMacShows(job.facts)},split=2[near][far]`,
       `[near]scale=${shape.width}:${pictureHeight}:${toVideo}:flags=bicubic,format=yuv420p[front]`,
       `[far]scale=${small.width}:${small.height}:force_original_aspect_ratio=increase:flags=bilinear,crop=${small.width}:${small.height},format=gbrp16le,${power(2.4)},` +
         `gblur=sigma=9,${power("1/2.4", [0.32, 0.32, 0.34])},scale=${shape.width}:${shape.height}:${toVideo}:flags=bilinear,format=yuv420p[back]`,

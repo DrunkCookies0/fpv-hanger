@@ -6,7 +6,9 @@
 //            are added, moved, undone and saved, a song is placed, the sound wave window marks it
 //   video    makes a 16:9 and a 9:16 video of a run and measures what came out
 //   mp4      an MP4 timed as the goggles time theirs, with gaps: every frame is where it was in
-//            the marker editor's copies, and a video made from it starts on the frame asked for
+//            the marker editor's copies, and a video made from it starts on the frame asked for.
+//            Then one with B-frames, whose video is made from the recording itself: each of its
+//            frames is in that video once
 //   pages    draws every page and sheet, and fails on any error in the window. The Video
 //            Creator opens on its first page, with a badge on its rail for every group (its logo
 //            when it has one), and a group chosen there shows its races beside it.
@@ -495,6 +497,42 @@ async function mp4(tools) {
   } finally {
     await library.saveRun(track, "hdz_check", { edit: {} });
     for (const file of [clip, join(library.folder(track, "csv markers"), "hdz_check.csv"), video]) if (file) rmSync(file, { force: true });
+  }
+  await reorderedMp4(tools);
+}
+
+/**
+ * A recording in an MP4 with B-frames, as some cameras make them, and gaps in its times like the
+ * goggles'. No copy of it with exact frame times is made, so its video is made from the recording
+ * itself, read from its start: each of its frames is in that video once, from the one asked for.
+ * FFmpeg 6.1 and later, which the Windows app has, once wrote the frame before a gap twice. The
+ * recording, its run and its video are taken away again after.
+ */
+async function reorderedMp4(tools) {
+  const { library, api, ffmpeg, cache } = tools;
+  const track = library.tracks[0];
+  const made = join(cache, "hdz_check_b.mp4");
+  const wrote = await numberedRecording(ffmpeg, made, { seconds: 10, reordered: true });
+  if (!say(wrote.ok, "an MP4 recording with B-frames and gaps in its times is made to work on", wrote.problem ?? "")) return;
+  const added = await library.addClips(track, [made]);
+  rmSync(made, { force: true });
+  const clip = library.clips(track).find((one) => basename(one) === "hdz_check_b.mp4");
+  if (!say(Boolean(clip), "it is added to the track", added.problem ?? "")) return;
+  let video = null;
+  try {
+    const facts = await library.facts(clip);
+    if (!say(facts?.reorders === true, "its frames are read as stored out of order", facts ? `${facts.frames} frames, ${facts.codec}` : "it can't be read")) return;
+    // A video from 3 s to 8 s starts on frame 180 and goes on a frame at a time, through nearly a hundred gaps.
+    await library.saveRun(track, "hdz_check_b", { frames: [210, 300, 390, 450], fps: new FrameRate(60), markersChanged: true, edit: { videoStart: 3, videoEnd: 8 } });
+    const result = await api.makeVideo(track, "hdz_check_b", "landscape");
+    video = result?.made?.path ?? null;
+    const shown = video ? await numbersIn(ffmpeg, video) : null;
+    const wrong = shown ? shown.map((number, index) => index).filter((index) => shown[index] !== 180 + index) : [];
+    say(shown?.length === 300 && wrong.length === 0, "a 16:9 video made from the recording itself has each of its frames once",
+      !shown ? result?.notice?.split("\n")[0] ?? "" : wrong.length > 0 ? `its frame ${wrong[0]} shows ${shown[wrong[0]]}, not ${180 + wrong[0]}, and it has ${shown.length} frames of 300` : `${shown.length} frames, from 180`);
+  } finally {
+    await library.saveRun(track, "hdz_check_b", { edit: {} });
+    for (const file of [clip, join(library.folder(track, "csv markers"), "hdz_check_b.csv"), video]) if (file) rmSync(file, { force: true });
   }
 }
 
