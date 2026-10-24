@@ -9,9 +9,12 @@ const bits = 12;
 /**
  * Makes one: `seconds` of frames at sixty a second, `width` wide and 16:9, in HEVC, or H.264 when
  * this FFmpeg can't make HEVC. Nearly one frame in three is followed by a gap of one frame, so the
- * file runs longer by the clock than its frames do at sixty a second. Says { ok, problem }.
+ * file runs longer by the clock than its frames do at sixty a second. `reordered` stores some
+ * frames after the ones they are shown before (B-frames), as some cameras do: no copy with exact
+ * frame times is made of such a recording, and a video is made from the recording itself.
+ * Says { ok, problem }.
  */
-export async function numberedRecording(ffmpeg, file, { seconds = 20, width = 640 } = {}) {
+export async function numberedRecording(ffmpeg, file, { seconds = 20, width = 640, reordered = false } = {}) {
   const height = Math.round((width * 9) / 32) * 2;
   const block = width / 20, top = Math.round(height * 0.84), tall = Math.round(height * 0.1);
   const marks = [`drawbox=x=0:y=${top}:w=${block * bits}:h=${tall}:color=black:t=fill`];
@@ -19,8 +22,9 @@ export async function numberedRecording(ffmpeg, file, { seconds = 20, width = 64
   const picture = ["-v", "error", "-y", "-f", "lavfi", "-i", `color=c=gray:s=${width}x${height}:r=60:d=${seconds}`,
     "-vf", `${marks.join(",")},setpts=N+floor(N*0.3),format=yuv420p`, "-fps_mode", "passthrough", "-enc_time_base:v", "1/60"];
   const out = ["-video_track_timescale", "15360", "-f", "mp4", file];
-  let made = await ffmpeg.run([...picture, "-c:v", "libx265", "-preset", "ultrafast", "-x265-params", "log-level=error:bframes=0:keyint=60", "-tag:v", "hvc1", ...out]);
-  if (made.code !== 0) made = await ffmpeg.run([...picture, "-c:v", "libx264", "-preset", "ultrafast", "-bf", "0", "-g", "60", ...out]);
+  const bframes = reordered ? 3 : 0;
+  let made = await ffmpeg.run([...picture, "-c:v", "libx265", "-preset", "ultrafast", "-x265-params", `log-level=error:bframes=${bframes}:keyint=60`, "-tag:v", "hvc1", ...out]);
+  if (made.code !== 0) made = await ffmpeg.run([...picture, "-c:v", "libx264", "-preset", "ultrafast", "-bf", String(bframes), "-g", "60", ...out]);
   return made.code === 0 ? { ok: true, problem: null } : { ok: false, problem: made.said.trim().split("\n").slice(-3).join(" ") || "FFmpeg wrote nothing" };
 }
 

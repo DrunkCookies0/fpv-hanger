@@ -66,7 +66,11 @@ test("a 16:9 video: whole frames, one clock, the box in its corner", () => {
 test("a clip without exact times is read from its start and cut by frame", () => {
   const made = plan({ shape: "landscape", facts, source: "clip.ts", exactTimes: false, start: 7.033333, end: 77.366667, race, look, output: "out.mp4" });
   assert.ok(!made.args.includes("-ss"));
-  assert.ok(made.args[made.args.indexOf("-filter_complex") + 1].includes("trim=start_frame=422:end_frame=4642,"));
+  // Numbered afresh, its frames are each made to last a frame too: FFmpeg 6.1 and later, told the
+  // rate with -r, wrote a frame twice where it had lasted two in the recording. -r stays for the encoders.
+  assert.ok(made.args[made.args.indexOf("-filter_complex") + 1].includes("[0:v]trim=start_frame=422:end_frame=4642,settb=1/60,setpts=N,fps=60/1,"));
+  assert.equal(made.args[made.args.indexOf("-r") + 1], "60/1");
+  assert.ok(!made.args.includes("-fps_mode"));
 });
 
 test("a 9:16 video: the picture cropped to itself, the box under it, music after the heading", () => {
@@ -75,7 +79,7 @@ test("a 9:16 video: the picture cropped to itself, the box under it, music after
     headingFile: "heading.png", music: { file: "song.mp3", songLength: 231.758, songStart: -145.823 }, output: "out.mp4",
   });
   const graph = made.args[made.args.indexOf("-filter_complex") + 1];
-  assert.ok(graph.includes("crop=1200:720:40:0"));
+  assert.ok(graph.startsWith("[0:v]settb=1/60,setpts=N,fps=60/1,crop=1200:720:40:0,"));
   assert.ok(graph.includes("scale=1080:648:"));
   // The box sits under the picture and fills the room down to the captions. It starts in from the
   // left, clear of what a phone cuts off, and ends short of the apps' column of buttons on the right.
