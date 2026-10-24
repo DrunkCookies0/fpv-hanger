@@ -2,6 +2,12 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.24.3 (24 October 2026)
+
+- A finished video made on Windows from an MP4 recording starts where you set it, and its timer starts as you cross the gate. It could start many seconds away from there, with the timer running over the wrong part of the flight, though Markers & music and Preview showed it right. The copy of the recording that videos are made from had its frames in the wrong places: the FFmpeg the Windows app has reads the times in an MP4 differently from the Mac's. Recordings in a transport stream (.ts), and videos made on the Mac, were right. Make the video again to get it right: the copy is made again by itself.
+- On Windows, the lighter copy, and the copy made for a computer that can't play a recording, have every frame where it is in the recording. Where the goggles had dropped a frame, the frames after it came a frame late, so a lap marked there could be a frame out.
+- Every release is now tried on an MP4 recording with dropped frames, on Windows and on a Mac, before it is published: each copy has to have every frame where it was, and a video has to start on the frame asked for.
+
 ## v0.24.2 (19 October 2026)
 
 - A finished video made on the Mac has all its music. Its music stopped several seconds before the end of the video, though Markers & music and Preview played it to the end: the Mac app's FFmpeg stopped the music as well when it was told how many frames the video has. The video is now cut at its last frame another way. Videos made on Windows had all their music. Make a video again to get all of it.
