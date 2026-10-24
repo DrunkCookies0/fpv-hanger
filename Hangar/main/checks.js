@@ -5,6 +5,8 @@
 //   editor   opens a run in the marker editor: every frame asked for is the frame shown, markers
 //            are added, moved, undone and saved, a song is placed, the sound wave window marks it
 //   video    makes a 16:9 and a 9:16 video of a run and measures what came out
+//   mp4      an MP4 timed as the goggles time theirs, with gaps: every frame is where it was in
+//            the marker editor's copies, and a video made from it starts on the frame asked for
 //   pages    draws every page and sheet, and fails on any error in the window. The Video
 //            Creator opens on its first page, with a badge on its rail for every group (its logo
 //            when it has one), and a group chosen there shows its races beside it.
@@ -47,12 +49,13 @@ import { existsSync, readFileSync, readdirSync, writeFileSync, appendFileSync, c
 import { createServer } from "node:http";
 import { EOL, arch, cpus, release, tmpdir, totalmem, version as systemVersion } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { argument, config, setConfig, logFile, version } from "./paths.js";
 import { install, thisCopy, whatTheOldAppKept, startScript } from "./updates.js";
 import { markerFile, FrameRate } from "../shared/timing.js";
 import { musicPlan } from "../shared/video.js";
 import { Library } from "./library.js";
+import { numberedRecording, numbersIn, frameTimes } from "./numbered.js";
 import { copyName, libraryName } from "../shared/drive.js";
 import { fileName, sites } from "../shared/uploads.js";
 
@@ -75,7 +78,7 @@ function say(ok, what, detail = "") {
 }
 
 export async function run(which, tools) {
-  const checks = { editor, video, pages, form, bookends, trackview, trackvideo, outside, uploads, drive, cards, update, updating, carryover, everything };
+  const checks = { editor, video, mp4, pages, form, bookends, trackview, trackvideo, outside, uploads, drive, cards, update, updating, carryover, everything };
   if (report) writeFileSync(report, "");
   if (!checks[which]) {
     console.error(`There is no check called ${which}. There are: ${Object.keys(checks).join(", ")}.`);
@@ -447,6 +450,51 @@ async function songLongerThanItSays({ library, api, ffmpeg, cache }, { track, ru
     rmSync(library.songFile(name, track), { force: true });
     rmSync(made, { force: true });
     if (file && !process.argv.includes("--keep")) rmSync(file, { force: true });
+  }
+}
+
+/**
+ * A recording in an MP4, as the goggles make them: its frames timed by the clock, in other units
+ * than a transport stream's, with gaps where frames were dropped (main/numbered.js). Every frame
+ * of it is where it was in the copies the marker editor plays, and a video made from it starts on
+ * the frame asked for. The recording, its run and its video are taken away again after.
+ */
+async function mp4(tools) {
+  const { library, api, ffmpeg, cache } = tools;
+  const track = library.tracks[0];
+  mkdirSync(cache, { recursive: true });
+  const made = join(cache, "hdz_check.mp4");
+  const wrote = await numberedRecording(ffmpeg, made, { seconds: 20 });
+  if (!say(wrote.ok, "an MP4 recording with gaps in its times is made to work on", wrote.problem ?? "")) return;
+  const added = await library.addClips(track, [made]);
+  rmSync(made, { force: true });
+  const clip = library.clips(track).find((one) => basename(one) === "hdz_check.mp4");
+  if (!say(Boolean(clip), "it is added to the track", added.problem ?? "")) return;
+  let video = null;
+  try {
+    const facts = await library.facts(clip);
+    say(facts?.fps.label === "60" && facts.frames === 1200 && facts.duration > 24, "its frame rate is read from its frames, not from how long it lasts", facts ? `${facts.frames} frames at ${facts.fps.label}, ${facts.duration.toFixed(1)} s by the clock` : "it can't be read");
+    if (!facts) return;
+    for (const light of [false, true]) {
+      const opened = await api.openClip(clip, { light });
+      const file = opened.url ? fileURLToPath(opened.url) : null;
+      const shown = file ? await numbersIn(ffmpeg, file) : null;
+      const times = file ? await frameTimes(ffmpeg, file) : null;
+      const wrong = shown && times ? shown.map((_, n) => n).filter((n) => shown[n] !== n || Math.abs(times[n] - n / 60) > 0.001) : [];
+      say(Boolean(shown) && shown.length === facts.frames && wrong.length === 0, `its ${light ? "lighter" : "full"} copy for the marker editor has every frame where it was`,
+        opened.problem ?? (wrong.length > 0 ? `${wrong.length} out of place, the first is frame ${wrong[0]}, showing ${shown[wrong[0]]} at ${times[wrong[0]]?.toFixed(3)} s` : `${shown?.length} frames of ${facts.frames}`));
+    }
+    // A video from 4 s to 16 s starts on frame 240 and goes on a frame at a time.
+    await library.saveRun(track, "hdz_check", { frames: [300, 480, 660, 840], fps: new FrameRate(60), markersChanged: true, edit: { videoStart: 4, videoEnd: 16 } });
+    const result = await api.makeVideo(track, "hdz_check", "landscape");
+    video = result?.made?.path ?? null;
+    const shown = video ? await numbersIn(ffmpeg, video) : null;
+    const wrong = shown ? shown.map((number, index) => index).filter((index) => shown[index] !== 240 + index) : [];
+    say(shown?.length === 720 && wrong.length === 0, "a 16:9 video made from it starts on the frame asked for, and goes on a frame at a time",
+      !shown ? result?.notice?.split("\n")[0] ?? "" : wrong.length > 0 ? `its frame ${wrong[0]} shows ${shown[wrong[0]]}, not ${240 + wrong[0]}` : `${shown.length} frames, from 240`);
+  } finally {
+    await library.saveRun(track, "hdz_check", { edit: {} });
+    for (const file of [clip, join(library.folder(track, "csv markers"), "hdz_check.csv"), video]) if (file) rmSync(file, { force: true });
   }
 }
 
@@ -1670,7 +1718,7 @@ async function everything(tools) {
   note();
 
   const steps = [
-    ["The marker editor", editor], ["Making the videos", video], ["Before and after a video", bookends],
+    ["The marker editor", editor], ["Making the videos", video], ["A recording in an MP4", mp4], ["Before and after a video", bookends],
     ["The track in 3D, and building one", trackview], ["Other projects' tools", outside], ["Uploading", uploads], ["A card from the goggles", cards], ["The copy in Google Drive", drive], ["Every page", pages], ["Updating itself", updating],
   ];
   for (const [title, step] of steps) {

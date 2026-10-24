@@ -123,9 +123,21 @@ export class FFmpeg {
    */
   async rewrap(file, to, facts) {
     const ticks = (90000 * facts.fps.den) / facts.fps.num;
+    // The times are in ninety-thousandths of a second, as the copy counts, and the filter is told
+    // so. Told nothing, FFmpeg 6.1 and later take them in the recording's own units, which are
+    // ninety-thousandths in a transport stream but not in most MP4s: an MP4's frames came out far
+    // apart, and a video made from the copy started seconds from where it was set. FFmpeg 8 takes
+    // them in the recording's units even then, unless also told "prescale", which 6 and 7 don't know.
+    const prescale = (await this.#settsHasPrescale()) ? ":prescale=1" : "";
     return this.#write(to, (part) => ["-v", "error", "-y", "-i", file, "-map", "0:v:0", "-an", "-c", "copy",
-      "-bsf:v", `setts=pts=N*${ticks}:dts=N*${ticks}`, "-video_track_timescale", "90000",
+      "-bsf:v", `setts=time_base=1/90000${prescale}:pts=N*${ticks}:dts=N*${ticks}:duration=${ticks}`, "-video_track_timescale", "90000",
       ...(facts.codec === "hevc" ? ["-tag:v", "hvc1"] : []), "-movflags", "+faststart", "-f", "mp4", part]);
+  }
+
+  /** Whether this FFmpeg's setts filter has the prescale option, as FFmpeg 8 has. Asked once. */
+  #settsHasPrescale() {
+    this.prescale ??= this.run(["-h", "bsf=setts"]).then((answer) => /\bprescale\b/.test(answer.out));
+    return this.prescale;
   }
 
   /**
@@ -134,9 +146,8 @@ export class FFmpeg {
    * `onProgress` is told how far along it is, from 0 to 1.
    */
   async plainCopy(file, to, facts, onProgress = null) {
-    const rate = `${facts.fps.num}/${facts.fps.den}`;
     return this.#write(to, (part) => ["-v", "error", "-stats", "-y", "-i", file, "-map", "0:v:0", "-an",
-      "-vf", `settb=${facts.fps.den}/${facts.fps.num},setpts=N,${colours(facts)},format=yuv420p`, "-fps_mode", "cfr", "-r", rate,
+      "-vf", `settb=${facts.fps.den}/${facts.fps.num},setpts=N,${colours(facts)},format=yuv420p`, ...asTimed(facts),
       "-c:v", "libx264", "-preset", "ultrafast", "-tune", "fastdecode", "-crf", "20", "-g", "1",
       ...tags, "-movflags", "+faststart", "-f", "mp4", part],
     { onLine: onProgress ? (line) => { const frame = /frame=\s*(\d+)/.exec(line); if (frame) onProgress(Math.min(1, Number(frame[1]) / facts.frames)); } : null });
@@ -149,10 +160,9 @@ export class FFmpeg {
    * along it is, from 0 to 1.
    */
   async lightCopy(file, to, facts, onProgress = null) {
-    const rate = `${facts.fps.num}/${facts.fps.den}`;
     return this.#write(to, (part) => ["-v", "error", "-stats", "-y", "-i", file, "-map", "0:v:0", "-an",
       "-vf", `settb=${facts.fps.den}/${facts.fps.num},setpts=N,scale=w='min(1280,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,${colours(facts)},format=yuv420p`,
-      "-fps_mode", "cfr", "-r", rate,
+      ...asTimed(facts),
       "-c:v", "libx264", "-preset", "superfast", "-tune", "fastdecode", "-crf", "23", "-g", "15", "-bf", "0",
       ...tags, "-movflags", "+faststart", "-f", "mp4", part],
     { onLine: onProgress ? (line) => { const frame = /frame=\s*(\d+)/.exec(line); if (frame) onProgress(Math.min(1, Number(frame[1]) / facts.frames)); } : null });
@@ -224,6 +234,14 @@ export class FFmpeg {
 export function colours(facts) {
   return `scale=in_color_matrix=${facts.matrix}:in_range=${facts.fullRange ? "full" : "limited"}:out_color_matrix=bt709:out_range=limited`;
 }
+
+/**
+ * A copy's frames are written at the times its filter gives them, frame n at n / fps, and nothing
+ * else, counted in frames. Asked for a steady rate (cfr), FFmpeg 6.1 and later also go by how long
+ * each frame lasted in the recording, and after a gap in a recording's times put a frame in twice:
+ * every frame after it came one late.
+ */
+const asTimed = (facts) => ["-fps_mode", "passthrough", "-enc_time_base:v", `${facts.fps.den}/${facts.fps.num}`];
 
 /** What says so in the file that is written. */
 export const tags = ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"];

@@ -212,7 +212,8 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
     const stamp = `${basename(clip, extname(clip))}-${file.size}-${Math.round(file.mtimeMs)}`;
     const canWrap = !facts.reorders && ["hevc", "h264"].includes(facts.codec);
     const kind = light ? "light" : plain || !canWrap ? "plain" : "wrapped";
-    const to = join(folder, `${stamp}-${kind}.mp4`);
+    // "-2": copies made before then could have their frames in the wrong places, and are made again.
+    const to = join(folder, `${stamp}-${kind}-2.mp4`);
     if (!existsSync(to)) {
       // The copy is about as big as the clip.
       try {
