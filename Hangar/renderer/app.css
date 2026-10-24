@@ -757,3 +757,42 @@ textarea.field { resize: vertical; line-height: 1.38; }
 .card-recording input { accent-color: var(--accent); margin: 0; }
 .card-recording.here { cursor: default; }
 .card-recording.here .file-name { color: var(--dim); }
+
+/* Find music: songs for a run, from the pilot's library, their Spotify, NCS and Monstercat. */
+.ed-song-row .ed-song { flex: 1 1 0; min-width: 0; }
+.music-sheet { display: flex; flex-direction: column; width: min(820px, 92vw); height: 84vh; padding: 24px; }
+.music-body { display: flex; flex-direction: column; gap: 12px; min-height: 0; flex: 1; }
+.music-head { display: flex; align-items: center; gap: 8px; }
+.music-tabs { flex-wrap: wrap; gap: 6px; }
+.music-tab { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 0; border-radius: 999px; background: var(--raised); font: 700 12px/1.2 var(--face); color: var(--dim); }
+.music-tab:hover { color: #fff; }
+.music-tab.on { background: var(--accent); color: var(--on-accent); }
+.music-tab .spinner, .music-note .spinner { width: 11px; height: 11px; border-width: 1.5px; }
+.music-tab.on .spinner { border-color: rgba(0, 0, 0, 0.2); border-top-color: var(--on-accent); }
+.music-filters { gap: 14px; }
+.music-filters .check input { accent-color: var(--accent); margin: 0; }
+.music-notes { display: flex; flex-direction: column; gap: 6px; }
+.music-note { gap: 9px; padding: 8px 10px 8px 12px; border-radius: 10px; background: rgba(255, 255, 255, 0.04); box-shadow: inset 0 0 0 1px var(--stroke); }
+.music-list { flex: 1; min-height: 120px; overflow-y: auto; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--stroke); }
+.music-empty { padding: 18px 14px; }
+.music-row { display: flex; align-items: flex-start; gap: 14px; padding: 10px 14px; }
+.music-row + .music-row { border-top: 1px solid var(--stroke); }
+.music-words { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.music-title-row { flex-wrap: wrap; row-gap: 2px; }
+.music-title { font: 700 13px/1.25 var(--face); }
+.music-credit { color: var(--dim); font-size: 12.5px; }
+.music-source { flex: none; font: 800 9px/1.2 var(--face); letter-spacing: 0.8px; text-transform: uppercase; padding: 3px 6px; border-radius: 5px; background: rgba(255, 255, 255, 0.08); color: var(--dim); }
+.music-source.spotify { color: #1ed760; background: rgba(30, 215, 96, 0.12); }
+.music-source.mine { color: var(--accent); background: rgba(255, 214, 10, 0.12); }
+.music-facts { font-size: 11.5px; color: var(--dim); }
+.music-reasons { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 11.5px; }
+.music-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.music-actions .button { font-size: 12px; }
+.music-more { display: flex; justify-content: center; padding: 10px; border-top: 1px solid var(--stroke); }
+.music-fit { display: block; width: 46px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.music-fit span { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+.licence { flex: none; font: 800 10px/1.2 var(--face); letter-spacing: 0.4px; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+.licence.free { color: var(--good); background: rgba(69, 219, 133, 0.14); }
+.licence.gold { color: var(--accent); background: rgba(255, 214, 10, 0.14); }
+.licence.claimed, .licence.no { color: var(--warn); background: rgba(255, 158, 56, 0.14); }
+.licence.unknown { color: var(--dim); background: rgba(255, 255, 255, 0.08); }

@@ -9,6 +9,8 @@
 // kept with its run, as the run's log of where it went up. Nothing here touches the disk or the
 // network, so it can be tested by itself.
 
+import { musicLine } from "./music.js";
+
 /**
  * Where a video can go. `shape` is the finished video each takes: "landscape" (16:9) or
  * "upright" (9:16). `browser`: its upload page opens in the pilot's own browser, not in the app.
@@ -103,22 +105,23 @@ function fit(text, most) {
 
 /**
  * The words that go up with a video on each site, made from what is known about its run. `about`
- * is { pilot, id, idLabel, event, race, date, best, window, bestLap, laps, song }, any of which can
- * be missing. `own` is lines of the pilot's own that go on every one, such as their gear or links.
+ * is { pilot, id, idLabel, event, race, date, best, window, bestLap, laps, song, songCredit }, any
+ * of which can be missing. `songCredit` is the credit the song's licence asks for, which takes the
+ * place of the song's name. `own` is lines of the pilot's own that go on every one, such as their gear or links.
  *
  * YouTube and YouTube Shorts get a title of up to 100 characters and a description. TikTok and
  * Instagram have one caption, which comes back as the description, with no title. `name` is what
  * the video file is called when it goes up: YouTube and TikTok start from it.
  */
 export function words(site, about = {}, own = "") {
-  const { pilot = "", id = "", idLabel = "ID", event = "", race = "", date = "", best = null, window = 3, bestLap = null, laps = [], song = "" } = about;
+  const { pilot = "", id = "", idLabel = "ID", event = "", race = "", date = "", best = null, window = 3, bestLap = null, laps = [], song = "", songCredit = "" } = about;
   // A season's track is called "Track 1" by itself, so its series goes with it. A race has a name of its own.
   const numbered = /^Track \d+$/i.test(race);
   const where = (numbered ? [event, race] : [race || event]).filter(Boolean).join(" ") || "FPV";
   const time = best ? `${best} best ${window} laps in a row` : "";
   const day = dayInWords(date);
   const who = pilot ? `${pilot}${id ? ` (${idLabel} ${id})` : ""}` : "";
-  const music = song ? `Music: ${String(song).replace(/\.[a-z0-9]{2,4}$/i, "")}` : "";
+  const music = musicLine(song, songCredit) ?? "";
   const facts = [
     best && `Best ${window} laps in a row: ${best}`,
     bestLap && `Best lap: ${bestLap}`,

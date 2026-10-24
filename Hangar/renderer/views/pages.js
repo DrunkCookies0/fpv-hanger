@@ -4,6 +4,7 @@ import { app, ask, goBack, backTitle, render, eventFolder, trackName, loadBoards
 import { h, icon, label, primary, secondary, plain, field, when, comingSoonBadge } from "../ui.js";
 import { placeOf, ordinal, sheet as boardSheet } from "../../shared/leaderboard.js";
 import { keyPages } from "../../shared/counts.js";
+import { dashboard as spotifyDashboard, isClientId } from "../../shared/spotify.js";
 import { bin, fileBrowser, season, comingSoon, guide } from "../words.js";
 import * as act from "../actions.js";
 import { showNote, showSetUp } from "./notes.js";
@@ -320,6 +321,78 @@ function youtubeCard() {
   );
 }
 
+/** What connecting Spotify last said: { kind, text }, or null. */
+let spotifySaid = null;
+
+/** The pilot's Spotify, through an app of their own, for Find music in the marker editor. */
+function spotifyCard() {
+  const now = app.state.spotify ?? { clientId: "", connected: false, name: null, waiting: false, redirect: "" };
+  const typed = () => app.drafts.get("spotifyClient") ?? now.clientId;
+  let connect = null;
+  const start = async () => {
+    const id = typed().trim();
+    if (!isClientId(id)) {
+      spotifySaid = { kind: "warn", text: "That isn't a Client ID. It is 32 letters and numbers, under your app's name in Spotify for Developers." };
+      return render();
+    }
+    spotifySaid = { kind: "dim", text: "Spotify's page is open in your browser. Sign in there if it asks, and press Agree." };
+    app.state.spotify = { ...now, waiting: true };
+    render();
+    const answer = await ask("connectSpotify", id);
+    if (answer?.state) app.state = answer.state;
+    spotifySaid = answer?.cancelled ? null : answer?.problem ? { kind: "warn", text: answer.problem } : { kind: "good", text: "Spotify is connected. Find music has your Liked Songs, and songs by the artists you play most." };
+    if (!answer?.problem) app.drafts.delete("spotifyClient");
+    render();
+  };
+  connect = primary("Connect Spotify", start, { disabled: typed().trim() === "", probe: "connect spotify" });
+  const step = (number, ...text) => h("div.step", h("span.step-number", String(number)), h("div.step-text", ...text));
+  const about = h("p.dim.small", "Find music, in Markers & music, finds songs for a run among your Liked Songs, and among NCS's and Monstercat's music by the artists you listen to. FPV Hangar only reads your Liked Songs and the artists you play most, and changes nothing. Spotify's own music can't be saved from Spotify for a video, so it is listed with what that means.");
+  if (now.connected) {
+    return h("div.card.spaced", { "data-probe": "spotify card" },
+      label("SPOTIFY"),
+      about,
+      h("div.row",
+        h("span.good.row.tight.grow.small.semibold", icon("checkCircle"), now.name ? `Connected as ${now.name}` : "Connected"),
+        secondary("Disconnect", async () => {
+          app.state = await ask("disconnectSpotify");
+          spotifySaid = { kind: "dim", text: "Spotify is disconnected on this computer." };
+          render();
+        }, { probe: "disconnect spotify", help: "Forget your Spotify on this computer. Your app in Spotify for Developers stays, to connect again." }),
+      ),
+      spotifySaid && h(`p.small.${spotifySaid.kind}`, spotifySaid.text),
+    );
+  }
+  return h("div.card.spaced", { "data-probe": "spotify card" },
+    label("SPOTIFY"),
+    about,
+    h("div.row.form-row",
+      h("input.field.grow", {
+        type: "text", key: "spotifyClient", value: typed(), spellcheck: false, autocomplete: "off", placeholder: "Paste your app's Client ID", disabled: now.waiting,
+        oninput: (event) => {
+          app.drafts.set("spotifyClient", event.target.value);
+          connect.disabled = event.target.value.trim() === "";
+        },
+        onkeydown: (event) => { if (event.key === "Enter" && !connect.disabled) start(); },
+      }),
+      now.waiting ? secondary("Stop waiting", () => ask("cancelSpotify"), { probe: "cancel spotify" }) : connect,
+    ),
+    spotifySaid && h(`p.small.${spotifySaid.kind}`, spotifySaid.text),
+    h("div.key-steps",
+      step(1, "Press Open Spotify for Developers and sign in with your Spotify account. Press Create app: any name and description will do, such as FPV Hangar."),
+      step(2, "Under Redirect URIs, paste ", h("code", now.redirect), " (Copy the address puts it on the clipboard) and press Add. Tick Web API, agree to Spotify's terms and press Save."),
+      step(3, "Copy the Client ID from the app's page, paste it above and press Connect Spotify. Spotify asks in your browser whether FPV Hangar may see your Liked Songs."),
+    ),
+    h("div.row.tight",
+      secondary("Open Spotify for Developers", () => act.openLink(spotifyDashboard), { icon: "arrowUpRight" }),
+      secondary("Copy the address", () => {
+        ask("copyText", now.redirect);
+        spotifySaid = { kind: "dim", text: "The address is on the clipboard: paste it under Redirect URIs." };
+        render();
+      }, { icon: "copies", probe: "copy spotify address" }),
+    ),
+  );
+}
+
 export function settings() {
   const state = app.state;
   const corners = [["tl", "Top left"], ["tr", "Top right"], ["bl", "Bottom left"], ["br", "Bottom right"]];
@@ -362,6 +435,7 @@ export function settings() {
       h("p.dim.small", "The colour is for the timer's highlights on your videos: the lap bars, the labels, your ID, and the fill when your time is set. The app itself stays yellow."),
     ),
     youtubeCard(),
+    spotifyCard(),
     h("div.card",
       label("LIBRARY"),
       h("div.path.dim", state.library),
