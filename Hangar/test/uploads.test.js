@@ -43,6 +43,15 @@ test("uploads: each site gets words of its own, made from the run", () => {
   assert.ok(instagram.description.includes("Laps: 9.500 · 9.120 · 9.696") && instagram.description.endsWith("#reels #RaceGOW6"));
 });
 
+test("uploads: a song from a catalog has the credit its licence asks for in place of its name", () => {
+  const credit = "Song: Test Nerds - Night Gate [Made Up Release]\nMusic provided by a made-up catalog\nFree Download: https://example.com/night-gate";
+  const about = { pilot: "Test Pilot", event: "RaceGOW6", race: "Track 1", best: "28.316", window: 3, song: "Night Gate.mp3", songCredit: credit };
+  assert.ok(words("youtube", about).description.includes(`\n\n${credit}\n\n#fpv`));
+  assert.ok(words("tiktok", about).description.includes(`Flown by Test Pilot\n${credit}\n\n#fpv`));
+  assert.ok(!words("youtube", about).description.includes("Music: Night Gate"));
+  assert.ok(words("youtube", { ...about, songCredit: "" }).description.includes("Music: Night Gate"));
+});
+
 test("uploads: a race of a club's goes by its own name, with the club and the day in the description", () => {
   const club = words("youtube", { pilot: "Test Pilot", event: "Circle City FPV", race: "Spring Cup", date: "2026-04-11", best: "31.002", window: 3 });
   assert.equal(club.title, "Spring Cup · 31.002 best 3 laps | Test Pilot");

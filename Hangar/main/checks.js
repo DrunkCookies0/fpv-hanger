@@ -43,6 +43,13 @@
 //            its views, likes and comments, from a made-up service standing in for YouTube's; a
 //            key YouTube doesn't know isn't kept. Nothing of YouTube's, TikTok's, Instagram's or
 //            Google's is called on.
+//   music    Find music, with a made-up service standing in for Spotify's, NCS's and SoundScout's:
+//            Spotify is connected the way the pilot's browser would come back from it, a run's
+//            songs are ranked for its laps with the pilot's taste and each song's licence, an NCS
+//            song is added with its credit, which reaches the run's upload words, a song of the
+//            pilot's is used with its drop on the start gate, and SoundScout's songs are listed
+//            with whether they are Copyright Safe, and its site offered at the run's tempos.
+//            Nothing of Spotify's, NCS's or SoundScout's is called on.
 
 import { app, clipboard, session } from "electron";
 import { spawn, spawnSync } from "node:child_process";
@@ -59,7 +66,7 @@ import { musicPlan } from "../shared/video.js";
 import { Library } from "./library.js";
 import { numberedRecording, numbersIn, frameTimes } from "./numbered.js";
 import { copyName, libraryName } from "../shared/drive.js";
-import { fileName, sites } from "../shared/uploads.js";
+import { fileName, sites, words } from "../shared/uploads.js";
 
 /** With `--report <file>`, everything said is written there too, a line at a time as it happens,
  *  so a check that stops halfway still leaves what it had found. */
@@ -80,7 +87,7 @@ function say(ok, what, detail = "") {
 }
 
 export async function run(which, tools) {
-  const checks = { editor, video, mp4, pages, form, bookends, trackview, trackvideo, outside, uploads, drive, cards, update, updating, carryover, everything };
+  const checks = { editor, video, mp4, pages, form, bookends, trackview, trackvideo, outside, uploads, music, drive, cards, update, updating, carryover, everything };
   if (report) writeFileSync(report, "");
   if (!checks[which]) {
     console.error(`There is no check called ${which}. There are: ${Object.keys(checks).join(", ")}.`);
@@ -1165,6 +1172,183 @@ ${run.name}`)}); await window.showForSnapshot(${JSON.stringify(`files:${track}`)
  */
 /** The copy of the library in Google Drive, with a folder standing in for where Drive shows a
  *  pilot's files. Nothing of Google's is called on, and no Drive on this computer is looked for. */
+/** A page of NCS's list as its site writes it, with made-up songs. */
+function ncsStandInPage(songs, pages) {
+  const rows = songs.map((song) => `<tr><td><a class="player-play" data-url="https://example.com/${song.id}.mp3" data-artist="<a href='/artist/1/x'>${song.artists}</a>" data-artistraw="${song.artists}" data-track="${song.title}" data-tid="${song.id}" data-versions="Regular" data-genre="${song.genre}"></a></td><td><a href="/${song.id}"><p>${song.title}</p></a></td><td><a class="tag" href="/music-search?mood=6">energetic</a></td><td>20 Aug 2026</td></tr>`);
+  return `<table>${rows.join("")}</table><ul class="pagination">${Array.from({ length: pages }, (_, index) => `<li><a class="page-link" href="https://ncs.io/music-search?page=${index + 1}">${index + 1}</a></li>`).join("")}</ul>`;
+}
+
+async function music(tools) {
+  const { library, api, ffmpeg, cache } = tools;
+  const track = library.tracks.find((one) => one.includes("Self Test")) ?? library.tracks[0];
+  if (!say(Boolean(track), "the library has a track")) return;
+  const run = (await library.summary(track)).runs.find((one) => one.crossings.length >= 3);
+  if (!say(Boolean(run?.clip), "the track has a run with laps", run?.name)) return;
+  const songs = library.songs(track, run.name).songs;
+  if (!say(songs.length > 0, "the song library has a song of the pilot's", songs.join(", "))) return;
+  // What is remembered is put back at the end, and a file that wasn't there goes again.
+  const kept = [library.storeFile, library.extrasFile].map((file) => [file, existsSync(file) ? readFileSync(file) : null]);
+  const spotifyBefore = config().spotify;
+  rmSync(join(cache, "Music"), { recursive: true, force: true });
+  const work = mkdtempSync(join(tmpdir(), "fpv-hangar-music-"));
+  // The song NCS gives: a few seconds of sound, as an MP3 would be handed over.
+  const ncsSong = join(work, "song.wav");
+  await ffmpeg.run(["-v", "error", "-y", "-f", "lavfi", "-i", "aevalsrc='0.5*sin(2*PI*55*t)*exp(-7*mod(t,0.5))':s=22050:d=12", ncsSong]);
+  const credit = "Song: Test Nerds - Night Gate\nMusic provided by a made-up catalog\nFree Download/Stream: http://example.com/NightGate";
+  const ncsList = [
+    [{ id: "11111111-aaaa", title: "Night Gate", artists: "Test Nerds", genre: "Drum &amp; Bass" }, { id: "22222222-bbbb", title: "Slow Field", artists: "Nobody Known", genre: "Chill" }],
+    [{ id: "33333333-cccc", title: "Cube Drop", artists: "Pipe Theory", genre: "Dubstep" }],
+  ];
+  // SoundScout's catalog: a Copyright Safe song at the run's tempo by an artist the pilot listens to, and one that isn't cleared.
+  const soundScoutList = [
+    { TrackID: "ss-1", Title: "Gate Runner", ArtistsTitle: "Test Nerds", PublicBPM: 120, PublicDuration: 180, EffectiveGenrePrimary: "Dance", EffectiveGenreSecondary: "Drum & Bass", IsCreatorFriendly: true, BrandTitle: "Made Up Label", ReleaseDate: "2026-09-01T00:00:00Z", Tags: ["racing", "energetic"] },
+    { TrackID: "ss-2", Title: "Locked Track", ArtistsTitle: "Nobody Known", PublicBPM: 140, PublicDuration: 200, EffectiveGenrePrimary: "Dance", EffectiveGenreSecondary: "Dubstep", IsCreatorFriendly: false, BrandTitle: "Made Up Label", ReleaseDate: "2026-08-01T00:00:00Z", Tags: [] },
+  ];
+  let swapped = null;
+  // Spotify's, NCS's and SoundScout's services, made up: the account knows one Client ID, one code and one pilot.
+  const server = createServer(async (asked, answer) => {
+    const url = new URL(asked.url, "http://here");
+    let body = "";
+    for await (const chunk of asked) body += chunk;
+    const json = (status, value) => {
+      answer.writeHead(status, { "content-type": "application/json" });
+      answer.end(JSON.stringify(value));
+    };
+    if (url.pathname === "/accounts/api/token") {
+      const form = new URLSearchParams(body);
+      if (form.get("client_id") !== "0123456789abcdef0123456789abcdef") return json(400, { error: "invalid_client", error_description: "Invalid client" });
+      if (form.get("grant_type") === "authorization_code") {
+        swapped = form;
+        return form.get("code") === "made-up-code" && (form.get("code_verifier") ?? "").length >= 43 ? json(200, { access_token: "made-up-access", refresh_token: "made-up-refresh", expires_in: 3600 }) : json(400, { error: "invalid_grant" });
+      }
+      return json(200, { access_token: "made-up-access", expires_in: 3600 });
+    }
+    if (url.pathname.startsWith("/spotify/")) {
+      if (asked.headers.authorization !== "Bearer made-up-access") return json(401, { error: { status: 401, message: "Invalid access token" } });
+      if (url.pathname === "/spotify/me") return json(200, { id: "test-pilot", display_name: "Test Pilot" });
+      if (url.pathname === "/spotify/me/top/artists") return json(200, { items: [{ name: "Test Nerds", genres: ["drum and bass"] }] });
+      if (url.pathname === "/spotify/me/tracks") return json(200, { next: null, items: [{ track: { type: "track", id: "liked1", name: "Old Favourite", duration_ms: 95000, artists: [{ name: "Test Nerds" }], external_urls: { spotify: "https://open.spotify.com/track/liked1" } } }] });
+    }
+    if (url.pathname === "/soundscout/catalog") {
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      return json(200, { Data: soundScoutList.slice(offset, offset + 100), Total: soundScoutList.length, Offset: offset, Limit: 100 });
+    }
+    if (url.pathname === "/ncs/music-search") {
+      answer.writeHead(200, { "content-type": "text/html" });
+      return answer.end(ncsStandInPage(ncsList[Number(url.searchParams.get("page")) - 1] ?? [], ncsList.length));
+    }
+    if (url.pathname.startsWith("/ncs/track/info/")) {
+      answer.writeHead(200, { "content-type": "text/html" });
+      return answer.end(`<div class="attribution"><p id="panel-copy">${credit.replace(/\n/g, "<br />\n")}</p></div>`);
+    }
+    if (url.pathname.startsWith("/ncs/track/download/")) {
+      answer.writeHead(200, { "content-type": "audio/mpeg", "content-disposition": 'attachment; filename="Test Nerds - Night Gate [Made Up Release].mp3"' });
+      return answer.end(readFileSync(ncsSong));
+    }
+    json(404, { error: "not here" });
+  });
+  await new Promise((done) => server.listen(0, "127.0.0.1", done));
+  api.useMusicStandIn(`http://127.0.0.1:${server.address().port}/`);
+  const { js, errors } = await page(tools);
+  const until = async (test, tries = 80) => {
+    for (let one = 0; one < tries; one += 1) {
+      const got = await test();
+      if (got) return got;
+      await pause(150);
+    }
+    return null;
+  };
+  const press = (probe) => js(`document.querySelector('[data-probe=${JSON.stringify(probe)}]').click()`);
+  try {
+    // Connecting Spotify: its page would open in the pilot's browser, which comes back to this computer.
+    const wrong = await api.connectSpotify("not an id");
+    say(/isn't a Client ID/.test(wrong.problem ?? ""), "something that isn't a Client ID isn't tried", wrong.problem);
+    const connecting = api.connectSpotify("0123456789abcdef0123456789abcdef");
+    const opened = await until(() => api.openedForMusic(), 40);
+    const asked = opened ? new URL(opened) : null;
+    say(asked?.pathname.endsWith("/accounts/authorize") && asked.searchParams.get("redirect_uri") === "http://127.0.0.1:43827/spotify" && asked.searchParams.get("code_challenge_method") === "S256" && asked.searchParams.get("scope") === "user-library-read user-top-read",
+      "Spotify's page would open in the pilot's browser, asking only to read their Liked Songs and the artists they play most", opened ?? "nothing opened");
+    const stranger = await fetch(`http://127.0.0.1:43827/spotify?code=made-up-code&state=someone-else`).then((one) => one.status).catch(() => null);
+    const back = await fetch(`http://127.0.0.1:43827/spotify?code=made-up-code&state=${encodeURIComponent(asked?.searchParams.get("state") ?? "")}`).then((one) => one.text()).catch((error) => error.message);
+    const connected = await connecting;
+    say(stranger === 404 && /connected/.test(back) && connected.problem === null && swapped?.get("redirect_uri") === "http://127.0.0.1:43827/spotify", "the browser coming back with the code connects Spotify, and nothing else does", `${stranger} / ${connected.problem ?? "connected"}`);
+    const now = api.state().spotify;
+    say(now.connected && now.name === "Test Pilot" && !JSON.stringify(library.settings).includes("made-up-refresh"), "Spotify is connected as the pilot, and its key is kept on this computer, not in the library", JSON.stringify(now));
+
+    // Find music on the run.
+    await js(`await window.showForSnapshot(${JSON.stringify(`music:${run.name}`)})`);
+    const rows = () => js(`return [...document.querySelectorAll('[data-probe^="music song "]')].map((row) => ({ key: row.dataset.probe.slice(11), title: row.querySelector(".music-title").textContent, licence: row.querySelector(".licence").textContent, reasons: [...row.querySelectorAll(".music-reasons span")].map((one) => one.textContent) }))`);
+    const listed = await until(async () => {
+      const got = await rows();
+      return ["ncs:", "spotify:", "mine:", "soundscout:"].every((source) => got.some((one) => one.key.startsWith(source))) ? got : null;
+    });
+    say(Boolean(listed), "Find music lists the pilot's songs, their Liked Songs, NCS's songs and SoundScout's together", listed?.map((one) => one.title).join(", ") ?? JSON.stringify(await rows()));
+    if (!listed) return;
+    const byKey = Object.fromEntries(listed.map((one) => [one.key, one]));
+    const theirs = byKey["ncs:11111111-aaaa"], liked = byKey["spotify:liked1"], mine = listed.find((one) => one.key.startsWith("mine:"));
+    const safe = byKey["soundscout:ss-1"], locked = byKey["soundscout:ss-2"];
+    say(theirs?.licence === "Free to use" && liked?.licence === "Copyrighted" && mine?.licence === "Licence unknown" && safe?.licence === "With SoundScout" && locked?.licence === "Not cleared for videos",
+      "each song says what it may be used for", listed.map((one) => `${one.title}: ${one.licence}`).join(", "));
+    say(theirs?.reasons.includes("By Test Nerds, whom you listen to") && liked?.reasons.includes("In your Liked Songs") && byKey["ncs:33333333-cccc"] && byKey["ncs:11111111-aaaa"], "NCS's songs are matched to what the pilot listens to, across all of its pages", JSON.stringify(theirs?.reasons));
+    // The SoundScout song is at the run's tempo, lasts the video and is by an artist the pilot listens to.
+    say(listed[0].key === "soundscout:ss-1" && safe.reasons.includes("By Test Nerds, whom you listen to") && safe.reasons.some((reason) => /gates land on a bar line at 120 BPM/.test(reason)),
+      "the song the laps land on the beat of, by an artist the pilot listens to, comes first, and says why", `${listed[0].title}: ${JSON.stringify(safe?.reasons)}`);
+    const at = (key) => listed.findIndex((one) => one.key === key);
+    say(at(mine.key) < at("spotify:liked1") && at(mine.key) < at("ncs:11111111-aaaa") && mine.reasons.some((reason) => /gates land on a bar line at 120 BPM/.test(reason)),
+      "the pilot's own song, whose beat the laps land on, comes before songs whose tempo isn't known, and says why", JSON.stringify(mine.reasons));
+    say(listed.findIndex((one) => one.key === "ncs:11111111-aaaa") < listed.findIndex((one) => one.key === "ncs:22222222-bbbb"), "an NCS song by an artist the pilot listens to comes before one by an artist they don't");
+    const tempos = await js(`return document.querySelector(".music-body > p.dim")?.textContent ?? ""`);
+    say(/at 120 BPM \(a lap is 1 bar\)/.test(tempos), "the tempos the run's gates land on the beat at are said", tempos);
+    await press("music cleared");
+    const cleared = await rows();
+    say(cleared.length > 0 && cleared.every((one) => ["Free to use", "With SoundScout"].includes(one.licence)) && cleared.some((one) => one.key === "soundscout:ss-1"),
+      "Only cleared for videos leaves only the songs free to use, or Copyright Safe on SoundScout", cleared.map((one) => one.licence).join(", "));
+    await press("music cleared");
+    await press("music tab soundscout");
+    const soundScout = await js(`return { tempos: [...document.querySelectorAll('[data-probe^="music soundscout "]')].map((one) => one.dataset.probe.slice(17)), songs: [...document.querySelectorAll('[data-probe^="music song "]')].map((row) => row.dataset.probe.slice(11)) }`);
+    say(soundScout.tempos[0] === "120" && JSON.stringify(soundScout.songs) === JSON.stringify(["soundscout:ss-1", "soundscout:ss-2"]), "SoundScout's tab lists its songs, and offers its site at the tempos the run suits", JSON.stringify(soundScout));
+    await press("music tab best");
+
+    // An NCS song added: fetched with its credit, and made the run's song.
+    const songBefore = await js(`return window.hangar_.app.editor?.edit.song ?? null`);
+    await until(() => js(`return Boolean(document.querySelector('[data-probe="music get ncs:11111111-aaaa"]'))`), 20);
+    await press("music get ncs:11111111-aaaa");
+    const added = await until(() => js(`const e = window.hangar_.app.editor; return e?.edit.song && e.edit.song !== ${JSON.stringify(songBefore)} && !document.querySelector('[data-probe="find music"]') ? e.edit.song : null`), 120);
+    const source = added ? library.songSources[added] : null;
+    say(added === "Test Nerds - Night Gate [Made Up Release].mp3" && existsSync(join(library.songLibrary, added)) && source?.licence === "free" && source?.creditLine === credit, "an NCS song is added to the song library, named as NCS names it, with its credit, and becomes the run's song", added ?? "nothing added");
+    await js(`await window.hangar_.app.editor.save()`);
+    const shown = (await api.track(track)).summary.runs.find((one) => one.name === run.name);
+    const description = words("youtube", { race: "Track 1", song: shown?.song, songCredit: shown?.songCredit }).description;
+    say(shown?.songCredit === credit && description.includes(credit), "its credit goes into the run's upload description", shown?.songCredit ?? "no credit");
+
+    // A song of the pilot's used: its drop goes on the start gate.
+    await js(`const { showFindMusic } = await import("./views/findmusic.js"); await showFindMusic(window.hangar_.app.editor).loading`);
+    const ownKey = songs[0];
+    await until(() => js(`return Boolean(document.querySelector('[data-probe=${JSON.stringify(`music use ${ownKey}`)}]'))`), 40);
+    await press(`music use ${ownKey}`);
+    const placed = await until(() => js(`const e = window.hangar_.app.editor; return e?.edit.song === ${JSON.stringify(ownKey)} && e.analysis && !e.listening ? { start: e.edit.songStart, gate: e.seconds(e.markers[0]), drops: e.spots.map((one) => one.time) } : null`), 120);
+    say(Boolean(placed) && placed.drops.some((drop) => Math.abs(placed.start + drop - placed.gate) < 0.002), "Use it makes a song of the pilot's the run's song with a drop on the start gate", JSON.stringify(placed));
+
+    api.disconnectSpotify();
+    say(!api.state().spotify.connected && api.state().spotify.clientId !== "", "Spotify can be disconnected, keeping the Client ID to connect again");
+  } finally {
+    api.cancelSpotify();
+    api.useMusicStandIn(null);
+    server.close();
+    setConfig({ spotify: spotifyBefore });
+    await js(`window.hangar_.app.editor?.close(); document.querySelectorAll("#sheets .backdrop, .menu").forEach((one) => one.remove())`);
+    for (const [file, bytes] of kept) {
+      if (bytes === null) rmSync(file, { force: true });
+      else writeFileSync(file, bytes);
+    }
+    library.load();
+    for (const name of library.songs(track, run.name).songs) if (!songs.includes(name)) rmSync(join(library.songLibrary, name), { force: true });
+    rmSync(work, { recursive: true, force: true });
+    rmSync(join(cache, "Music"), { recursive: true, force: true });
+  }
+  say(errors.length === 0, "nothing went wrong on the page", errors.join(" | "));
+}
+
 async function drive(tools) {
   const { api, library } = tools;
   const place = argument("--drive");
@@ -1757,7 +1941,7 @@ async function everything(tools) {
 
   const steps = [
     ["The marker editor", editor], ["Making the videos", video], ["A recording in an MP4", mp4], ["Before and after a video", bookends],
-    ["The track in 3D, and building one", trackview], ["Other projects' tools", outside], ["Uploading", uploads], ["A card from the goggles", cards], ["The copy in Google Drive", drive], ["Every page", pages], ["Updating itself", updating],
+    ["The track in 3D, and building one", trackview], ["Other projects' tools", outside], ["Uploading", uploads], ["Finding music", music], ["A card from the goggles", cards], ["The copy in Google Drive", drive], ["Every page", pages], ["Updating itself", updating],
   ];
   for (const [title, step] of steps) {
     note(`-- ${title}`);
@@ -1830,7 +2014,7 @@ async function form(tools) {
 
 async function pages(tools) {
   const { js, errors } = await page(tools);
-  for (const which of ["home", "creator", "track", "files", "settings", "guide", "leaderboard", "welcome", "whatsnew", "setup", "submit", "race", "editor", "wave", "trackview", "upload:youtube", "upload:shorts", "upload:tiktok"]) {
+  for (const which of ["home", "creator", "track", "files", "settings", "guide", "leaderboard", "welcome", "whatsnew", "setup", "submit", "race", "editor", "wave", "music", "trackview", "upload:youtube", "upload:shorts", "upload:tiktok"]) {
     const before = errors.length;
     let problem = "";
     try {

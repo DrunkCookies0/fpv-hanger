@@ -1,7 +1,7 @@
 // The marker editor. One clip: its picture, frame by frame, the gate crossings marked on it, the
 // stretch its finished videos show, and the song laid under them. It takes over the whole window.
 
-import { app, ask, hangar, render, loadTrack, trackName } from "../core.js";
+import { app, ask, hangar, render, loadTrack, trackName, open } from "../core.js";
 import { h, fill, redraw, icon, label, primary, secondary, plain } from "../ui.js";
 import { menu, confirm, sheetIsOpen } from "../sheets.js";
 import { keys, mac, fileBrowser } from "../words.js";
@@ -10,6 +10,7 @@ import { SongSound } from "../sound.js";
 import { Race } from "../../shared/timing.js";
 import { clock, lapTime } from "../../shared/panel.js";
 import { musicPlan } from "../../shared/video.js";
+import { runShape, placing } from "../../shared/fit.js";
 import { evenness, unevenBecause } from "../../shared/smoothness.js";
 
 /** How long before lap 1 and after the finish a finished video runs when the stretch is left to the app. */
@@ -86,6 +87,8 @@ export class Editor {
     /** What the app hears in the chosen song. Null until it has listened. */
     this.analysis = null;
     this.listening = false;
+    /** While the app listens to the chosen song: done once it has. */
+    this.hearing = null;
     this.soundWave = null;
     this.snapToBeat = app.state.snapToBeat;
     this.showsTimer = app.state.showsTimer;
@@ -732,6 +735,7 @@ export class Editor {
     this.wave = null;
     this.analysis = null;
     this.listening = false;
+    this.hearing = null;
     const name = this.edit.song;
     if (!name) return;
     const read = await ask("songSound", this.target.track, name);
@@ -744,7 +748,7 @@ export class Editor {
     this.songLength = read.length;
     this.wave = read.wave;
     this.listening = true;
-    ask("songAnalysis", this.target.track, name).then((heard) => {
+    this.hearing = ask("songAnalysis", this.target.track, name).then((heard) => {
       if (this.edit.song !== name || app.editor !== this) return;
       this.analysis = heard;
       this.listening = false;
@@ -873,6 +877,37 @@ export class Editor {
 
   /** Slides the song so that one of its marks falls on a clip time. */
   lineUp(mark, time) { this.placeSong(thousandth(time - mark)); }
+
+  /** Opens Find music: songs for this run, ranked by how well they fit its laps. */
+  async findMusic() {
+    this.pause();
+    const { showFindMusic } = await import("./findmusic.js");
+    if (app.editor === this) showFindMusic(this);
+  }
+
+  /** Makes a song from the library the run's song, as Find music does: once the app has heard it,
+   *  the drop that lasts the video best goes on the start gate, or with none the song starts with
+   *  the video. */
+  async useFoundSong(name) {
+    this.songs = (await ask("songs", this.target.track, this.target.name)).songs;
+    if (app.editor !== this) return;
+    await this.choose(name);
+    if (this.edit.song !== name || !this.sound) return this.drawChanged();
+    await this.hearing;
+    if (this.edit.song !== name || app.editor !== this) return;
+    const run = runShape(this.markers.map((marker) => this.seconds(marker)), this.stretch);
+    const place = run && placing({ length: this.songLength, drops: this.spots }, run);
+    if (place?.drop) this.put(place.drop.time, 0);
+    else if (place) this.placeSong(thousandth(place.songStart));
+    this.drawChanged();
+  }
+
+  /** Keeps the work as Done does, then opens another page, such as Pilot & settings. Stays when
+   *  the work can't be saved and the pilot keeps working. */
+  async leaveFor(page) {
+    await this.done();
+    if (app.editor !== this) open(page);
+  }
 
   /** Asks for an audio file, adds it to the song library and makes it the run's song. */
   async importSong() {
@@ -1245,6 +1280,7 @@ export class Editor {
       { title: "No music", action: () => this.choose(null) },
       ...(this.songs.length > 0 ? ["-", ...this.songs.map((name) => ({ title: name, action: () => this.choose(name) }))] : []),
       "-",
+      { title: "Find music for this run…", action: () => this.findMusic() },
       { title: "Add a song…", action: () => this.importSong() },
       { title: `Show my songs in ${fileBrowser}`, action: () => ask("revealSongs") },
     ]);
@@ -1252,7 +1288,10 @@ export class Editor {
       h("div.row.baseline", label("MUSIC"), h("span.spacer"),
         heard?.tempo && h("span.ed-tempo", { help: heard.beatLength ? "The song's tempo. It can read as double or half what you would call it." : "The song's tempo, roughly. Its beat doesn't keep steady enough time to draw." },
           heard.beatLength ? tempoLabel(heard.tempo) : `About ${tempoLabel(heard.tempo)}`)),
-      h("button.ed-song", { type: "button", onclick: pick, help: "Your songs. A song you add is kept in your library for every track, and so are the marks you put in it." }, icon("music"), h("span.ed-song-name", title), icon("chevronDown", 10)),
+      h("div.row.tight.ed-song-row",
+        h("button.ed-song", { type: "button", onclick: pick, help: "Your songs. A song you add is kept in your library for every track, and so are the marks you put in it." }, icon("music"), h("span.ed-song-name", title), icon("chevronDown", 10)),
+        secondary("Find music", () => this.findMusic(), { icon: "scope", probe: "ed find music", help: "Songs for this run from your library, your Spotify and NCS, ranked by how well your laps land on their beat, each saying whether it is free to use. SoundScout opens at the tempos that suit it." }),
+      ),
       song ? [
         this.songFindings(),
         h("div.ed-note", this.songPlacement(song.from)),
@@ -1273,8 +1312,8 @@ export class Editor {
           this.songMarks.length > 0 && h("span.ed-yours", { help: "Your own marks in this song. They are drawn in this colour, and the drops the app found in blue." }, icon("diamond", 8), `${this.songMarks.length} of yours`),
         ),
       ] : edit.song ? h("div.ed-note", "Getting the song ready…")
-        : h("div.ed-note", this.songs.length === 0 ? "Add a song and drag it along the timeline to line it up. It is kept in your song library, with any marks you put in it, for your other clips."
-          : "Pick a song and drag it along the timeline to line it up."),
+        : h("div.ed-note", this.songs.length === 0 ? "Find music for this run, or add a song, and drag it along the timeline to line it up. It is kept in your song library, with any marks you put in it, for your other clips."
+          : "Pick a song, or find one for this run's laps, and drag it along the timeline to line it up."),
     );
     const top = this.side.scrollTop;
     redraw(this.side, lapsCard, videoCard, musicCard);

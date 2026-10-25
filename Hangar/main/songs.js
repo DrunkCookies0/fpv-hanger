@@ -102,16 +102,26 @@ const stampOf = (file) => {
   return `${basename(file, extname(file))}-${facts.size}-${Math.round(facts.mtimeMs / 1000)}`;
 };
 
+// The number at the end is the way of listening. A version that hears songs differently changes it and starts again.
+const noteOf = (file, cache) => join(cache, "Songs", `${stampOf(file)}-1.json`);
+
+/** What the app heard in a song when it listened to it before, or null when it hasn't. */
+export function keptAnalysisOf(file, cache) {
+  try {
+    return JSON.parse(readFileSync(noteOf(file, cache), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
 /**
  * What the app hears in a song: its tempo, where its beat falls, and its drops. The answer is kept
  * in the cache, so a song is only listened to once.
  */
 export async function analysisOf(file, { ffmpegPath, cache }) {
-  // The number at the end is the way of listening. A version that hears songs differently changes it and starts again.
-  const note = join(cache, "Songs", `${stampOf(file)}-1.json`);
-  try {
-    return JSON.parse(readFileSync(note, "utf8"));
-  } catch {}
+  const note = noteOf(file, cache);
+  const kept = keptAnalysisOf(file, cache);
+  if (kept) return kept;
   const heard = await listenApart(ffmpegPath, file);
   if (!heard) return null;
   mkdirSync(join(cache, "Songs"), { recursive: true });

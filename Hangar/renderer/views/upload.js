@@ -24,7 +24,7 @@ const shapeWords = { landscape: "16:9 video", upright: "9:16 video" };
 export function aboutRun(data, run) {
   return {
     event: data.event.name, id: data.event.id, idLabel: data.event.idLabel, race: data.name, date: data.state.date ?? "",
-    best: run.best?.seconds ?? null, window: data.summary.window, bestLap: run.bestLap ?? null, laps: run.laps ?? [], song: run.song ?? "",
+    best: run.best?.seconds ?? null, window: data.summary.window, bestLap: run.bestLap ?? null, laps: run.laps ?? [], song: run.song ?? "", songCredit: run.songCredit ?? "",
   };
 }
 
