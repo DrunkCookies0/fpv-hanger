@@ -346,7 +346,7 @@ function spotifyCard() {
   };
   connect = primary("Connect Spotify", start, { disabled: typed().trim() === "", probe: "connect spotify" });
   const step = (number, ...text) => h("div.step", h("span.step-number", String(number)), h("div.step-text", ...text));
-  const about = h("p.dim.small", "Find music, in Markers & music, finds songs for a run among your Liked Songs, and among NCS's free music by the artists and in the kinds of music you listen to. FPV Hangar only reads your Liked Songs and the artists you play most, and changes nothing. Spotify's own music can't be saved from Spotify or put in a video, so it is listed with what that means. Spotify signs FPV Hangar out every six months: connect again then.");
+  const about = h("p.dim.small", "Find music, in Markers & music, finds songs for a run among your Liked Songs, and among NCS's and SoundScout's music by the artists and in the kinds of music you listen to. FPV Hangar only reads your Liked Songs and the artists you play most, and changes nothing. Spotify's own music can't be saved from Spotify or put in a video, so it is listed with what that means. Spotify signs FPV Hangar out every six months: connect again then.");
   if (now.connected) {
     return h("div.card.spaced", { "data-probe": "spotify card" },
       label("SPOTIFY"),

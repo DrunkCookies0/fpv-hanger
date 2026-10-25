@@ -10,9 +10,9 @@ const song = (fields) => ({ key: `ncs:${fields.title}`, source: "ncs", artists: 
 
 test("music: every song says where it is from and what it may be used for", () => {
   assert.deepEqual(Object.keys(sources), ["mine", "spotify", "ncs", "soundscout"]);
-  assert.equal(sources.soundscout.listed, false);
   assert.equal(licences.free.cleared, true);
   assert.equal(licences.soundscout.cleared, true);
+  assert.equal(licences.notcleared.cleared, false);
   assert.equal(licences.claimed.cleared, false);
   assert.equal(licences.unknown.cleared, null);
   assert.match(licences.claimed.words, /fair use/);
@@ -60,6 +60,7 @@ test("music: what is typed finds songs by title, artist or kind, word by word", 
   const songs = [song({ title: "Night Gate", credit: "Test Nerds", genre: "Drum & Bass" }), song({ title: "Cube Drop", credit: "Pipe Theory", genre: "Dubstep" })];
   assert.deepEqual(matching(songs, "nerds drum").map((one) => one.title), ["Night Gate"]);
   assert.deepEqual(matching(songs, "DUBSTEP").map((one) => one.title), ["Cube Drop"]);
+  assert.deepEqual(matching([...songs, song({ title: "Fast Lane", tags: ["racing", "energetic"] })], "racing").map((one) => one.title), ["Fast Lane"]);
   assert.equal(matching(songs, "  ").length, 2);
   assert.equal(matching(songs, "house").length, 0);
 });

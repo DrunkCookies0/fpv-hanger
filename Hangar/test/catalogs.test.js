@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ncs, ncsSongs, ncsPages, ncsCredit, ncsDate, unescapeHtml, soundScout } from "../shared/catalogs.js";
+import { ncs, ncsSongs, ncsPages, ncsCredit, ncsDate, unescapeHtml, soundScout, soundScoutSong, catalogs } from "../shared/catalogs.js";
 
 // A page of NCS's list as its site writes it, with songs and artists made up.
 const row = ({ id, title, artists, genre = "", versions = "Regular", url = "https://example.com/song.mp3", page, moods = [], day = "20 Aug 2026" }) => `
@@ -77,6 +77,56 @@ test("catalogs: NCS's list is read a page at a time to its last page, and what w
   const partway = await ncs.read({ get: async (address) => (address.endsWith("page=1") ? { ok: true, status: 200, text: pages[1] } : { ok: false, status: 503, text: "" }), pause: async () => {} });
   assert.match(partway.problem, /answered 503/);
   assert.equal(partway.songs.length, 2);
+});
+
+/** A song as SoundScout's catalog gives it, made up, with the fields it leaves empty when they aren't asked for. */
+const track = (fields) => ({ TrackID: "s-1", Title: "Night Gate", Version: "", ArtistsTitle: "Test Nerds & Elefant Made", BPM: 0, Duration: 0, PublicBPM: 174, PublicDuration: 201,
+  EffectiveGenrePrimary: "Dance", EffectiveGenreSecondary: "Drum & Bass", IsCreatorFriendly: true, BrandTitle: "Made Up Label", ReleaseDate: "2026-10-09T07:00:59.72Z",
+  Tags: ["2010s", "F minor", "energetic", "racing", "fast"], ...fields });
+
+test("catalogs: SoundScout's catalog gives each song's tempo, length, kind and whether it is Copyright Safe", () => {
+  assert.deepEqual(soundScoutSong(track({})), {
+    key: "soundscout:s-1", source: "soundscout", id: "s-1", title: "Night Gate", artists: ["Test Nerds", "Elefant Made"], credit: "Test Nerds & Elefant Made",
+    genre: "Drum & Bass", moods: ["racing", "energetic", "fast"], tags: ["2010s", "F minor", "energetic", "racing", "fast"], tempo: 174, length: 201,
+    link: "https://www.soundscout.com/player/music/s-1", licence: "soundscout", creditLine: null, released: "2026-10-09", label: "Made Up Label",
+  });
+  const other = soundScoutSong(track({ Version: "Extended Mix", IsCreatorFriendly: false, PublicBPM: 0, BPM: 87, EffectiveGenreSecondary: "", Tags: null, ArtistsTitle: "Solo feat. Guest" }));
+  assert.equal(other.title, "Night Gate (Extended Mix)");
+  assert.equal(other.licence, "notcleared");
+  assert.equal(other.tempo, 87);
+  assert.equal(other.genre, "Dance");
+  assert.deepEqual(other.artists, ["Solo", "Guest"]);
+  assert.deepEqual(other.moods, []);
+  assert.equal(soundScoutSong(track({ PublicDuration: 0 })).length, null);
+  assert.equal(soundScoutSong({ Title: "No id" }), null);
+  assert.equal(soundScoutSong(null), null);
+  assert.ok(soundScout.page(200, "https://example.com/api/").startsWith("https://example.com/api/catalog?sort=-ReleaseDate&offset=200&limit=100&columns=TrackID&columns=Title"));
+  assert.deepEqual(Object.keys(catalogs), ["ncs", "soundscout"]);
+});
+
+test("catalogs: SoundScout's catalog is read a hundred songs at a time to its end, and what went wrong is told", async () => {
+  const asked = [];
+  const all = Array.from({ length: 250 }, (_, index) => track({ TrackID: `s-${index}`, Title: `Song ${index}` }));
+  const get = async (address) => {
+    asked.push(address);
+    const offset = Number(new URL(address).searchParams.get("offset"));
+    return { ok: true, status: 200, body: { Data: all.slice(offset, offset + 100), Total: all.length, Limit: 100, Offset: offset } };
+  };
+  const heard = [];
+  const read = await soundScout.read({ base: "https://example.com/api/", get, heard: (page, of) => heard.push(`${page}/${of}`), pause: async () => {} });
+  assert.equal(read.songs.length, 250);
+  assert.deepEqual(asked.map((address) => new URL(address).searchParams.get("offset")), ["0", "100", "200"]);
+  assert.deepEqual(heard, ["1/3", "2/3", "3/3"]);
+  const down = await soundScout.read({ get: async () => ({ ok: false, status: 0 }), pause: async () => {} });
+  assert.match(down.problem, /couldn't be reached/);
+  assert.equal(down.songs, undefined);
+  const refused = await soundScout.read({ get: async () => ({ ok: false, status: 403, body: null }), pause: async () => {} });
+  assert.match(refused.problem, /answered 403/);
+  const changed = await soundScout.read({ get: async () => ({ ok: true, status: 200, body: { items: [] } }), pause: async () => {} });
+  assert.match(changed.problem, /catalog has changed/);
+  const partway = await soundScout.read({ get: async (address) => (address.includes("offset=0&") ? get(address) : { ok: false, status: 503 }), pause: async () => {} });
+  assert.equal(partway.songs.length, 100);
+  assert.match(partway.problem, /answered 503/);
 });
 
 test("catalogs: SoundScout is opened at the tempos near one", () => {

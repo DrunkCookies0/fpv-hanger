@@ -1,5 +1,5 @@
-// Finding music: the pilot's Spotify, and NCS's catalog of music free for videos, read for Find
-// music in the marker editor (see shared/music.js and shared/catalogs.js).
+// Finding music: the pilot's Spotify, and the catalogs of NCS and SoundScout, read for Find music
+// in the marker editor (see shared/music.js and shared/catalogs.js).
 //
 // Spotify is signed in to in the pilot's own browser, through an app of their own in Spotify for
 // Developers: the browser comes back to an address on this computer that only FPV Hangar listens
@@ -8,7 +8,7 @@
 // connects for itself. It only reads the pilot's Liked Songs and the artists they play most.
 //
 // A copy trying itself out asks only a service of its own standing in for all of them, never
-// Spotify or NCS.
+// Spotify, NCS or SoundScout.
 
 import { createServer } from "node:http";
 import { createHash, randomBytes } from "node:crypto";

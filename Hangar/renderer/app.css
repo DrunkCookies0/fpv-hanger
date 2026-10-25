@@ -758,7 +758,7 @@ textarea.field { resize: vertical; line-height: 1.38; }
 .card-recording.here { cursor: default; }
 .card-recording.here .file-name { color: var(--dim); }
 
-/* Find music: songs for a run, from the pilot's library, their Spotify and NCS, and SoundScout on its own site. */
+/* Find music: songs for a run, from the pilot's library, their Spotify, NCS and SoundScout. */
 .ed-song-row .ed-song { flex: 1 1 0; min-width: 0; }
 .music-sheet { display: flex; flex-direction: column; width: min(820px, 92vw); height: 84vh; padding: 24px; }
 .music-body { display: flex; flex-direction: column; gap: 12px; min-height: 0; flex: 1; }
@@ -793,9 +793,9 @@ textarea.field { resize: vertical; line-height: 1.38; }
 .music-fit span { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
 .licence { flex: none; font: 800 10px/1.2 var(--face); letter-spacing: 0.4px; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
 .licence.free { color: var(--good); background: rgba(69, 219, 133, 0.14); }
-.licence.claimed { color: var(--warn); background: rgba(255, 158, 56, 0.14); }
+.licence.claimed, .licence.notcleared { color: var(--warn); background: rgba(255, 158, 56, 0.14); }
 .licence.unknown { color: var(--dim); background: rgba(255, 255, 255, 0.08); }
-.music-elsewhere-body { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px; }
+.music-soundscout { display: flex; flex-direction: column; gap: 8px; }
 .music-tempo-links { flex-wrap: wrap; }
 .music-source.soundscout { color: #e7c873; background: rgba(231, 200, 115, 0.12); }
 .licence.soundscout { color: #e7c873; background: rgba(231, 200, 115, 0.14); }

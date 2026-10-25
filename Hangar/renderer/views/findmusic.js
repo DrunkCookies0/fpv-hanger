@@ -1,7 +1,6 @@
 // Find music: songs for the run that is open in the marker editor, from the pilot's own song
-// library, their Spotify and NCS, ranked by how well each fits the run's laps and how near it is
-// to what the pilot listens to, each saying what it may be used for. SoundScout, Monstercat's, is
-// opened on its own site at the tempos that suit the run, and a song bought there is added here.
+// library, their Spotify, NCS and SoundScout (Monstercat's), ranked by how well each fits the
+// run's laps and how near it is to what the pilot listens to, each saying what it may be used for.
 
 import { ask, hangar } from "../core.js";
 import { h, redraw, icon, primary, secondary, plain } from "../ui.js";
@@ -15,8 +14,7 @@ import { sources, licences, rank, matching, lengthWords, tempoWords, librarySong
 const page = 40;
 /** What the pilot last chose in the sheet, kept while the app is open. */
 const kept = { tab: "best", cleared: false };
-/** The sources that are lists of songs here. */
-const listed = Object.keys(sources).filter((key) => sources[key].listed !== false);
+const listed = Object.keys(sources);
 
 /** The tabs: every source together, then each by itself. */
 const tabs = [["best", "Best for this run"], ...Object.entries(sources).map(([key, source]) => [key, source.name])];
@@ -60,7 +58,7 @@ class FindMusic {
   get open() { return this.body.isConnected; }
 
   async load() {
-    await Promise.all([this.loadMine(), this.loadSpotify(), this.loadCatalog("ncs")]);
+    await Promise.all([this.loadMine(), this.loadSpotify(), this.loadCatalog("ncs"), this.loadCatalog("soundscout")]);
   }
 
   /** The pilot's own songs: what the app has heard in each already, then the rest listened to one at a time. */
@@ -134,7 +132,7 @@ class FindMusic {
   /** The pilot's taste, from their Spotify, with the kinds of music their artists make as the catalogs file them. */
   learn() {
     this.taste = tasteFrom({ liked: this.spotify.liked ?? [], top: this.spotify.top ?? [] });
-    learnKinds(this.taste, this.lists.ncs.songs);
+    learnKinds(this.taste, [...this.lists.ncs.songs, ...this.lists.soundscout.songs]);
   }
 
   /** The songs the tab shows, ranked. A catalog song the pilot has added already shows as theirs. */
@@ -171,7 +169,7 @@ class FindMusic {
           this.draw();
         },
       }, title, this.lists[key]?.busy && h("span.spinner.small")))),
-      tab === "soundscout" ? this.soundScoutPage() : this.listPage(tab),
+      this.listPage(tab),
       h("p.faint.small", "What each song may be used for is what its label or catalog says. A copyright claim goes by the recording, not by how much of it is used or why."),
     );
   }
@@ -188,7 +186,7 @@ class FindMusic {
             this.draw();
           },
         }),
-        h("label.check", { help: "Only songs you may put in a video without a copyright claim, on their terms: NCS's with its credit, or SoundScout's with a plan." },
+        h("label.check", { help: "Only songs you may put in a video without a copyright claim, on their terms: NCS's with its credit, or SoundScout's Copyright Safe ones with a plan." },
           h("input", { type: "checkbox", checked: kept.cleared, probe: "music cleared", onchange: (event) => {
             kept.cleared = event.target.checked;
             this.shown = page;
@@ -210,27 +208,6 @@ class FindMusic {
     ];
   }
 
-  /** SoundScout's own site, at the tempos that suit the run, and a song bought there added here. */
-  soundScoutPage() {
-    const tempos = this.tempos.length > 0 ? this.tempos.map((one) => one.tempo) : [];
-    return h("div.music-list.music-elsewhere", { "data-probe": "music soundscout" },
-      h("div.music-elsewhere-body",
-        h("p.small", "SoundScout is Monstercat's: Monstercat's music and other labels', for creators, with each song's tempo and whether it is Copyright Safe. Its songs are cleared for your videos with a SoundScout plan, and it has a free trial. FPV Hangar opens it in your browser; its terms don't let other programs read its catalog."),
-        tempos.length > 0
-          ? [
-            h("p.dim.small", "Open it at the tempos your gates land on the beat at. Tick Copyright Safe there for the songs a plan clears."),
-            h("div.row.tight.music-tempo-links", tempos.map((tempo) => secondary(`${tempoWords(tempo)}`, () => ask("openLink", soundScout.near(tempo)), { icon: "arrowUpRight", probe: `music soundscout ${tempo}`, help: `SoundScout's music from ${Math.floor(tempo - 2)} to ${Math.ceil(tempo + 2)} BPM` }))),
-          ]
-          : h("p.dim.small", this.run ? "Your laps don't land on any one tempo's beat, so any tempo will do." : "Mark the laps, and it opens at the tempos your gates land on the beat at."),
-        h("div.row.tight",
-          secondary("Open SoundScout", () => ask("openLink", soundScout.home), { icon: "arrowUpRight" }),
-          primary("Add a song from SoundScout…", () => this.addFile({ source: "soundscout" }), { probe: "music add soundscout", help: "Choose a song you downloaded from SoundScout: it goes into your song library, marked as SoundScout's." }),
-        ),
-        this.lists.mine.problem && h("p.small.warn", this.lists.mine.problem),
-      ),
-    );
-  }
-
   /** What to say about a source above its list: still reading, what went wrong, or how to connect. */
   sourceNote(tab) {
     const notes = [];
@@ -239,7 +216,7 @@ class FindMusic {
       const list = this.lists[key];
       if (key === "spotify" && !list.busy && !this.spotify.connected) {
         notes.push(h("div.music-note.row", icon("music", 14), h("span.grow.small", this.spotify.needsSetup
-          ? "Connect your Spotify in Pilot & settings, and your Liked Songs, and NCS's songs by the artists and in the kinds of music you listen to, are found for you."
+          ? "Connect your Spotify in Pilot & settings, and your Liked Songs, and NCS's and SoundScout's songs by the artists and in the kinds of music you listen to, are found for you."
           : "Spotify isn't connected on this computer."), secondary("Pilot & settings", () => {
           this.close();
           this.editor.leaveFor({ name: "settings" });
@@ -253,10 +230,17 @@ class FindMusic {
         notes.push(h("div.music-note.row.dim", h("span.spinner.small"), h("span.grow.small", list.note)));
       }
     }
-    if (tab === "best" && this.tempos.length > 0) {
-      const tempo = this.tempos[0].tempo;
-      notes.push(h("div.music-note.row", icon("music", 14), h("span.grow.small", `SoundScout, Monstercat's, has songs cleared with a plan: open it at ${tempoWords(tempo)}.`),
-        secondary("SoundScout", () => ask("openLink", soundScout.near(tempo)), { icon: "arrowUpRight" })));
+    if (tab === "soundscout") {
+      // Its songs are bought and downloaded on its own site, which can also be opened at the run's tempos.
+      notes.push(h("div.music-note.music-soundscout", { "data-probe": "music soundscout" },
+        h("p.small", "SoundScout is Monstercat's: Monstercat's music and other labels', cleared for your videos with a SoundScout plan when it is marked Copyright Safe. Download a song on its own page there, then add the file here. It has a free trial."),
+        h("div.row.tight.music-tempo-links",
+          this.tempos.map((one) => secondary(tempoWords(one.tempo), () => ask("openLink", soundScout.near(one.tempo)), { icon: "arrowUpRight", probe: `music soundscout ${one.tempo}`, help: `SoundScout's music from ${Math.floor(one.tempo - 2)} to ${Math.ceil(one.tempo + 2)} BPM, on its own site` })),
+          this.tempos.length === 0 && secondary("Open SoundScout", () => ask("openLink", soundScout.home), { icon: "arrowUpRight" }),
+          h("span.spacer"),
+          secondary("Add a song from SoundScout…", () => this.addFile({ source: "soundscout" }), { probe: "music add soundscout", help: "Choose a song you downloaded from SoundScout: it goes into your song library, marked as SoundScout's." }),
+        ),
+      ));
     }
     return notes.length > 0 ? h("div.music-notes", notes) : null;
   }
@@ -267,13 +251,14 @@ class FindMusic {
     if (tab === "best" ? Object.values(this.lists).every((one) => one.busy) : list?.busy) return "Reading the songs…";
     if (tab === "mine") return "Your song library is empty. Add a song from NCS here, or with Add a song… in the Music card.";
     if (tab === "spotify") return this.spotify.connected ? "No songs from Spotify." : "Spotify isn't connected.";
+    if (tab === "soundscout" && list?.problem) return "SoundScout's catalog couldn't be read. Its songs can still be found on its own site.";
     return kept.cleared ? "No song here is cleared for videos." : "No songs to show.";
   }
 
   row({ song, fit, taste, score }) {
     const licence = licences[song.licence] ?? licences.unknown;
     const tempo = tempoWords(song.beatLength > 0 ? 60 / song.beatLength : song.tempo) ?? (song.source === "ncs" ? "tempo heard once it's added" : "tempo unknown");
-    const facts = [song.genre, ...(song.moods ?? []).slice(0, 2), tempo, lengthWords(song.length)].filter(Boolean).join(" · ");
+    const facts = [song.genre, ...(song.moods ?? []).slice(0, 2), tempo, lengthWords(song.length), song.label].filter(Boolean).join(" · ");
     const reasons = [taste.text && { good: true, text: taste.text }, ...fit.reasons].filter(Boolean).slice(0, 3);
     const failed = this.failed.get(song.key);
     return h("div.music-row", { "data-probe": `music song ${song.key}` },
@@ -315,6 +300,15 @@ class FindMusic {
         }),
       ];
     }
+    if (song.source === "soundscout") {
+      return [
+        song.link && link("SoundScout", song.link, { help: "Open the song's page on SoundScout, to hear it, and to download it with a plan." }),
+        secondary("Add the file…", () => this.addFile(song), {
+          probe: `music add ${song.key}`,
+          help: "Once you have downloaded it from SoundScout, choose its file here: it goes into your song library, marked as SoundScout's.",
+        }),
+      ];
+    }
     return [
       song.link && link("Open in Spotify", song.link),
       secondary("Add the file…", () => this.addFile(song), {
@@ -350,7 +344,8 @@ class FindMusic {
   async addFile(song) {
     const added = await ask("addFoundSong", song);
     if (added.problem) {
-      this.lists.mine.problem = added.problem;
+      if (song.key) this.failed.set(song.key, added.problem);
+      else this.lists.mine.problem = added.problem;
       return this.draw();
     }
     if (!added.name) return;

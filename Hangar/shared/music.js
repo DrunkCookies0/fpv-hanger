@@ -1,6 +1,6 @@
 // Songs to choose from for a run's video, from wherever they come: the pilot's own song library,
-// their Spotify, and NCS's catalog of music free for videos. SoundScout (Monstercat's) is opened on
-// its own site instead (see catalogs.js), and what is bought there is added to the library.
+// their Spotify, NCS's catalog of music free for videos, and SoundScout's (Monstercat's) of music
+// cleared for creators with a plan (see catalogs.js).
 // Every one is described the same way, says what it may be used for, and is ranked for the run by
 // how well it fits it (fit.js) and how near it is to what the pilot listens to (taste.js).
 //
@@ -15,13 +15,12 @@
 import { fitOf } from "./fit.js";
 import { tasteOf } from "./taste.js";
 
-/** Where songs come from, in the order they are offered. SoundScout has no list of its own here:
- *  its songs are found on its site. */
+/** Where songs come from, in the order they are offered. */
 export const sources = {
   mine: { name: "Your songs", short: "Yours" },
   spotify: { name: "Spotify", short: "Spotify" },
   ncs: { name: "NCS", short: "NCS" },
-  soundscout: { name: "SoundScout", short: "SoundScout", listed: false },
+  soundscout: { name: "SoundScout", short: "SoundScout" },
 };
 
 /**
@@ -37,6 +36,10 @@ export const licences = {
   soundscout: {
     cleared: true, short: "With SoundScout",
     words: "From SoundScout, Monstercat's, and cleared for your videos when it is marked Copyright Safe there and your plan covers where you post: Personal for your own accounts, where a monetised video's ad money goes to the label, and Creator for monetised channels, which are whitelisted. Without a plan, YouTube's Content ID claims the video and its ad money goes to the label.",
+  },
+  notcleared: {
+    cleared: false, short: "Not cleared for videos",
+    words: "SoundScout doesn't mark this song Copyright Safe, so a SoundScout plan doesn't clear it for your videos: YouTube's Content ID claims a video with it for its label.",
   },
   claimed: {
     cleared: false, short: "Copyrighted",
@@ -90,12 +93,12 @@ export function rank(songs, run, taste) {
   return ranked.sort((a, b) => b.score - a.score || a.song.title.localeCompare(b.song.title));
 }
 
-/** Songs that match what is typed: every word of it is in the title, the artists or the kind of music. */
+/** Songs that match what is typed: every word of it is in the title, the artists, the kind of music or its tags. */
 export function matching(songs, typed) {
   const words = String(typed ?? "").toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return songs;
   return songs.filter((song) => {
-    const said = `${song.title} ${song.credit} ${song.genre ?? ""}`.toLowerCase();
+    const said = `${song.title} ${song.credit} ${song.genre ?? ""} ${(song.tags ?? song.moods ?? []).join(" ")}`.toLowerCase();
     return words.every((word) => said.includes(word));
   });
 }

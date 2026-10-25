@@ -680,7 +680,8 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
      * Asks for the file of a song found in Find music, from Spotify or SoundScout, puts a copy
      * in the song library and keeps where it came from with it: its page, what it may be used for
      * and the credit it asks for, which goes into the descriptions of videos that use it. A song
-     * bought on SoundScout is any file the pilot chooses, and is called what its file is.
+     * bought on SoundScout without picking it from its list is any file the pilot chooses, and is
+     * called what its file is.
      */
     async addFoundSong(song) {
       const fromSoundScout = song?.source === "soundscout";
@@ -690,7 +691,7 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
       const picked = await dialog.showOpenDialog(window(), {
         title: fromSoundScout ? "Add a song from SoundScout" : `Add ${title}`,
         message: fromSoundScout
-          ? "Choose the song you downloaded from SoundScout. A copy goes into your song library, where every track can use it, marked as SoundScout's."
+          ? `Choose ${title ? `the file of ${title}${song.credit ? ` by ${song.credit}` : ""}` : "the song"} you downloaded from SoundScout. A copy goes into your song library, where every track can use it, marked as SoundScout's.`
           : `Choose the file of ${title}${song.credit ? ` by ${song.credit}` : ""}. A copy goes into your song library, where every track can use it.`,
         defaultPath: app.getPath("downloads"),
         properties: ["openFile"],
@@ -704,7 +705,8 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
         source: song.source, key: text(song.key), title: title || basename(kept.name, extname(kept.name)), credit: text(song.credit),
         artists: Array.isArray(song.artists) ? song.artists.filter((one) => typeof one === "string") : [],
         genre: text(song.genre), tempo: Number.isFinite(song.tempo) ? song.tempo : null, link: text(song.link),
-        licence: fromSoundScout ? "soundscout" : "claimed", creditLine: null, added: new Date().toISOString(),
+        // A song from SoundScout's list says whether it is Copyright Safe; one chosen by itself is taken to be.
+        licence: fromSoundScout ? (song.licence === "notcleared" ? "notcleared" : "soundscout") : "claimed", creditLine: null, added: new Date().toISOString(),
       });
       drive.soon();
       return { name: kept.name, problem: null };
@@ -749,7 +751,7 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
       return music.spotifyMusic({ again: Boolean(again) });
     },
 
-    /** The songs of a catalog of music free for videos: "ncs". */
+    /** The songs of a catalog of music for videos: "ncs" or "soundscout". */
     musicCatalog(which, { again = false } = {}) {
       return music.catalog(String(which), { again: Boolean(again) });
     },

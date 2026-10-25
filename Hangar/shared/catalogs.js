@@ -7,9 +7,12 @@
 // for it.
 //
 // SoundScout, Monstercat's (it was Monstercat Gold), licenses Monstercat's music and other labels'
-// to creators with a plan. Its terms don't allow its catalog to be read by a program, so FPV Hangar
-// doesn't read it: it opens SoundScout's own page in the pilot's browser, at the tempos that suit
-// the run, and a song bought there is added as a file.
+// to creators with a plan, and says of each song whether it is Copyright Safe. FPV Hangar reads
+// its catalog from the address SoundScout's own player reads it from, which anyone can read
+// without signing in, a page at a time, and keeps it for a week. That address isn't offered to
+// other programs: SoundScout's terms ask for its written permission to read the catalog by a
+// program, and it can change or close it without warning. FPV Hangar never plays or fetches
+// SoundScout's music. A song bought there is downloaded on SoundScout's site and added as a file.
 //
 // Nothing here touches the network, so it can be tested by itself: `get` is handed in.
 
@@ -124,12 +127,72 @@ export const ncs = {
   },
 };
 
+/** The tags SoundScout gives a song that say something about how it feels, in the order they are shown. */
+const feelings = ["racing", "extreme sports", "energetic", "aggressive", "epic", "fast", "hectic", "dark", "uplifting", "intense", "driving", "propulsive"];
+
+/** A song from SoundScout's catalog, as Find music lists it (see shared/music.js). Null for anything that isn't a song. */
+export function soundScoutSong(track) {
+  if (typeof track?.TrackID !== "string" || track.TrackID === "" || typeof track.Title !== "string" || track.Title.trim() === "") return null;
+  const credit = String(track.ArtistsTitle ?? "").trim();
+  const number = (...values) => values.find((value) => Number.isFinite(value) && value > 0) ?? null;
+  const tags = Array.isArray(track.Tags) ? track.Tags.filter((tag) => typeof tag === "string") : [];
+  return {
+    key: `soundscout:${track.TrackID}`, source: "soundscout", id: track.TrackID,
+    title: track.Version ? `${track.Title.trim()} (${String(track.Version).trim()})` : track.Title.trim(),
+    artists: credit.split(/\s*(?:,|&|\bx\b|\bfeat\.?|\bft\.?|\bvs\.?)\s*/i).map((one) => one.trim()).filter(Boolean), credit,
+    // The second kind is the closer one: "Drum & Bass" where the first is "Dance".
+    genre: String(track.EffectiveGenreSecondary || track.EffectiveGenrePrimary || "").trim() || null,
+    moods: feelings.filter((feeling) => tags.includes(feeling)), tags,
+    tempo: number(track.PublicBPM, track.BPM), length: number(track.PublicDuration, track.Duration),
+    link: soundScout.track(track.TrackID),
+    licence: track.IsCreatorFriendly === true ? "soundscout" : "notcleared", creditLine: null,
+    released: typeof track.ReleaseDate === "string" && /^\d{4}-\d{2}-\d{2}/.test(track.ReleaseDate) ? track.ReleaseDate.slice(0, 10) : null,
+    label: typeof track.BrandTitle === "string" && track.BrandTitle !== "" ? track.BrandTitle : null,
+  };
+}
+
 export const soundScout = {
   name: "SoundScout",
+  base: "https://www.soundscout.com/api/",
   home: "https://www.soundscout.com/",
+  /** How long its catalog as read is good for. */
+  fresh: 7 * 24 * 60 * 60 * 1000,
+  /** How many songs a page of its catalog has: as many as its own player asks for. */
+  perPage: 100,
+  /** What is asked of each song, so the pages are no bigger than they need be. */
+  columns: ["TrackID", "Title", "Version", "ArtistsTitle", "PublicDuration", "PublicBPM", "EffectiveGenrePrimary", "EffectiveGenreSecondary", "IsCreatorFriendly", "BrandTitle", "ReleaseDate", "Tags"],
+  /** A page of its catalog, newest first. */
+  page: (offset, base = soundScout.base) => `${base}catalog?sort=-ReleaseDate&offset=${offset}&limit=${soundScout.perPage}&${soundScout.columns.map((column) => `columns=${column}`).join("&")}`,
+  /** A song's own page on SoundScout, where it is heard and, with a plan, downloaded. */
+  track: (id) => `https://www.soundscout.com/player/music/${encodeURIComponent(id)}`,
   /** SoundScout's music, newest first, at tempos near one: within 2 beats a minute either side. */
   near: (tempo) => `https://www.soundscout.com/player/music?bpm_min=${Math.floor(tempo - 2)}&bpm_max=${Math.ceil(tempo + 2)}`,
+
+  /**
+   * Reads SoundScout's catalog, a page at a time with a pause between, newest first: { songs } or
+   * { problem }, with what was read before the problem when some was. `get(address)` answers
+   * { ok, status, body }; `heard(page, pages)` is told how far it has got.
+   */
+  async read({ base = soundScout.base, get, heard = () => {}, pause = (milliseconds) => new Promise((done) => setTimeout(done, milliseconds)) }) {
+    const songs = new Map();
+    let pages = 1;
+    for (let number = 1; number <= Math.min(pages, mostPages); number += 1) {
+      if (number > 1) await pause(300);
+      const answer = await get(soundScout.page((number - 1) * soundScout.perPage, base));
+      const problem = answer.status === 0 ? "SoundScout couldn't be reached. Check the connection."
+        : !answer.ok ? `SoundScout didn't give its catalog (it answered ${answer.status}). It may have changed the way its own player reads it.`
+        : !Array.isArray(answer.body?.Data) ? "SoundScout's catalog has changed, and FPV Hangar can't read its songs. An update to FPV Hangar may put that right."
+        : null;
+      if (problem) return songs.size > 0 ? { problem, songs: [...songs.values()] } : { problem };
+      if (number === 1) pages = Math.ceil((Number(answer.body.Total) || 0) / soundScout.perPage);
+      const found = answer.body.Data.map(soundScoutSong).filter(Boolean);
+      for (const song of found) if (!songs.has(song.id)) songs.set(song.id, song);
+      heard(number, Math.min(pages, mostPages));
+      if (found.length === 0) break;
+    }
+    return { songs: [...songs.values()] };
+  },
 };
 
 /** The catalogs FPV Hangar reads for itself, by the name Find music knows them by. */
-export const catalogs = { ncs };
+export const catalogs = { ncs, soundscout: soundScout };

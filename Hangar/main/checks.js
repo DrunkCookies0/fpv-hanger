@@ -43,12 +43,13 @@
 //            its views, likes and comments, from a made-up service standing in for YouTube's; a
 //            key YouTube doesn't know isn't kept. Nothing of YouTube's, TikTok's, Instagram's or
 //            Google's is called on.
-//   music    Find music, with a made-up service standing in for Spotify's and NCS's: Spotify is
-//            connected the way the pilot's browser would come back from it, a run's songs are
-//            ranked for its laps with the pilot's taste and each song's licence, an NCS song is
-//            added with its credit, which reaches the run's upload words, a song of the pilot's
-//            is used with its drop on the start gate, and SoundScout is offered at the run's
-//            tempos. Nothing of Spotify's, NCS's or SoundScout's is called on.
+//   music    Find music, with a made-up service standing in for Spotify's, NCS's and SoundScout's:
+//            Spotify is connected the way the pilot's browser would come back from it, a run's
+//            songs are ranked for its laps with the pilot's taste and each song's licence, an NCS
+//            song is added with its credit, which reaches the run's upload words, a song of the
+//            pilot's is used with its drop on the start gate, and SoundScout's songs are listed
+//            with whether they are Copyright Safe, and its site offered at the run's tempos.
+//            Nothing of Spotify's, NCS's or SoundScout's is called on.
 
 import { app, clipboard, session } from "electron";
 import { spawn, spawnSync } from "node:child_process";
@@ -1198,8 +1199,13 @@ async function music(tools) {
     [{ id: "11111111-aaaa", title: "Night Gate", artists: "Test Nerds", genre: "Drum &amp; Bass" }, { id: "22222222-bbbb", title: "Slow Field", artists: "Nobody Known", genre: "Chill" }],
     [{ id: "33333333-cccc", title: "Cube Drop", artists: "Pipe Theory", genre: "Dubstep" }],
   ];
+  // SoundScout's catalog: a Copyright Safe song at the run's tempo by an artist the pilot listens to, and one that isn't cleared.
+  const soundScoutList = [
+    { TrackID: "ss-1", Title: "Gate Runner", ArtistsTitle: "Test Nerds", PublicBPM: 120, PublicDuration: 180, EffectiveGenrePrimary: "Dance", EffectiveGenreSecondary: "Drum & Bass", IsCreatorFriendly: true, BrandTitle: "Made Up Label", ReleaseDate: "2026-09-01T00:00:00Z", Tags: ["racing", "energetic"] },
+    { TrackID: "ss-2", Title: "Locked Track", ArtistsTitle: "Nobody Known", PublicBPM: 140, PublicDuration: 200, EffectiveGenrePrimary: "Dance", EffectiveGenreSecondary: "Dubstep", IsCreatorFriendly: false, BrandTitle: "Made Up Label", ReleaseDate: "2026-08-01T00:00:00Z", Tags: [] },
+  ];
   let swapped = null;
-  // Spotify's and NCS's services, made up: the account knows one Client ID, one code and one pilot.
+  // Spotify's, NCS's and SoundScout's services, made up: the account knows one Client ID, one code and one pilot.
   const server = createServer(async (asked, answer) => {
     const url = new URL(asked.url, "http://here");
     let body = "";
@@ -1222,6 +1228,10 @@ async function music(tools) {
       if (url.pathname === "/spotify/me") return json(200, { id: "test-pilot", display_name: "Test Pilot" });
       if (url.pathname === "/spotify/me/top/artists") return json(200, { items: [{ name: "Test Nerds", genres: ["drum and bass"] }] });
       if (url.pathname === "/spotify/me/tracks") return json(200, { next: null, items: [{ track: { type: "track", id: "liked1", name: "Old Favourite", duration_ms: 95000, artists: [{ name: "Test Nerds" }], external_urls: { spotify: "https://open.spotify.com/track/liked1" } } }] });
+    }
+    if (url.pathname === "/soundscout/catalog") {
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      return json(200, { Data: soundScoutList.slice(offset, offset + 100), Total: soundScoutList.length, Offset: offset, Limit: 100 });
     }
     if (url.pathname === "/ncs/music-search") {
       answer.writeHead(200, { "content-type": "text/html" });
@@ -1270,25 +1280,33 @@ async function music(tools) {
     const rows = () => js(`return [...document.querySelectorAll('[data-probe^="music song "]')].map((row) => ({ key: row.dataset.probe.slice(11), title: row.querySelector(".music-title").textContent, licence: row.querySelector(".licence").textContent, reasons: [...row.querySelectorAll(".music-reasons span")].map((one) => one.textContent) }))`);
     const listed = await until(async () => {
       const got = await rows();
-      return got.some((one) => one.key.startsWith("ncs:")) && got.some((one) => one.key.startsWith("spotify:")) && got.some((one) => one.key.startsWith("mine:")) ? got : null;
+      return ["ncs:", "spotify:", "mine:", "soundscout:"].every((source) => got.some((one) => one.key.startsWith(source))) ? got : null;
     });
-    say(Boolean(listed), "Find music lists the pilot's songs, their Liked Songs and NCS's songs together", listed?.map((one) => one.title).join(", ") ?? JSON.stringify(await rows()));
+    say(Boolean(listed), "Find music lists the pilot's songs, their Liked Songs, NCS's songs and SoundScout's together", listed?.map((one) => one.title).join(", ") ?? JSON.stringify(await rows()));
     if (!listed) return;
     const byKey = Object.fromEntries(listed.map((one) => [one.key, one]));
     const theirs = byKey["ncs:11111111-aaaa"], liked = byKey["spotify:liked1"], mine = listed.find((one) => one.key.startsWith("mine:"));
-    say(theirs?.licence === "Free to use" && liked?.licence === "Copyrighted" && mine?.licence === "Licence unknown", "each song says what it may be used for", listed.map((one) => `${one.title}: ${one.licence}`).join(", "));
+    const safe = byKey["soundscout:ss-1"], locked = byKey["soundscout:ss-2"];
+    say(theirs?.licence === "Free to use" && liked?.licence === "Copyrighted" && mine?.licence === "Licence unknown" && safe?.licence === "With SoundScout" && locked?.licence === "Not cleared for videos",
+      "each song says what it may be used for", listed.map((one) => `${one.title}: ${one.licence}`).join(", "));
     say(theirs?.reasons.includes("By Test Nerds, whom you listen to") && liked?.reasons.includes("In your Liked Songs") && byKey["ncs:33333333-cccc"] && byKey["ncs:11111111-aaaa"], "NCS's songs are matched to what the pilot listens to, across all of its pages", JSON.stringify(theirs?.reasons));
-    say(listed[0].key.startsWith("mine:") && mine.reasons.some((reason) => /gates land on a bar line at 120 BPM/.test(reason)), "the pilot's own song, whose beat the laps land on, comes first, and says why", JSON.stringify(mine.reasons));
+    // The SoundScout song is at the run's tempo, lasts the video and is by an artist the pilot listens to.
+    say(listed[0].key === "soundscout:ss-1" && safe.reasons.includes("By Test Nerds, whom you listen to") && safe.reasons.some((reason) => /gates land on a bar line at 120 BPM/.test(reason)),
+      "the song the laps land on the beat of, by an artist the pilot listens to, comes first, and says why", `${listed[0].title}: ${JSON.stringify(safe?.reasons)}`);
+    const at = (key) => listed.findIndex((one) => one.key === key);
+    say(at(mine.key) < at("spotify:liked1") && at(mine.key) < at("ncs:11111111-aaaa") && mine.reasons.some((reason) => /gates land on a bar line at 120 BPM/.test(reason)),
+      "the pilot's own song, whose beat the laps land on, comes before songs whose tempo isn't known, and says why", JSON.stringify(mine.reasons));
     say(listed.findIndex((one) => one.key === "ncs:11111111-aaaa") < listed.findIndex((one) => one.key === "ncs:22222222-bbbb"), "an NCS song by an artist the pilot listens to comes before one by an artist they don't");
     const tempos = await js(`return document.querySelector(".music-body > p.dim")?.textContent ?? ""`);
     say(/at 120 BPM \(a lap is 1 bar\)/.test(tempos), "the tempos the run's gates land on the beat at are said", tempos);
     await press("music cleared");
     const cleared = await rows();
-    say(cleared.length > 0 && cleared.every((one) => one.licence === "Free to use"), "Only cleared for videos leaves only the songs free to use", cleared.map((one) => one.licence).join(", "));
+    say(cleared.length > 0 && cleared.every((one) => ["Free to use", "With SoundScout"].includes(one.licence)) && cleared.some((one) => one.key === "soundscout:ss-1"),
+      "Only cleared for videos leaves only the songs free to use, or Copyright Safe on SoundScout", cleared.map((one) => one.licence).join(", "));
     await press("music cleared");
     await press("music tab soundscout");
-    const soundScout = await js(`return [...document.querySelectorAll('[data-probe^="music soundscout "]')].map((one) => one.dataset.probe.slice(17))`);
-    say(soundScout[0] === "120", "SoundScout is offered at the tempos the run suits, on its own site", soundScout.join(", "));
+    const soundScout = await js(`return { tempos: [...document.querySelectorAll('[data-probe^="music soundscout "]')].map((one) => one.dataset.probe.slice(17)), songs: [...document.querySelectorAll('[data-probe^="music song "]')].map((row) => row.dataset.probe.slice(11)) }`);
+    say(soundScout.tempos[0] === "120" && JSON.stringify(soundScout.songs) === JSON.stringify(["soundscout:ss-1", "soundscout:ss-2"]), "SoundScout's tab lists its songs, and offers its site at the tempos the run suits", JSON.stringify(soundScout));
     await press("music tab best");
 
     // An NCS song added: fetched with its credit, and made the run's song.
