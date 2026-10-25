@@ -21,7 +21,7 @@ import { stillsOf, pipesIn } from "./trackvideo.js";
 import { latest, install, checkIsDue } from "./updates.js";
 import { makeTools } from "./tools.js";
 import { makeUploads } from "./uploads.js";
-import { sites, linkFor, uploadsOf, videoLinkIn } from "../shared/uploads.js";
+import { sites, linkFor, uploadsOf, videoLinkIn, fileName } from "../shared/uploads.js";
 import { makeCounts } from "./counts.js";
 import { makeMusic } from "./music.js";
 import { videoIdOf } from "../shared/counts.js";
@@ -134,10 +134,10 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
   const uploads = makeUploads({ window, tell, quiet, staging: join(cache, "Uploading"), still: quiet && !process.argv.includes("--live"), keepLink: (track, run, site, link) => api.keepUpload(track, run, site, link ?? "") });
   /** How many views, likes and comments the runs' YouTube videos have, with the pilot's own key. */
   const counts = makeCounts({ key: () => library.settings.youtubeKey ?? "", quiet });
-  /** The pilot's Spotify and the catalogs of music cleared for videos, for Find music. A copy trying
+  /** The pilot's Spotify and NCS's catalog of music free for videos, for Find music. A copy trying
    *  itself out opens nothing in the pilot's browser: it notes the page it would have opened. */
   let openedForMusic = null;
-  const music = makeMusic({ cache, quiet, open: (address) => (quiet ? (openedForMusic = address) : shell.openExternal(address)) });
+  const music = makeMusic({ cache, quiet, tell, open: (address) => (quiet ? (openedForMusic = address) : shell.openExternal(address)) });
   /** A video from anywhere that the pilot chose to upload. Any other has to be in the library. */
   let chosenToUpload = null;
   /** The copy of the library kept in Google Drive, when the pilot has asked for one. */
@@ -677,16 +677,21 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
     },
 
     /**
-     * Asks for the file of a song found in Find music, from a catalog or Spotify, puts a copy in the
-     * song library and keeps where it came from with it: its page, what it may be used for and the
-     * credit it asks for, which goes into the descriptions of videos that use it.
+     * Asks for the file of a song found in Find music, from Spotify or SoundScout, puts a copy
+     * in the song library and keeps where it came from with it: its page, what it may be used for
+     * and the credit it asks for, which goes into the descriptions of videos that use it. A song
+     * bought on SoundScout is any file the pilot chooses, and is called what its file is.
      */
     async addFoundSong(song) {
+      const fromSoundScout = song?.source === "soundscout";
       const title = String(song?.title ?? "").trim();
-      if (title === "" || !["spotify", "ncs", "monstercat"].includes(song?.source)) return { name: null, problem: null };
+      // A song of NCS's is added from NCS itself (addNcsSong), with its credit.
+      if ((title === "" && !fromSoundScout) || !["spotify", "soundscout"].includes(song?.source)) return { name: null, problem: null };
       const picked = await dialog.showOpenDialog(window(), {
-        title: `Add ${title}`,
-        message: `Choose the file of ${title}${song.credit ? ` by ${song.credit}` : ""}. A copy goes into your song library, where every track can use it.`,
+        title: fromSoundScout ? "Add a song from SoundScout" : `Add ${title}`,
+        message: fromSoundScout
+          ? "Choose the song you downloaded from SoundScout. A copy goes into your song library, where every track can use it, marked as SoundScout's."
+          : `Choose the file of ${title}${song.credit ? ` by ${song.credit}` : ""}. A copy goes into your song library, where every track can use it.`,
         defaultPath: app.getPath("downloads"),
         properties: ["openFile"],
         filters: [{ name: "Songs", extensions: [...audioExtensions] }],
@@ -696,12 +701,45 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
       if (kept.problem) return { name: kept.name, problem: `${kept.name} couldn't be added to your songs: ${kept.problem}` };
       const text = (value) => (typeof value === "string" && value.trim() !== "" ? value.trim() : null);
       library.keepSongSource(kept.name, {
-        source: song.source, key: text(song.key), title, credit: text(song.credit),
+        source: song.source, key: text(song.key), title: title || basename(kept.name, extname(kept.name)), credit: text(song.credit),
         artists: Array.isArray(song.artists) ? song.artists.filter((one) => typeof one === "string") : [],
         genre: text(song.genre), tempo: Number.isFinite(song.tempo) ? song.tempo : null, link: text(song.link),
-        licence: text(song.licence) ?? "unknown", creditLine: text(song.creditLine), added: new Date().toISOString(),
+        licence: fromSoundScout ? "soundscout" : "claimed", creditLine: null, added: new Date().toISOString(),
       });
+      drive.soon();
       return { name: kept.name, problem: null };
+    },
+
+    /**
+     * Gets a song from NCS into the song library, as NCS's own Download does, with the credit NCS
+     * asks for kept with it: it goes into the descriptions of videos that use it.
+     */
+    async addNcsSong(song) {
+      const id = String(song?.id ?? "");
+      if (!/^[0-9a-z-]{8,64}$/i.test(id)) return { name: null, problem: "That isn't one of NCS's songs." };
+      const got = await music.fromNcs(id);
+      if (got.problem) return { name: null, problem: got.problem };
+      const title = String(song.title ?? "").trim() || "NCS song";
+      // Called what NCS calls it, as a song downloaded from NCS's site is, made fit to be a file's name.
+      const given = got.name && /\.mp3$/i.test(got.name) ? fileName(got.name.replace(/\.mp3$/i, "")) : "";
+      const name = `${given || fileName([song.credit, title].filter(Boolean).join(" - ")) || "NCS song"}.mp3`;
+      const fetched = join(cache, "Music", "Fetched", name);
+      try {
+        mkdirSync(dirname(fetched), { recursive: true });
+        writeFileSync(fetched, got.bytes);
+        const kept = await library.keepSong(fetched, name);
+        if (kept.problem) return { name: null, problem: `${name} couldn't be added to your songs: ${kept.problem}` };
+      } finally {
+        rmSync(fetched, { force: true });
+      }
+      const text = (value) => (typeof value === "string" && value.trim() !== "" ? value.trim() : null);
+      library.keepSongSource(name, {
+        source: "ncs", key: `ncs:${id}`, title, credit: text(song.credit),
+        artists: Array.isArray(song.artists) ? song.artists.filter((one) => typeof one === "string") : [],
+        genre: text(song.genre), tempo: null, link: text(song.link), licence: "free", creditLine: got.credit, added: new Date().toISOString(),
+      });
+      drive.soon();
+      return { name, problem: null };
     },
 
     // Finding music.
@@ -711,7 +749,7 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
       return music.spotifyMusic({ again: Boolean(again) });
     },
 
-    /** The songs of a catalog of music cleared for videos: "ncs" or "monstercat". */
+    /** The songs of a catalog of music free for videos: "ncs". */
     musicCatalog(which, { again = false } = {}) {
       return music.catalog(String(which), { again: Boolean(again) });
     },

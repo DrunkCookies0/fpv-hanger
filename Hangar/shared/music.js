@@ -1,5 +1,6 @@
 // Songs to choose from for a run's video, from wherever they come: the pilot's own song library,
-// their Spotify, and the catalogs of music made free or cleared for videos (NCS and Monstercat).
+// their Spotify, and NCS's catalog of music free for videos. SoundScout (Monstercat's) is opened on
+// its own site instead (see catalogs.js), and what is bought there is added to the library.
 // Every one is described the same way, says what it may be used for, and is ranked for the run by
 // how well it fits it (fit.js) and how near it is to what the pilot listens to (taste.js).
 //
@@ -14,12 +15,13 @@
 import { fitOf } from "./fit.js";
 import { tasteOf } from "./taste.js";
 
-/** Where songs come from, in the order they are offered. */
+/** Where songs come from, in the order they are offered. SoundScout has no list of its own here:
+ *  its songs are found on its site. */
 export const sources = {
   mine: { name: "Your songs", short: "Yours" },
   spotify: { name: "Spotify", short: "Spotify" },
   ncs: { name: "NCS", short: "NCS" },
-  monstercat: { name: "Monstercat", short: "Monstercat" },
+  soundscout: { name: "SoundScout", short: "SoundScout", listed: false },
 };
 
 /**
@@ -30,23 +32,19 @@ export const sources = {
 export const licences = {
   free: {
     cleared: true, short: "Free to use",
-    words: "Free to use in your videos on YouTube, TikTok, Instagram and Twitch, monetised or not, as long as the credit it asks for is in the description.",
+    words: "NCS's: free in your own videos on YouTube, TikTok, Instagram, Facebook, Snapchat and Twitch, monetised or not, as long as its credit is in the description. FPV Hangar puts it there. It may not be changed except to cut it to length, or used to promote a product.",
   },
-  gold: {
-    cleared: true, short: "With Monstercat Gold",
-    words: "Cleared for creators who have Monstercat Gold: add your channels to your Gold account and videos with it aren't claimed. Without Gold, YouTube's Content ID claims the video for Monstercat, which takes its ad money or blocks it in some countries.",
+  soundscout: {
+    cleared: true, short: "With SoundScout",
+    words: "From SoundScout, Monstercat's, and cleared for your videos when it is marked Copyright Safe there and your plan covers where you post: Personal for your own accounts, where a monetised video's ad money goes to the label, and Creator for monetised channels, which are whitelisted. Without a plan, YouTube's Content ID claims the video and its ad money goes to the label.",
   },
   claimed: {
     cleared: false, short: "Copyrighted",
-    words: "Owned by its label, with no licence for videos. YouTube's Content ID, and TikTok's and Instagram's own checks, recognise it: expect the video to be claimed, muted or blocked in some countries. Copyright checks don't weigh fair use.",
-  },
-  no: {
-    cleared: false, short: "Not cleared for videos",
-    words: "Monstercat doesn't clear this song for creators, even with Gold. A video with it gets claimed.",
+    words: "Owned by its label, with no licence for videos. YouTube's Content ID, and TikTok's and Instagram's own checks, recognise it: expect the video to be claimed, muted or blocked in some countries, however little of it is used. Copyright checks don't weigh fair use.",
   },
   unknown: {
     cleared: null, short: "Licence unknown",
-    words: "FPV Hangar doesn't know where this song came from. Use music you have the right to use, or one from NCS or Monstercat.",
+    words: "FPV Hangar doesn't know where this song came from. Use music you have the right to use, such as NCS's, or SoundScout's with a plan.",
   },
 };
 
@@ -80,12 +78,12 @@ export function librarySong(name, heard, from = null) {
 /**
  * The songs ranked for a run, best first: each { song, fit, taste, score }. With a run (fit.js'
  * `runShape`) the fit counts for more than the taste; without one there is only the taste. A song
- * already in the library counts as somewhat to the pilot's taste: they chose it.
+ * already in the library counts as much to the pilot's taste: they chose it.
  */
 export function rank(songs, run, taste) {
   const ranked = songs.map((song) => {
     const fit = fitOf(song, run);
-    const liking = song.source === "mine" ? { score: 0.6, text: null } : tasteOf(song, taste);
+    const liking = song.source === "mine" ? { score: 0.7, text: null } : tasteOf(song, taste);
     const score = fit.score === null ? liking.score : 0.6 * fit.score + 0.4 * liking.score;
     return { song, fit, taste: liking, score };
   });

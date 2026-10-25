@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { usualTempo, runShape, onTheBeat, placing, fitOf, bestTempos } from "../shared/fit.js";
+import { usualTempo, runShape, onTheBeat, placing, fitOf, bestTempos, lapInMusic } from "../shared/fit.js";
 
 /** A run whose laps are given, starting at `start` seconds into the clip, its video from 3 s before
  *  lap 1 to 8 s after the finish, as the app makes it when it is left to it. */
@@ -56,7 +56,14 @@ test("fit: the tempos a run suits are those its laps last whole bars at, the fas
   // 12 s is a whole number of bars at any multiple of 20 BPM.
   for (const one of tempos) assert.equal(one.tempo % 20, 0, `${one.tempo}`);
   assert.equal(tempos[0].tempo, 160);
+  assert.equal(lapInMusic(tempos[0]), "8 bars");
   assert.deepEqual(bestTempos(null), []);
+  // A lap of 2 seconds is one bar at 120 BPM, and six beats, not a bar and a half, at 180.
+  const quick = run([2, 2, 2, 2]);
+  assert.equal(lapInMusic(onTheBeat(quick, 120)), "1 bar");
+  assert.equal(lapInMusic(onTheBeat(quick, 179.5)), "6 beats");
+  assert.equal(lapInMusic(onTheBeat(quick, 131)), null);
+  assert.equal(lapInMusic(null), null);
 });
 
 test("fit: the strongest drop that leaves the video nothing short goes on the start gate", () => {
@@ -100,12 +107,14 @@ test("fit: a song that lasts the video and lands every gate on a bar fits best, 
   assert.ok(tooShort.reasons.some((reason) => reason.text === "Runs out 31.0 s before the video ends"));
 });
 
-test("fit: what isn't known about a song counts as halfway, and there is nothing to fit without a run", () => {
+test("fit: what isn't known about a song counts for a little less than halfway, and there is nothing to fit without a run", () => {
   const shape = run([12, 12, 12]);
   const unknownTempo = fitOf({ tempo: null, length: 300 }, shape);
   assert.equal(unknownTempo.beat, null);
-  assert.ok(Math.abs(unknownTempo.score - (0.45 + 0.55 * 0.5)) < 1e-9);
+  assert.ok(Math.abs(unknownTempo.score - (0.45 + 0.55 * 0.4)) < 1e-9);
   const unknownAll = fitOf({ tempo: null, length: null }, shape);
-  assert.equal(unknownAll.score, 0.5);
+  assert.ok(Math.abs(unknownAll.score - 0.4) < 1e-9);
+  // A song known to fit comes before a song the pilot likes whose tempo isn't known.
+  assert.ok(fitOf({ tempo: 160, length: 300 }, run([12, 12, 12])).score > unknownTempo.score + 0.25);
   assert.deepEqual(fitOf({ tempo: 160, length: 200 }, null), { score: null, length: null, beat: null, place: null, reasons: [] });
 });

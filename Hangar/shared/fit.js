@@ -7,6 +7,8 @@
 
 /** How far off a beat a gate can be and still be heard on it, in seconds. */
 export const onTime = 0.06;
+/** What a part of the fit that isn't known counts for, out of 1. */
+const unknown = 0.4;
 /** The tempos a run is matched against, as the app says a tempo: between 90 and 180, as listen.js does. */
 export const slowest = 90, fastest = 180;
 
@@ -70,6 +72,17 @@ export function onTheBeat(run, tempo) {
   };
 }
 
+/** How long a lap is in a tempo's terms, for the words: "8 bars" when it is about a whole number of
+ *  bars, or else "6 beats" when it is about a whole number of beats, or null. */
+export function lapInMusic(beat) {
+  if (!beat) return null;
+  const bars = Math.round(beat.barsPerLap), beats = Math.round(beat.barsPerLap * 4);
+  const beatLength = 60 / beat.tempo;
+  if (bars >= 1 && Math.abs(beat.barsPerLap - bars) * 4 * beatLength < onTime * 2) return `${bars} bar${bars === 1 ? "" : "s"}`;
+  if (beats >= 1 && Math.abs(beat.barsPerLap * 4 - beats) * beatLength < onTime * 2) return `${beats} beat${beats === 1 ? "" : "s"}`;
+  return null;
+}
+
 /**
  * Where a song can go under the video: which of its drops, if any, goes on the start gate, and
  * what that leaves the video short of at either end. A song with no drops is laid from the start
@@ -104,7 +117,8 @@ const tempoWords = (tempo) => `${Math.round(tempo * 10) / 10} BPM`;
  * How well a song suits a run: { score, length, beat, place, reasons }. `song` has `tempo` and
  * `length` (either can be null when it isn't known), and a song in the library also `beatLength`
  * and `drops` ({ time, strength }), as the app heard them. `score` is from 0 to 1, or null when
- * there is no run to fit to. A part that isn't known counts as halfway.
+ * there is no run to fit to. A part that isn't known counts for a little less than halfway, so a
+ * song known to fit comes before one that only might.
  */
 export function fitOf(song, run) {
   if (!run) return { score: null, length: null, beat: null, place: null, reasons: [] };
@@ -122,15 +136,14 @@ export function fitOf(song, run) {
   const tempo = song.beatLength > 0 ? 60 / song.beatLength : song.tempo;
   const beat = onTheBeat(run, tempo);
   if (beat) {
-    const bars = Math.round(beat.barsPerLap);
-    const lapsWhole = bars >= 1 && Math.abs(beat.barsPerLap - bars) * 4 * (60 / beat.tempo) < onTime * 2;
+    const lap = lapInMusic(beat);
     if (beat.onBar > 0 && beat.onBar * 2 >= beat.gates) reasons.push({ good: true, text: `${beat.onBar} of ${beat.gates} gates land on a bar line at ${tempoWords(beat.tempo)}` });
     else if (beat.onBar + beat.onBeat > 0 && (beat.onBar + beat.onBeat) * 2 >= beat.gates) reasons.push({ good: true, text: `${beat.onBar + beat.onBeat} of ${beat.gates} gates land on a beat at ${tempoWords(beat.tempo)}` });
     else reasons.push({ good: false, text: `Most gates fall between beats at ${tempoWords(beat.tempo)}` });
-    if (lapsWhole) reasons.push({ good: true, text: `A lap lasts ${bars} bar${bars === 1 ? "" : "s"}` });
+    if (lap) reasons.push({ good: true, text: `A lap lasts ${lap}` });
   }
   const parts = [[0.45, lengthScore], [0.55, beat?.score ?? null]];
-  const score = parts.reduce((sum, [weight, value]) => sum + weight * (value ?? 0.5), 0);
+  const score = parts.reduce((sum, [weight, value]) => sum + weight * (value ?? unknown), 0);
   return { score, length: lengthScore, beat, place, reasons };
 }
 

@@ -1,6 +1,5 @@
 // What the pilot listens to, from their Liked Songs and the artists they play most on Spotify, and
-// how near a song is to it: the song itself, an artist of theirs, an artist like theirs, or the
-// kind of music they play. Nothing here touches the network, so it can be tested by itself.
+// how near a song is to it: the song itself, an artist of theirs, or the kind of music they play. Nothing here touches the network, so it can be tested by itself.
 
 /** An artist's name made comparable: "Pegboard Nerds", "PEGBOARD NERDS" and "Pégboard  Nerds" are one. */
 export function nameKey(name) {
@@ -27,12 +26,11 @@ export function sameKind(one, other) {
 
 /**
  * The pilot's taste: { artists, genres, songs, size }. `liked` is their Liked Songs, newest first,
- * each { title, artists: [name] }; `top` the artists they play most, each { name, genres }; `like`
- * artists like theirs, each { name, because } where `because` is the artist of theirs they are like.
- * An artist of theirs counts for more the more of their liked songs are by them.
+ * each { title, artists: [name] }; `top` the artists they play most, each { name, genres }. An
+ * artist of theirs counts for more the more of their liked songs are by them.
  */
-export function tasteFrom({ liked = [], top = [], like = [] } = {}) {
-  const artists = new Map(), genres = new Map(), songs = new Set(), alike = new Map();
+export function tasteFrom({ liked = [], top = [] } = {}) {
+  const artists = new Map(), genres = new Map(), songs = new Set();
   const add = (name, weight) => {
     const key = nameKey(name);
     if (key === "") return;
@@ -51,11 +49,7 @@ export function tasteFrom({ liked = [], top = [], like = [] } = {}) {
       if (key !== "") genres.set(key, (genres.get(key) ?? 0) + 1);
     }
   }
-  for (const artist of like) {
-    const key = nameKey(artist.name);
-    if (key !== "" && !artists.has(key) && !alike.has(key)) alike.set(key, { name: artist.name, because: artist.because });
-  }
-  return { artists, genres, songs, alike, size: liked.length + top.length };
+  return { artists, genres, songs, size: liked.length + top.length };
 }
 
 /** Adds to a taste the kinds of music its artists make, as a catalog files their songs, so a
@@ -87,7 +81,6 @@ export function tasteOf(song, taste) {
   let best = null;
   for (const [key, artist] of taste.artists) if (names(credit, key) && (!best || artist.weight > best.weight)) best = artist;
   if (best) return { score: Math.min(0.95, 0.8 + 0.03 * best.weight), text: `By ${best.name}, whom you listen to` };
-  for (const [key, artist] of taste.alike) if (names(credit, key)) return { score: 0.65, text: `Like ${artist.because}, whom you listen to` };
   if (song.genre) {
     let kind = null;
     for (const [key, count] of taste.genres) if (sameKind(song.genre, key) && (!kind || count > kind.count)) kind = { key, count };

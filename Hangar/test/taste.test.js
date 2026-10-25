@@ -26,8 +26,8 @@ test("taste: names and kinds of music are compared as words, whatever their mark
   assert.ok(!sameKind("", "house"));
 });
 
-test("taste: a liked song, then an artist of the pilot's, then one like theirs, then their kind of music", () => {
-  const taste = tasteFrom({ liked, top, like: [{ name: "Similar Sound", because: "Pipe Theory" }, { name: "Test Nerds", because: "Pipe Theory" }] });
+test("taste: a liked song, then an artist of the pilot's, then their kind of music", () => {
+  const taste = tasteFrom({ liked, top });
   assert.equal(taste.size, 5);
   // Two liked songs and the top of the list.
   assert.equal(taste.artists.get("test nerds").weight, 7);
@@ -35,9 +35,6 @@ test("taste: a liked song, then an artist of the pilot's, then one like theirs, 
   const byThem = tasteOf({ title: "Something New", credit: "Test Nerds & Someone Else" }, taste);
   assert.equal(byThem.text, "By Test Nerds, whom you listen to");
   assert.ok(byThem.score > 0.8 && byThem.score <= 0.95);
-  // An artist of their own isn't counted again as one like theirs.
-  assert.equal(taste.alike.has("test nerds"), false);
-  assert.deepEqual(tasteOf({ title: "Other", artists: ["Similar Sound"] }, taste), { score: 0.65, text: "Like Pipe Theory, whom you listen to" });
   const kind = tasteOf({ title: "Other", artists: ["Nobody Known"], genre: "Dubstep" }, taste);
   assert.equal(kind.text, "Dubstep, as you listen to");
   assert.ok(kind.score >= 0.45 && kind.score < 0.65);

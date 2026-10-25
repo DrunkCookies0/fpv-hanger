@@ -1290,7 +1290,7 @@ export class Editor {
           heard.beatLength ? tempoLabel(heard.tempo) : `About ${tempoLabel(heard.tempo)}`)),
       h("div.row.tight.ed-song-row",
         h("button.ed-song", { type: "button", onclick: pick, help: "Your songs. A song you add is kept in your library for every track, and so are the marks you put in it." }, icon("music"), h("span.ed-song-name", title), icon("chevronDown", 10)),
-        secondary("Find music", () => this.findMusic(), { icon: "scope", probe: "ed find music", help: "Songs for this run from your library, your Spotify, NCS and Monstercat, ranked by how well your laps land on their beat, each saying whether it is free to use." }),
+        secondary("Find music", () => this.findMusic(), { icon: "scope", probe: "ed find music", help: "Songs for this run from your library, your Spotify and NCS, ranked by how well your laps land on their beat, each saying whether it is free to use. SoundScout opens at the tempos that suit it." }),
       ),
       song ? [
         this.songFindings(),

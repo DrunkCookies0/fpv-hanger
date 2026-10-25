@@ -1,5 +1,5 @@
-// Finding music: the pilot's Spotify, and the catalogs of music cleared for videos (NCS and
-// Monstercat), read for Find music in the marker editor (see shared/music.js).
+// Finding music: the pilot's Spotify, and NCS's catalog of music free for videos, read for Find
+// music in the marker editor (see shared/music.js and shared/catalogs.js).
 //
 // Spotify is signed in to in the pilot's own browser, through an app of their own in Spotify for
 // Developers: the browser comes back to an address on this computer that only FPV Hangar listens
@@ -8,18 +8,18 @@
 // connects for itself. It only reads the pilot's Liked Songs and the artists they play most.
 //
 // A copy trying itself out asks only a service of its own standing in for all of them, never
-// Spotify, NCS or Monstercat.
+// Spotify or NCS.
 
 import { createServer } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as spotify from "../shared/spotify.js";
-import { catalogs } from "../shared/catalogs.js";
+import { catalogs, ncs, ncsCredit } from "../shared/catalogs.js";
 import { config, setConfig, log } from "./paths.js";
 
-/** How long a catalog as read is good for, and the pilot's Spotify. */
-const catalogFresh = 24 * 60 * 60 * 1000, spotifyFresh = 30 * 60 * 1000;
+/** How long the pilot's Spotify as read is good for. A catalog says for itself. */
+const spotifyFresh = 30 * 60 * 1000;
 /** How long FPV Hangar waits for the pilot in their browser. */
 const signInWait = 5 * 60 * 1000;
 
@@ -32,16 +32,17 @@ const backPage = (said) => `<!doctype html><meta charset="utf-8"><title>FPV Hang
 
 /**
  * `cache` is the folder for what can be read again. `open(address)` opens a page in the pilot's
- * own browser. `quiet` is a copy trying itself out.
+ * own browser. `tell(kind, details)` sends news to the pages. `quiet` is a copy trying itself out.
  */
-export function makeMusic({ cache, open, quiet = false, fetcher = fetch }) {
+export function makeMusic({ cache, open, tell = () => {}, quiet = false, fetcher = fetch }) {
   /** Where each service is: their own, or for a copy trying itself out, nowhere until a stand-in is given. */
   let bases = quiet ? null : { accounts: spotify.accounts, service: spotify.service, ...Object.fromEntries(Object.entries(catalogs).map(([key, one]) => [key, one.base])) };
   /** The key to the pilot's Spotify while it lasts, and what was last read from it. */
   let access = null, read = null;
   /** While FPV Hangar waits for the pilot in their browser: how to stop waiting. */
   let waiting = null;
-  const catalogsRead = new Map();
+  /** Each catalog as last read, and the reading of it under way, if one is. */
+  const catalogsRead = new Map(), reading = new Map();
 
   const kept = () => config().spotify ?? {};
   const keep = (patch) => setConfig({ spotify: { ...kept(), ...patch } });
@@ -179,7 +180,7 @@ export function makeMusic({ cache, open, quiet = false, fetcher = fetch }) {
      */
     async spotifyMusic({ again = false } = {}) {
       const now = this.spotifyNow();
-      const none = { connected: false, needsSetup: now.clientId === "", songs: [], liked: [], top: [], like: [], problem: null };
+      const none = { connected: false, needsSetup: now.clientId === "", songs: [], liked: [], top: [], problem: null };
       if (!now.connected) return none;
       if (!bases) return { ...none, connected: true, problem: "Spotify can't be asked from this copy." };
       if (read && !again && Date.now() - read.at < spotifyFresh) return read.music;
@@ -198,48 +199,98 @@ export function makeMusic({ cache, open, quiet = false, fetcher = fetch }) {
       const music = {
         connected: this.spotifyNow().connected, needsSetup: false, songs,
         liked: songs.map((song) => ({ title: song.title, artists: song.artists })),
-        top: top.body ? spotify.topArtistsIn(top.body) : [], like: [], problem: problem ?? null,
+        top: top.body ? spotify.topArtistsIn(top.body) : [], problem: problem ?? null,
       };
       if (!problem) read = { at: Date.now(), music };
       return music;
     },
 
     /**
-     * A catalog's songs: { songs, read, problem, note }. Read from the catalog once a day, or with
-     * `again`, and kept between times, so Find music opens at once and works without a connection.
+     * A catalog's songs: { songs, read, problem, reading }. Its list is kept between times, so Find
+     * music opens at once and works without a connection. When it is older than the catalog says
+     * it is good for, or with `again`, it is read again behind what the pilot is doing, and the
+     * pages hear ("musicCatalog") how far that has got and when it is done. Only the first time,
+     * with nothing kept, is the reading waited for.
      */
     async catalog(which, { again = false } = {}) {
       const catalog = catalogs[which];
-      if (!catalog) return { songs: [], read: null, problem: "There is no such catalog." };
+      if (!catalog) return { songs: [], read: null, problem: "There is no such catalog.", reading: false };
       const file = join(cache, "Music", `${which}.json`);
       let held = catalogsRead.get(which) ?? null;
       if (!held) {
         try {
           held = JSON.parse(readFileSync(file, "utf8"));
+          catalogsRead.set(which, held);
         } catch {}
       }
-      if (held && !again && Date.now() - held.read < catalogFresh) return { ...held, problem: null, note: catalog.note ?? null };
-      if (!bases) return { songs: held?.songs ?? [], read: held?.read ?? null, problem: held ? null : `${catalog.name} can't be read from this copy.`, note: catalog.note ?? null };
-      const got = await catalog.read({ base: bases[which], get: (address) => ask(address) });
-      if (got.problem) {
-        log(`Reading ${catalog.name}: ${got.problem}`);
-        return { songs: held?.songs ?? [], read: held?.read ?? null, problem: held ? `${got.problem} These are its songs as they were read ${new Date(held.read).toLocaleDateString()}.` : got.problem, note: catalog.note ?? null };
+      if (!bases) return { songs: held?.songs ?? [], read: held?.read ?? null, problem: held ? null : `${catalog.name} can't be read from this copy.`, reading: false };
+      const stale = !held || again || Date.now() - held.read > catalog.fresh;
+      if (stale && !reading.has(which)) {
+        const work = (async () => {
+          const got = await catalog.read({
+            base: bases[which], get: (address) => ask(address),
+            heard: (page, pages) => tell("musicCatalog", { which, page, pages, done: false }),
+          });
+          // A reading that stopped part of the way keeps what it read, as long as that is more than was kept.
+          const songs = got.songs ?? [];
+          if (got.problem) log(`Reading ${catalog.name}: ${got.problem}`);
+          if (songs.length > 0 && (!got.problem || songs.length > (held?.songs.length ?? 0))) {
+            const fresh = { songs, read: got.problem ? 0 : Date.now() };
+            catalogsRead.set(which, fresh);
+            try {
+              mkdirSync(join(cache, "Music"), { recursive: true });
+              writeFileSync(file, JSON.stringify(fresh));
+            } catch (error) {
+              log(`Keeping ${catalog.name}: ${error.message}`);
+            }
+          }
+          return got.problem ?? null;
+        })().finally(() => reading.delete(which));
+        reading.set(which, work);
+        work.then((problem) => tell("musicCatalog", { which, done: true, problem }));
       }
-      const fresh = { songs: got.songs, read: Date.now() };
-      catalogsRead.set(which, fresh);
+      // Nothing kept yet: this time the pilot waits for it.
+      if (!held && reading.has(which)) {
+        const problem = await reading.get(which);
+        held = catalogsRead.get(which) ?? null;
+        return { songs: held?.songs ?? [], read: held?.read ?? null, problem, reading: false };
+      }
+      return { songs: held?.songs ?? [], read: held?.read ?? null, problem: null, reading: reading.has(which) };
+    },
+
+    /**
+     * Fetches a song from NCS, as its own Download does, with the credit NCS gives for it:
+     * { bytes, credit, name } or { problem }, `name` being what NCS calls the file, if it says.
+     * Asked for by the pilot, one song at a time.
+     */
+    async fromNcs(id) {
+      if (!bases) return { problem: "NCS can't be asked from this copy." };
+      const info = await ask(ncs.info(id, bases.ncs));
+      const credit = info.ok ? ncsCredit(info.text) : null;
+      if (!credit) return { problem: info.status === 0 ? "NCS couldn't be reached. Check the connection." : "NCS didn't give the credit for this song, so it isn't added. Try again, or get it from its page." };
       try {
-        mkdirSync(join(cache, "Music"), { recursive: true });
-        writeFileSync(file, JSON.stringify(fresh));
+        const answer = await fetcher(ncs.download(id, bases.ncs), { signal: AbortSignal.timeout(120000) });
+        const bytes = Buffer.from(await answer.arrayBuffer());
+        const kind = answer.headers.get("content-type") ?? "";
+        if (!answer.ok || bytes.length < 50_000 || !/audio|octet-stream/i.test(kind)) return { problem: `NCS didn't give the song${answer.ok ? "" : ` (it answered ${answer.status})`}. It may not be out yet: try its page.` };
+        const named = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(answer.headers.get("content-disposition") ?? "")?.[1] ?? null;
+        let name = null;
+        try {
+          name = named ? decodeURIComponent(named) : null;
+        } catch {
+          name = named;
+        }
+        return { bytes, credit, name };
       } catch (error) {
-        log(`Keeping ${catalog.name}: ${error.message}`);
+        log(`Fetching a song from NCS: ${error.message}`);
+        return { problem: "NCS couldn't be reached. Check the connection." };
       }
-      return { ...fresh, problem: null, note: catalog.note ?? null };
     },
 
     /** For the app's checks of itself: a service of its own to stand in for Spotify's and the catalogs'. */
     useStandIn(address) {
       if (!quiet) return;
-      bases = { accounts: `${address}accounts/`, service: `${address}spotify/`, ...Object.fromEntries(Object.keys(catalogs).map((key) => [key, `${address}${key}/`])) };
+      bases = address === null ? null : { accounts: `${address}accounts/`, service: `${address}spotify/`, ...Object.fromEntries(Object.keys(catalogs).map((key) => [key, `${address}${key}/`])) };
       access = null;
       read = null;
       catalogsRead.clear();

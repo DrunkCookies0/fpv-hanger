@@ -346,7 +346,7 @@ function spotifyCard() {
   };
   connect = primary("Connect Spotify", start, { disabled: typed().trim() === "", probe: "connect spotify" });
   const step = (number, ...text) => h("div.step", h("span.step-number", String(number)), h("div.step-text", ...text));
-  const about = h("p.dim.small", "Find music, in Markers & music, finds songs for a run among your Liked Songs, and among NCS's and Monstercat's music by the artists you listen to. FPV Hangar only reads your Liked Songs and the artists you play most, and changes nothing. Spotify's own music can't be saved from Spotify for a video, so it is listed with what that means.");
+  const about = h("p.dim.small", "Find music, in Markers & music, finds songs for a run among your Liked Songs, and among NCS's free music by the artists and in the kinds of music you listen to. FPV Hangar only reads your Liked Songs and the artists you play most, and changes nothing. Spotify's own music can't be saved from Spotify or put in a video, so it is listed with what that means. Spotify signs FPV Hangar out every six months: connect again then.");
   if (now.connected) {
     return h("div.card.spaced", { "data-probe": "spotify card" },
       label("SPOTIFY"),
@@ -378,7 +378,7 @@ function spotifyCard() {
     ),
     spotifySaid && h(`p.small.${spotifySaid.kind}`, spotifySaid.text),
     h("div.key-steps",
-      step(1, "Press Open Spotify for Developers and sign in with your Spotify account. Press Create app: any name and description will do, such as FPV Hangar."),
+      step(1, "Press Open Spotify for Developers and sign in with your Spotify account. Spotify only lets an app of your own work for an account with Premium. Press Create app: any name and description will do, such as FPV Hangar."),
       step(2, "Under Redirect URIs, paste ", h("code", now.redirect), " (Copy the address puts it on the clipboard) and press Add. Tick Web API, agree to Spotify's terms and press Save."),
       step(3, "Copy the Client ID from the app's page, paste it above and press Connect Spotify. Spotify asks in your browser whether FPV Hangar may see your Liked Songs."),
     ),
