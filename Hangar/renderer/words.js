@@ -69,6 +69,23 @@ export const tools = {
     about: "for setting a radio up on the computer: its models, mixes, switches, telemetry and screens, tried out in a simulator, then written to the radio, with a backup of it all. It also updates the radio's firmware and what is on its SD card",
     tip: "For a RadioMaster TX15 Max, choose the RadioMaster TX15 as the radio in Companion's settings. Its firmware is written from Companion's Radio menu, with a USB-A to USB-C cable, and it is updated differently from older radios.",
     guide: { title: "Updating a TX15", address: "https://manual.edgetx.org/installing-and-updating-edgetx/updating-your-stm32h7-radio" },
+    // What carries over, beside the radio's backups (renderer/views/radio.js).
+    keeps: [
+      "Updating Companion keeps its settings and radio profiles. A newer version family, such as 3.0, takes them from the one before the first time it opens, and the one before stays.",
+      "Writing new firmware leaves the models and settings on the radio's card as they are. Before it writes new firmware, Companion backs up the radio's firmware into the same folder as the card's backups, unless you untick that.",
+    ],
+    changes: {
+      title: "WHAT YOU CAN CHANGE ON A TX15 MAX",
+      items: [
+        ["The touch screen.", "On the radio itself: its theme, and each model's top bar and screens, with their layouts and widgets. New themes and widgets are folders added to THEMES and WIDGETS on its card."],
+        ["The switches' lights.", "The colours of the six customizable switches, on and off, for each model: in Companion under the model's Setup, Customizable Switches, or on the radio under Model Setup."],
+        ["The gimbals' lights.", "The ring round each gimbal is lit by a script from SCRIPTS/RGBLED on the card, which a model's special function RGB leds runs. EdgeTX's SD card content has some: gimbal.lua lights each ring as its stick moves, and there are plain colours."],
+      ],
+    },
+  },
+  radioBackups: {
+    title: "Radio backups", icon: "copies", soon: null,
+    summary: "Everything on your radio's SD card, its models and settings with its screens, themes, scripts and sounds, copied whenever it is plugged in with USB Storage chosen.",
   },
 };
 
@@ -88,8 +105,8 @@ export const suites = [
   },
   {
     title: "Radio",
-    summary: "Your radio's own setup program, for a RadioMaster TX15 Max or any radio that runs EdgeTX. It is EdgeTX's, not FPV Hangar's: open source, and kept current from its own Releases page.",
-    tools: ["edgetxCompanion"],
+    summary: "For a RadioMaster TX15 Max or any radio that runs EdgeTX: its own setup program, and a backup of its card each time it is plugged in. Companion is EdgeTX's, not FPV Hangar's: open source, and kept current from its own Releases page.",
+    tools: ["edgetxCompanion", "radioBackups"],
     links: [
       { title: "edgetx.org", address: "https://edgetx.org/" },
       { title: "Manual", address: "https://manual.edgetx.org/" },
@@ -132,6 +149,15 @@ export const readMeFor = (mac) => ({
         ["point", `The ExpressLRS Configurator is a program of its own. The app fetches it from ExpressLRS's Releases page, checks it against the checksum published there, opens it, and tells you when a newer one is out.${mac ? " It goes in your Applications folder, and updating it sends the copy you had to the Trash." : " On Windows the app starts ExpressLRS's own installer, and you follow that through."}`],
         ["point", `EdgeTX Companion, under Radio, is fetched the same way, from EdgeTX's Releases page, and checked against the checksum GitHub keeps for it there. It sets up a radio that runs EdgeTX, such as a RadioMaster TX15 Max: its models, mixes, switches and screens, tried out in a simulator and then written to the radio. Each version family, such as 2.12, is a program of its own: a newer family goes in beside the one you have, which stays.${mac ? "" : " On Windows the app starts EdgeTX's own installer."}`],
         ...(mac ? [["point", "The first time one of them looks for devices, macOS asks whether FPV Hangar may use Bluetooth. Say yes if you connect to anything that way. USB works either way."]] : []),
+      ],
+    },
+    {
+      title: "Your radio's backups",
+      items: [
+        ["paragraph", "EdgeTX keeps all of a radio's models and settings on its SD card, with its themes, widgets, scripts and sounds. Whenever the radio is plugged in to this computer with USB Storage (SD) chosen on its screen, FPV Hangar copies everything on that card into a folder of its own, in Documents, EdgeTX, backups. Radio backups, under Radio on the first screen, lists them."],
+        ["point", "The radio's card is only read. A file that hasn't changed since the last backup is linked to its copy there, so a backup takes little room, and a backup that finds nothing changed isn't kept."],
+        ["point", "To put one back, plug the radio in with USB Storage (SD) chosen, delete the RADIO and MODELS folders on its card, and copy the backup's in their place. Or open the backup in EdgeTX Companion with File, Read Models and Settings from SD Path, then write it with Radio, Write Models and Settings to Radio."],
+        ["point", "Updating Companion keeps its settings. A newer version family takes them from the one before when it first opens. Writing new firmware leaves the card as it is, and Companion backs up the radio's firmware first, into the same folder."],
       ],
     },
     {

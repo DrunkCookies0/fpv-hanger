@@ -6,6 +6,7 @@ import { suites, tools } from "../words.js";
 import { openLink } from "../actions.js";
 import { showNote } from "./notes.js";
 import { openTool, showProgram, programStatus } from "./tool.js";
+import { showRadioBackups, radioStatus } from "./radio.js";
 import { uploadAnyVideo } from "./upload.js";
 
 /** Says a newer version is ready. Pressing it goes to where it is installed. */
@@ -22,6 +23,7 @@ function actionFor(tool) {
   // Another project's own app, shown in the window, or its program, which the app fetches.
   if (tool === "betaflight" || tool === "elrsFlasher") return () => openTool(tool);
   if (tool === "elrsConfigurator" || tool === "edgetxCompanion") return () => showProgram(tool);
+  if (tool === "radioBackups") return showRadioBackups;
   if (tool === "upload") return uploadAnyVideo;
   return null;
 }
@@ -48,6 +50,7 @@ function statusOf(tool) {
   }
   if (tool === "betaflight" || tool === "elrsFlasher") return "Always their newest";
   if (tool === "elrsConfigurator" || tool === "edgetxCompanion") return programStatus(tool);
+  if (tool === "radioBackups") return radioStatus();
   if (tool === "upload") return "YouTube, Shorts, TikTok, Instagram";
   return null;
 }

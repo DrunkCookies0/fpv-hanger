@@ -57,6 +57,10 @@ export const programs = {
     mac: "EdgeTX Companion *.app",
     windows: ["EdgeTX/Companion */bin/companion.exe"],
     registry: "EdgeTX Companion *",
+    // Before it writes new firmware to a radio it backs up the old, in Documents/EdgeTX/backups,
+    // and it doesn't write it when that folder isn't there. The app makes it, and keeps its own
+    // backups of the radio's card there too (main/radio.js).
+    backups: true,
     asset: (platform) => (platform === "darwin" ? /^edgetx-cpn-macos-v[\d.]+\.zip$/ : platform === "win32" ? /^edgetx-cpn-win64-v[\d.]+\.zip$/ : null),
     inside: (platform) => (platform === "darwin" ? /^edgetx-companion-[\d.]+\.dmg$/ : platform === "win32" ? /^companion-windows-[\d.]+\.exe$/ : null),
   },

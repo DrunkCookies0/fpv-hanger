@@ -16,6 +16,7 @@ import { showSheet } from "../sheets.js";
 import { openLink } from "../actions.js";
 import { computer, tools } from "../words.js";
 import { outsideTools, programs, plainNotes, megabytes, goesBeside, familyOf } from "../../shared/components.js";
+import { backupLine } from "./radio.js";
 
 /** What each kind of device is called when a tool asks for one, and what to do when none shows. */
 const kinds = {
@@ -180,6 +181,9 @@ export function showProgram(id) {
       h("div.alert-title", program.title),
       h("div.alert-message", `${program.owner}'s own program, ${words.about}. It opens in a window of its own. FPV Hangar fetches it from ${program.owner}'s Releases page, checks it against the checksum ${program.sums ? "published there" : "GitHub keeps for it there"}, and tells you when a newer one is out.`),
       words.tip && h("div.program-tip", h("span", words.tip), words.guide && plain(words.guide.title, () => openLink(words.guide.address), { icon: "arrowUpRight", help: `Opens ${words.guide.address} in your browser` })),
+      // A radio's settings: its backups, and what carries over.
+      words.keeps && h("div.program-notes.whole", label("YOUR RADIO'S SETTINGS"), h("p", backupLine()), words.keeps.map((line) => h("p", line))),
+      words.changes && h("div.program-notes.whole", label(words.changes.title), words.changes.items.map(([title, line]) => h("p", h("strong", title), " ", line))),
       h("p.program-now", here, newest && " ", newest),
       (said ?? now.problem) && h("p.program-said", said ?? now.problem),
       fetching && h("div.program-fetch", h("span.job-bar", bar), h("span.program-share", `Fetching ${megabytes(latest.size)}…`)),

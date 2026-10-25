@@ -21,6 +21,7 @@ import { basename, join, resolve } from "node:path";
 import { argument, config, setConfig, log } from "./paths.js";
 import { programs, releaseOf, publishedSum, versionOf, familyOf, familyIn, nameFor, registryVersion } from "../shared/components.js";
 import { isNewer } from "../shared/updates.js";
+import { backupsFolder } from "./radio.js";
 
 const mac = process.platform === "darwin";
 const run = (program, parts) => spawnSync(program, parts, { encoding: "utf8", windowsHide: true });
@@ -129,6 +130,17 @@ export async function newest(program) {
   return releaseOf(program, await answer.json(), process.platform, process.arch);
 }
 
+/** The folder a program backs a radio up to, made if it isn't there yet. (Tried out in a folder of
+ *  its own, it leaves the pilot's Documents alone unless it is given a folder for that too.) */
+function makeBackupsFolder(program) {
+  if (!program.backups || (argument("--programs") && !argument("--radio-backups"))) return;
+  try {
+    mkdirSync(backupsFolder(), { recursive: true });
+  } catch (error) {
+    log(`Making ${program.title}'s backups folder: ${error.message}`);
+  }
+}
+
 /** Whether a program is open, on a Mac, where a copy in use can't be swapped for another. */
 function isOpen(path) {
   return mac && run("/usr/bin/pgrep", ["-f", `${path}/Contents/MacOS/`]).status === 0;
@@ -230,8 +242,9 @@ export async function install(program, release, { heard = () => {} } = {}) {
 /**
  * The programs as the app's pages ask for them: `checkProgram`, `installProgram`, `openProgram`,
  * and `programsNow` for what is known. The pages hear "program" while one is being fetched.
+ * `used` is given a program that has been put in place or opened.
  */
-export function makePrograms({ tell, quiet }) {
+export function makePrograms({ tell, quiet, used = () => {} }) {
   /** What is being done to each program at the moment: `{ kind: "checking" }`, `{ kind: "fetching", progress }`. */
   const busy = {};
   const problems = {};
@@ -298,6 +311,10 @@ export function makePrograms({ tell, quiet }) {
       problems[id] = done.problem;
       // What was put there, for a copy that doesn't say which version it is.
       if (done.path) remember(id, { put: { path: done.path, version: latest.version } });
+      if (!done.problem) {
+        makeBackupsFolder(program);
+        used(program);
+      }
       tell("changed");
       return { state: api.programsNow(), installer: Boolean(done.installer) };
     },
@@ -306,6 +323,8 @@ export function makePrograms({ tell, quiet }) {
     async openProgram(id) {
       const program = Object.hasOwn(programs, id) ? programs[id] : null, here = program && installed(program);
       if (!here) return { problem: "It isn't on this computer yet." };
+      makeBackupsFolder(program);
+      used(program);
       const failed = await shell.openPath(here.path);
       return { problem: failed || null };
     },

@@ -25,6 +25,7 @@ The app is not signed, so macOS and Windows both ask before opening it the first
 - **Leaderboards.** Every entry on each track as the series has it, with yours picked out.
 - **One library on two computers.** Keep your library in Google Drive and your Mac and your PC open the same one. Google's own Drive for desktop carries it between them, so the app never signs in to anything.
 - **Set up your radio.** EdgeTX Companion, under Radio on the first screen, for a RadioMaster TX15 Max or any radio that runs EdgeTX: its models, mixes, switches, telemetry and screens, tried out in a simulator and written to the radio, and its firmware updated. The app fetches Companion from EdgeTX's Releases page, checks it against the checksum GitHub keeps for it, and says when a newer one is out.
+- **Back up your radio.** Whenever the radio is plugged in with USB Storage (SD) chosen on it, the app copies everything on its SD card, where EdgeTX keeps all its models and settings, into Documents/EdgeTX/backups. A new backup is kept only when something on the card has changed. Its sheet lists them and says how to put one back.
 - **Groups and races.** Races are grouped by series or club, each group with its own name on the timer, its own ID number, and a logo of your choosing on its videos. Each race has its own name and the day it was flown.
 
 ## Coming soon
@@ -74,6 +75,7 @@ The library is a folder, `FPV Hangar` in your Movies or Videos folder unless you
 - SoundScout's catalog is read from `www.soundscout.com/api/catalog`, the address its own player reads it from, which needs no sign-in. It isn't offered to other programs: it can change or close without warning, and SoundScout's terms (section 8.1(f)) ask for its written permission to read the catalog by a program. It is read a page at a time, at most once a week, and the app never plays or fetches SoundScout's music. NCS's site has no such rule; it is read the same way.
 - The key Spotify gives for a pilot's account is kept in the app's own `config.json` on each computer, never in the library, which may be in Google Drive.
 - A track's video is read at 480 lines on purpose: the search for pipes was worked out on a picture that soft.
+- A radio's card is only read, as a card from the goggles is. A backup that is put back is put back by the pilot, or by Companion.
 
 ## Releasing a version
 

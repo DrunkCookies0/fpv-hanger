@@ -23,6 +23,10 @@
 //   cards    a card from the goggles, with folders standing in for cards (`--cards <folder>`): the
 //            track's page says one is plugged in, its recordings are listed with the new ones
 //            from the last day ticked, and the ones picked are copied in and the card left alone
+//   radio    the radio's backups, with folders standing in for its card and for where they go
+//            (`--radios <folder> --radio-backups <folder>`): a radio plugged in is backed up whole
+//            and its card left as it was; plugged in again with nothing changed, no new backup is
+//            kept; with a model changed, one is, the rest linked to the last; the sheet lists them
 //   outside  other projects' tools: one opens over its place in the window, a list of devices is
 //            chosen from, and made-up releases of the programs the app keeps up to date are fetched,
 //            checked and put in place, all in a folder of their own: the ExpressLRS Configurator in
@@ -89,7 +93,7 @@ function say(ok, what, detail = "") {
 }
 
 export async function run(which, tools) {
-  const checks = { editor, video, mp4, pages, form, bookends, trackview, trackvideo, outside, uploads, music, drive, cards, update, updating, carryover, everything };
+  const checks = { editor, video, mp4, pages, form, bookends, trackview, trackvideo, outside, uploads, music, drive, cards, radio, update, updating, carryover, everything };
   if (report) writeFileSync(report, "");
   if (!checks[which]) {
     console.error(`There is no check called ${which}. There are: ${Object.keys(checks).join(", ")}.`);
@@ -1616,6 +1620,78 @@ async function driveLibrary(tools, myDrive) {
 }
 
 /** A card from the goggles, with folders standing in for the disks that are plugged in. */
+/** The radio's backups. Its card is a folder with a radio's settings in it, as EdgeTX writes them,
+ *  and a little of everything else a card has. */
+async function radio(tools) {
+  const { api } = tools;
+  const place = argument("--radios"), kept = argument("--radio-backups");
+  if (!place || !kept) return note("   (give folders to stand in for a radio's card and for its backups with --radios and --radio-backups, and this is tried)");
+  rmSync(resolve(place), { recursive: true, force: true });
+  rmSync(resolve(kept), { recursive: true, force: true });
+  const card = join(resolve(place), "NO NAME");
+  const write = (path, what) => {
+    mkdirSync(dirname(join(card, ...path.split("/"))), { recursive: true });
+    writeFileSync(join(card, ...path.split("/")), what);
+  };
+  write("RADIO/radio.yml", "semver: 9.9.9\nboard: tx15\n");
+  write("MODELS/model00.yml", "header:\n  name: \"Made-up\"\n");
+  write("MODELS/labels.yml", "models:\n  model00.yml: {}\n");
+  write("THEMES/Made-up/theme.yml", "summary:\n  name: Made-up\n");
+  write("SCRIPTS/RGBLED/made-up.lua", "-- made up\n");
+  write("SOUNDS/en/made-up.wav", Buffer.alloc(200_000, 3));
+  write(".Spotlight-V100/Store-V2", "the computer's");
+  /** A folder's files, with their sizes and times, as lines. */
+  const listing = (folder, inside = "") => readdirSync(join(folder, inside), { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap((entry) => {
+    const path = inside ? `${inside}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) return listing(folder, path);
+    const facts = statSync(join(folder, path));
+    return [`${path} ${facts.size} ${Math.round(facts.mtimeMs / 2000)}`];
+  });
+  // Pulled out is somewhere else, where no disk is looked for.
+  const away = join(dirname(resolve(place)), "Radio pulled out");
+  const plugAgain = async () => {
+    renameSync(card, away);
+    const out = await api.lookForRadios(true);
+    renameSync(away, card);
+    return out.radios.length === 0 ? api.lookForRadios(true) : { ...out, problem: "it was still plugged in" };
+  };
+  const before = listing(card).join("\n"), known = config().radioBackups;
+  const { js, errors } = await page(tools);
+  try {
+    let now = await api.lookForRadios(true);
+    const first = now.backups[0];
+    say(now.radios.length === 1 && now.radios[0].board === "tx15" && now.radios[0].version === "9.9.9", "a radio's card is found by the settings on it", JSON.stringify(now.radios[0] ?? null));
+    const copy = first ? listing(first.folder).join("\n") : "";
+    say(Boolean(first) && first.files === 6 && copy === before.split("\n").filter((line) => !line.startsWith(".")).join("\n") && now.problem === null,
+      "everything on it is backed up, as it is on the card, and nothing the computer put there", first ? `${first.files} files in ${basename(first.folder)}` : now.problem ?? "no backup");
+    say(listing(card).join("\n") === before, "the card is left as it was");
+    now = await plugAgain();
+    say(now.count === 1 && now.last?.unchanged === true, "plugged in again with nothing changed, no new backup is kept", `${now.count} backups`);
+    // A model changed on the radio. A card keeps times to two seconds.
+    await pause(2100);
+    write("MODELS/model00.yml", "header:\n  name: \"Made-up, changed\"\n");
+    now = await plugAgain();
+    const second = now.backups[0], sound = (folder) => statSync(join(folder, "SOUNDS", "en", "made-up.wav"));
+    say(now.count === 2 && second?.copied === 1 && first && sound(first.folder).ino === sound(second.folder).ino && readFileSync(join(first.folder, "MODELS", "model00.yml"), "utf8").includes("\"Made-up\""),
+      "with a model changed, a new backup is kept: the model copied, the rest the same files as in the last backup, and the last backup as it was", `${now.count} backups, ${second?.copied} copied`);
+    // The sheet lists them, and its button backs the radio up again.
+    await js(`await window.showForSnapshot("home"); document.querySelector('[data-probe="tile radioBackups"]').click()`);
+    await pause(300);
+    const sheet = await js(`return { rows: document.querySelectorAll("#sheets .backup").length, now: document.querySelector("#sheets .program-now")?.textContent ?? "", button: !document.querySelector('[data-probe="radio back up"]')?.disabled }`);
+    say(sheet.rows === 2 && sheet.now.startsWith("TX15 is plugged in") && !sheet.now.includes("Nothing on its card has changed") && sheet.button, "its sheet lists the backups and says the radio is plugged in", JSON.stringify(sheet));
+    const was = api.radioNow().last?.at;
+    await js(`document.querySelector('[data-probe="radio back up"]').click()`);
+    for (let tries = 0; tries < 100 && (api.radioNow().last?.at === was || api.radioNow().backing); tries += 1) await pause(50);
+    now = api.radioNow();
+    say(now.count === 2 && now.last?.unchanged === true && now.problem === null, "Back up now looks at the card again, and keeps nothing new when nothing changed", JSON.stringify(now.last));
+  } finally {
+    await js(`document.querySelectorAll("#sheets .backdrop").forEach((one) => one.remove())`);
+    setConfig({ radioBackups: known });
+    for (const folder of [resolve(place), resolve(kept), away]) rmSync(folder, { recursive: true, force: true });
+  }
+  say(errors.length === 0, "nothing went wrong on the page", errors.join(" | "));
+}
+
 async function cards(tools) {
   const { api, library } = tools;
   const place = argument("--cards");
@@ -1992,7 +2068,7 @@ async function everything(tools) {
 
   const steps = [
     ["The marker editor", editor], ["Making the videos", video], ["A recording in an MP4", mp4], ["Before and after a video", bookends],
-    ["The track in 3D, and building one", trackview], ["Other projects' tools", outside], ["Uploading", uploads], ["Finding music", music], ["A card from the goggles", cards], ["The copy in Google Drive", drive], ["Every page", pages], ["Updating itself", updating],
+    ["The track in 3D, and building one", trackview], ["Other projects' tools", outside], ["Uploading", uploads], ["Finding music", music], ["A card from the goggles", cards], ["The radio's backups", radio], ["The copy in Google Drive", drive], ["Every page", pages], ["Updating itself", updating],
   ];
   for (const [title, step] of steps) {
     note(`-- ${title}`);
