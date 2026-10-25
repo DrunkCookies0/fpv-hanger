@@ -2,6 +2,10 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.25.1 (25 October 2026)
+
+- On a 9:16 video, the race's name is no longer cut short above your name. When the race has a date, or its name and the group's are too long to share a line, the group and the date are on one line and the race on the line under them, as in a 16:9 video's timer box. The two lines are a little smaller than one, and the same size as each other. Your name and ID move down to make room, and the heading stays clear of the apps' buttons. A RaceGOW track keeps its one line. Make the video again to get it.
+
 ## v0.25.0 (25 October 2026)
 
 - **Find music**, in Markers & music: songs for the run that is open, from your song library, your Spotify, NCS and SoundScout, ranked for its laps. The app works out the tempos your gates land on the beat at (a lap that lasts a whole number of bars crosses every gate on a bar line) and says them at the top, and puts first the songs that last the whole video with a drop on the start gate and whose beat your gates land on, then those nearest what you listen to. Each song says why: "4 of 4 gates land on a bar line at 120 BPM", "A lap lasts 8 bars", "By an artist you listen to", "In your Liked Songs".

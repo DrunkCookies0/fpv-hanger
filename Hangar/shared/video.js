@@ -246,7 +246,7 @@ export function plan(job) {
     ];
     let last = "pictured";
     if (job.headingFile) {
-      const height = headingHeight({ title: look.title, badge: look.badge, eyebrow: eyebrowOf(look), logo: look.logo ?? null });
+      const height = headingHeight(headingOf(look));
       graph.push(`[2:v]${clock}[heading]`);
       layOver(graph, { under: last, graphics: "heading", to: "headed", ...evenPlace({ x: 0, y: upright.pictureTop - upright.headingGap - height, width: shape.width, height }) });
       last = "headed";
@@ -319,8 +319,7 @@ export function plan(job) {
   return { args, panel, at, canvas, first, count, fps: fps.value, music };
 }
 
-/** The line above the pilot's name in an upright video: the event and the track. */
-export function eyebrowOf(look) {
-  const parts = [look.event, look.track].filter((part) => part);
-  return parts.length > 0 ? parts.join("  ·  ") : null;
+/** What the heading of an upright video holds, from the look of a track's videos. */
+export function headingOf(look) {
+  return { title: look.title ?? null, badge: look.badge ?? null, event: look.event ?? null, track: look.track ?? null, date: look.date ?? null, logo: look.logo ?? null };
 }
