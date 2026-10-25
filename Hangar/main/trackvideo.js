@@ -22,10 +22,12 @@ export async function stillsOf(link, { shot = null, moments = null, said = () =>
   const address = videoPage(link);
   if (!address) return { problem: "That isn't a link to a YouTube video. Put the link to the track's video in the box under Track video." };
   // The window is big so that the player asks for a sharp picture, and has a memory of its own
-  // that is forgotten when the app closes: nothing of the pilot's browsing is in it.
+  // that is forgotten when the app closes: nothing of the pilot's browsing is in it. It is never
+  // shown, and a page nobody sees is slowed and then stopped once nothing plays in it, which left
+  // the reader waiting for good after an advert: so it is not slowed.
   const window = new BrowserWindow({
     show: false, width: 1920, height: 1200,
-    webPreferences: { offscreen: true, partition: "trackvideo", sandbox: true, contextIsolation: true, nodeIntegration: false, autoplayPolicy: "no-user-gesture-required" },
+    webPreferences: { offscreen: true, backgroundThrottling: false, partition: "trackvideo", sandbox: true, contextIsolation: true, nodeIntegration: false, autoplayPolicy: "no-user-gesture-required" },
   });
   window.webContents.setAudioMuted(true);
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -35,18 +37,36 @@ export async function stillsOf(link, { shot = null, moments = null, said = () =>
     // The page sends the window on to another address of its own, which ends the first load early.
     await window.loadURL(address).catch(() => {});
     await pause(1500);
-    const opened = await js(`
+    // Waits for something to play, or for YouTube to say why nothing will. `film` waits for the
+    // video itself, past any advert.
+    const playing = (film) => `
       const wait = (ms) => new Promise((done) => setTimeout(done, ms));
       const told = () => window.ytInitialPlayerResponse ?? null;
       let video = null;
       for (let tries = 0; tries < 150; tries += 1) {
         video = document.querySelector("video");
         const status = told()?.playabilityStatus?.status;
-        if ((video && video.readyState >= 2 && video.videoWidth) || (status && status !== "OK")) break;
+        if ((video && video.readyState >= 2 && video.videoWidth${film ? ` && !document.querySelector(".ad-showing")` : ""}) || (status && status !== "OK")) break;
         await wait(200);
-      }
-      // An advert plays in the same player. It is waited out, not skipped.
-      for (let tries = 0; tries < 450 && document.querySelector(".ad-showing"); tries += 1) await wait(200);
+      }`;
+    await js(playing(false));
+    // An advert can play in the same player first, and some are minutes long (Track 3's was 2 min
+    // 42 s, where this used to give up after a minute and a half). YouTube's own Skip button is
+    // pressed when it offers one, with a real click, the way a viewer would; else it is waited out.
+    for (let waited = 0, told = false; waited < 300_000; waited += 500) {
+      const advert = await js(`
+        const button = [...document.querySelectorAll(".ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern")].find((one) => one.offsetParent);
+        const box = button?.getBoundingClientRect();
+        return { showing: Boolean(document.querySelector(".ad-showing")), skip: box ? { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) } : null };
+      `);
+      if (!advert.showing) break;
+      if (!told) said("Waiting for an advert to finish");
+      told = true;
+      if (advert.skip) for (const type of ["mouseMove", "mouseDown", "mouseUp"]) window.webContents.sendInputEvent({ type, x: advert.skip.x, y: advert.skip.y, button: "left", clickCount: 1 });
+      await pause(500);
+    }
+    const opened = await js(`
+      ${playing(true)}
       const status = told()?.playabilityStatus ?? {};
       return {
         ready: Boolean(video && video.readyState >= 2 && video.videoWidth) && !document.querySelector(".ad-showing"),

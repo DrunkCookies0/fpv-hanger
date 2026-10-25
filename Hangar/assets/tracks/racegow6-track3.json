@@ -1,0 +1,55 @@
+{
+  "event": "RaceGOW6",
+  "track": 3,
+  "from": {
+    "video": "https://www.youtube.com/watch?v=PDvWKWs_0j4",
+    "pipes": "The video's build, from 1:11 to 1:37: the time-lapse and the track standing, from the fixed camera.",
+    "parts": "The parts lists drawn over the build in the video.",
+    "lap": "The video's flythrough, from 1:46 to 2:32, as it is talked through: the gates in that order. The end, over the structure and down through the gap, is one way of what the video says; it leaves the pilot to go over or round the gate."
+  },
+  "parts": [
+    { "name": "Start/Finish", "sections": 3 },
+    { "name": "3 Lower Gates", "sections": 6 },
+    { "name": "3 Wide Gap and Flag", "sections": 6 },
+    { "name": "2 High Gate", "sections": 3 },
+    { "name": "Single Gate", "sections": 2 }
+  ],
+  "pipes": [
+    [[1, 0, 0], [1, 0, 1]],
+    [[2, 0, 0], [2, 0, 1]],
+    [[1, 0, 1], [2, 0, 1]],
+    [[1, 0, 1], [1, 1, 1]],
+    [[1, 1, 1], [1, 2, 1]],
+    [[1, 2, 1], [1, 3, 1]],
+    [[1, 1, 0], [1, 1, 1]],
+    [[1, 2, 0], [1, 2, 1]],
+    [[1, 3, 0], [1, 3, 1]],
+    [[1, 0, 1], [1, 0, 2]],
+    [[1, 0, 2], [1, 1, 2]],
+    [[1, 1, 2], [1, 2, 2]],
+    [[1, 2, 2], [1, 3, 2]],
+    [[1, 3, 1], [1, 3, 2]],
+    [[1, 3, 2], [1, 3, 3]],
+    [[0, 3, 0], [0, 3, 1]],
+    [[0, 3, 1], [0, 3, 2]],
+    [[0, 3, 2], [1, 3, 2]],
+    [[1, 3, 1], [2, 3, 1]],
+    [[2, 3, 0], [2, 3, 1]]
+  ],
+  "start": { "at": [1.5, 0, 0.5], "heading": [0, 1, 0] },
+  "lap": [
+    { "move": "Through the start gate", "by": [[1.5, -0.8, 0.5], [1.5, 0, 0.5], [1.55, 0.85, 0.5]] },
+    { "move": "Left through the middle bottom gate", "by": [[1.4, 1.4, 0.5], [1, 1.5, 0.5], [0.5, 1.5, 0.5]] },
+    { "move": "Left round, back through the first bottom gate", "by": [[0.15, 1.3, 0.5], [0.15, 0.75, 0.5], [0.5, 0.5, 0.5], [1, 0.5, 0.5], [1.5, 0.5, 0.55]] },
+    { "move": "Round and up through the three-wide gap", "by": [[1.85, 0.75, 0.8], [1.85, 1.3, 1.2], [1.5, 1.65, 1.45], [1, 1.7, 1.5], [0.5, 1.85, 1.5]] },
+    { "move": "Right, to the back through the two-high gate", "by": [[0.45, 2.4, 1.3], [0.5, 3, 1], [0.55, 3.6, 0.85]] },
+    { "move": "Right corkscrew round, back through the single gate", "by": [[0.85, 4.05, 0.75], [1.5, 4.15, 1.05], [1.9, 3.6, 0.7], [1.55, 3, 0.5]] },
+    { "move": "Right through the third bottom gate", "by": [[1.5, 2.65, 0.5], [1.25, 2.5, 0.5], [1, 2.5, 0.5], [0.5, 2.5, 0.5]] },
+    { "move": "Up and over, back through the three-wide gap", "by": [[0.1, 2.45, 0.75], [-0.1, 2.35, 1.25], [0.2, 2.25, 1.6], [0.6, 2.2, 1.55], [1, 2.2, 1.5], [1.5, 2.2, 1.5]] },
+    { "move": "Left round the back, back through the two-high gate", "by": [[1.7, 2.6, 1.55], [1.75, 3.3, 1.5], [1.6, 3.9, 1.4], [0.9, 4.1, 1.25], [0.4, 3.65, 1.1], [0.5, 3, 1], [0.5, 2.45, 1]] },
+    { "move": "Right round the gate and up behind the pole", "by": [[0.25, 2.1, 1.1], [-0.3, 2.3, 1.4], [-0.55, 3, 1.8], [-0.25, 3.75, 2.2], [0.5, 4.05, 2.45], [1.3, 3.9, 2.6]] },
+    { "move": "Over the whole structure", "by": [[1.6, 3.3, 2.6], [1.5, 2.5, 2.55], [1.45, 1.5, 2.5]] },
+    { "move": "Drop down and right, back through the three-wide gap", "by": [[1.55, 0.95, 2.15], [1.6, 0.6, 1.75], [1.35, 0.55, 1.55], [1, 0.6, 1.5], [0.5, 0.6, 1.45]] },
+    { "move": "Left round the start gate and into it", "by": [[0.2, 0.45, 1.15], [0.25, -0.3, 0.75], [0.8, -0.75, 0.55], [1.35, -0.9, 0.5]] }
+  ]
+}

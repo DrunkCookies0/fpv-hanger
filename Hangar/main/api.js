@@ -1169,7 +1169,10 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
       try {
         const shot = Number.isFinite(from) && Number.isFinite(to) ? { from, to } : null;
         const stills = await stillsOf(link, { shot, moments, said: (stage) => tell("trackvideo", stage) });
-        if (stills.problem) return stills;
+        if (stills.problem) {
+          log(`Reading the track out of ${link}: ${stills.problem}`);
+          return stills;
+        }
         tell("trackvideo", "Looking for the pipes");
         const found = await pipesIn(stills, Number.isInteger(sections) && sections > 0 ? sections : null);
         if (found.problem) {
