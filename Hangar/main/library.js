@@ -765,6 +765,16 @@ export class Library {
     }
   }
 
+  /** Where each song added from Find music came from: its catalog, its page, what it may be used
+   *  for and the credit it asks for (see shared/music.js). Kept in hangar.json, as the Mac app has
+   *  no place for it. */
+  get songSources() { return this.extras.songs ?? {}; }
+
+  keepSongSource(name, from) {
+    this.extras.songs = { ...(this.extras.songs ?? {}), [name]: from };
+    this.saveExtras();
+  }
+
   /** The pilot's marks in each song that has any. */
   get songMarks() {
     return Object.fromEntries(Object.entries(this.store.songs ?? {}).filter(([, notes]) => Array.isArray(notes?.marks)).map(([song, notes]) => [song, notes.marks]));

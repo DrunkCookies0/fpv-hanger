@@ -112,7 +112,8 @@ const started = (async () => {
  *
  *   home, creator, track, track:<path>, files (a track with its first run's files showing),
  *   settings, guide, leaderboard, welcome, whatsnew, setup, setup:<pilot name> (the second
- *   question, looked up), race (the sheet for renaming or moving a race), trackview,
+ *   question, looked up), race (the sheet for renaming or moving a race), editor, wave (the
+ *   song's sound wave), music (Find music, with every source read), trackview,
  *   tool:<which>, program:<which>, upload:<site> (a site's upload page, for the first run's video),
  *   notice:<words>
  */
@@ -152,7 +153,7 @@ window.showForSnapshot = async (which) => {
     await showTrack();
     if (app.page.name === "track") act.editRace(app.page.track);
   }
-  else if (name === "editor" || name === "wave" || name === "mark") {
+  else if (name === "editor" || name === "wave" || name === "mark" || name === "music") {
     // The marker editor, on the first run or the one named. "mark" is a clip with no markers yet.
     await showTrack();
     const data = app.tracks.get(app.page.track);
@@ -162,6 +163,10 @@ window.showForSnapshot = async (which) => {
     else if (run) await editRun(run, app.page.track);
     for (let tries = 0; tries < 600 && !(app.editor && (app.editor.phase === "failed" || (app.editor.phase === "ready" && !app.editor.listening && app.editor.settled))); tries += 1) await new Promise((done) => setTimeout(done, 50));
     if (name === "wave" && app.editor?.phase === "ready") await app.editor.openSoundWave();
+    if (name === "music" && app.editor?.phase === "ready") {
+      const { showFindMusic } = await import("./views/findmusic.js");
+      await showFindMusic(app.editor).loading;
+    }
   } else if (name === "submit") {
     // Check your answers, for the fastest run or the one named.
     await showTrack();
