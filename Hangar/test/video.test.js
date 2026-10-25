@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { musicPlan, musicFilter, plan, stretch, shapes } from "../shared/video.js";
 import { Race, FrameRate } from "../shared/timing.js";
+import { raceDay } from "../shared/panel.js";
 
 test("the stretch a video covers", () => {
   const crossings = [10, 20, 30, 40];
@@ -61,6 +62,22 @@ test("a 16:9 video: whole frames, one clock, the box in its corner", () => {
   assert.equal(made.args[made.args.indexOf("-map") + 1], "[cut]");
   assert.ok(!made.args.includes("-frames:v"));
   assert.ok(!made.args.includes("-c:a"));
+});
+
+test("a race's day is on its 16:9 video, at the right of the group's line", () => {
+  assert.equal(raceDay("2026-09-21"), "21 SEP 2026");
+  assert.equal(raceDay("2026-04-01"), "1 APR 2026");
+  assert.equal(raceDay(""), null);
+  assert.equal(raceDay(null), null);
+  const club = { ...look, event: "Circle City FPV", track: "Spring Cup" };
+  const undated = plan({ shape: "landscape", facts, source: "clip.mp4", exactTimes: true, start: 7.033333, end: 77.366667, race, look: club, output: "out.mp4" });
+  const dated = plan({ shape: "landscape", facts, source: "clip.mp4", exactTimes: true, start: 7.033333, end: 77.366667, race, look: { ...club, date: "2026-04-11" }, output: "out.mp4" });
+  assert.equal(undated.panel.day, null);
+  assert.equal(undated.panel.stripLines, 1);
+  // With a day, the race has the line under the group's, and the box is that much taller.
+  assert.equal(dated.panel.day, "11 APR 2026");
+  assert.equal(dated.panel.stripLines, 2);
+  assert.equal(dated.panel.height - undated.panel.height, 58 - 36);
 });
 
 test("a clip without exact times is read from its start and cut by frame", () => {

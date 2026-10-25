@@ -2,6 +2,10 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.25.0 (25 October 2026)
+
+- A race's finished videos show the day it was flown. On a 16:9 video it is in the timer box, at the right of the group's name, with the race's name on the line under them. On a 9:16 video it is in the line above your name, after the group and the race; when that line is too long, the race's name is cut short and the date kept whole. Markers & music and the preview in Pilot & settings show it too. The date is the one the race was given when it was made, or later with Rename or move; a race without one shows none. RaceGOW tracks have no date, since each can be flown any day until its deadline.
+
 ## v0.24.4 (24 October 2026)
 
 - A finished video made on Windows straight from a recording has each of its frames once. Videos are made that way from a recording whose frames are stored out of order (B-frames), as some cameras store them, or from one that isn't HEVC or H.264; HDZero recordings are neither, and were right. Wherever the camera had dropped a frame, the video showed the frame before it twice, so it ran a frame longer than the stretch chosen and, from there on, a frame behind its music. After a longer gap it stopped for a moment and then skipped frames. The timer stayed with the picture. Videos made on the Mac were right. Make the video again to get it right.

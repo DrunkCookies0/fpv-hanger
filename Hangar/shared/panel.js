@@ -150,13 +150,15 @@ export class Panel {
    * @param {string|null} [options.badge] such as "RaceGOW ID 042"
    * @param {string|null} [options.event]
    * @param {string|null} [options.track]
+   * @param {string|null} [options.date] the day the race was flown, as YYYY-MM-DD
    * @param {number} [options.maxRows] how many laps the corner box lists at once
    * @param {"stack"|"wide"} [options.layout]
    * @param {number|null} [options.room] for the wide box: the height there is for it, in reference points
    * @param {CanvasImageSource|null} [options.logo] for the corner box: a picture across its head
    */
-  constructor({ race, scale, accent, title = null, badge = null, event = null, track = null, maxRows = 8, layout = "stack", room = null, logo = null }) {
+  constructor({ race, scale, accent, title = null, badge = null, event = null, track = null, date = null, maxRows = 8, layout = "stack", room = null, logo = null }) {
     Object.assign(this, { race, scale, title, badge, event, track, layout });
+    this.day = raceDay(date);
     this.accent = accent;
     const luminance = 0.2126 * accent[0] + 0.7152 * accent[1] + 0.0722 * accent[2];
     this.onAccent = luminance > 0.55 ? ink : [1, 1, 1];
@@ -164,8 +166,9 @@ export class Panel {
     this.fit = 1;
     if (layout === "stack") {
       // The group and the race share a line, or have a line each when their names are too long for
-      // one: a race's own name can be, where a track's number never was.
-      this.stripLines = event !== null && track && Panel.#roughWidth(`${event}${track}`) + 24 > 400 - 2 * 24 ? 2 : 1;
+      // one: a race's own name can be, where a track's number never was. A race's day goes at the
+      // right of the group's line, and the race then has the line under it.
+      this.stripLines = event !== null && track && (this.day !== null || Panel.#roughWidth(`${event}${track}`) + 24 > 400 - 2 * 24) ? 2 : 1;
       this.stripHeight = event === null && track === null ? 0 : this.stripLines === 2 ? 58 : 36;
       this.titleHeight = title === null && badge === null ? 0 : 44;
       this.rows = Math.min(race.lapCount, Math.max(0, maxRows));
@@ -255,16 +258,21 @@ export class Panel {
       context.fillRect(0, y, width, this.stripHeight);
       const room = width - 2 * pad, kern = 1.8;
       const first = (this.event ?? this.track)?.toUpperCase(), second = this.event !== null && this.track ? this.track.toUpperCase() : null;
+      // A line of the strip: words at the left, and others at the right, 24 apart, made smaller
+      // together if they would meet. Alone, they sit left.
+      const line = (left, leftColour, right, rightColour, centerY) => {
+        const font = pen.font(right ? pen.spacedSize(`${left}${right}`, 13, 800, room - 24, kern) : pen.spacedSize(left ?? "", 13, 800, room, kern), 800);
+        if (left) pen.put(left, font, leftColour, { x: pad, centerY, kern });
+        if (right) pen.put(right, font, rightColour, { x: width - pad, centerY, kern, align: "right" });
+      };
       if (this.stripLines === 2) {
-        // A line each, the group above the race, each made smaller if it is still too long.
-        pen.put(first, pen.font(pen.spacedSize(first, 13, 800, room, kern), 800), accent, { x: pad, centerY: y + 20, kern });
-        pen.put(second, pen.font(pen.spacedSize(second, 13, 800, room, kern), 800), white(0.9), { x: pad, centerY: y + 39, kern });
+        // A line each, the group above the race, each made smaller if it is still too long. The
+        // race's day is at the right of the group's.
+        line(first, accent, this.day, white(0.6), y + 20);
+        line(second, white(0.9), null, null, y + 39);
       } else {
-        // With both, the group sits left and the race right, 24 apart, and are made smaller together
-        // if they would meet. One alone sits left.
-        const font = pen.font(second ? pen.spacedSize(`${first}${second}`, 13, 800, room - 24, kern) : pen.spacedSize(first ?? "", 13, 800, room, kern), 800);
-        if (first) pen.put(first, font, accent, { x: pad, centerY: y + this.stripHeight / 2 + 1, kern });
-        if (second) pen.put(second, font, white(0.9), { x: width - pad, centerY: y + this.stripHeight / 2 + 1, kern, align: "right" });
+        // The group left and the race right, or one of them left and the race's day right.
+        line(first, accent, second ?? this.day, second ? white(0.9) : white(0.6), y + this.stripHeight / 2 + 1);
       }
       y += this.stripHeight;
     }
@@ -429,6 +437,15 @@ export class Panel {
   }
 }
 
+const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+/** A race's day as its videos have it: "2026-09-21" as "21 SEP 2026", the same on any computer.
+ *  Null for none. */
+export function raceDay(date) {
+  const found = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date ?? ""));
+  const month = found ? months[Number(found[2]) - 1] : undefined;
+  return month ? `${Number(found[3])} ${month} ${found[1]}` : null;
+}
+
 /** A picture's own size, whatever kind of picture it is. */
 function logoSize(picture) {
   return {
@@ -460,10 +477,10 @@ export function headingHeight({ title = null, badge = null, eyebrow = null, logo
   return Math.max((title === null && badge === null ? 0 : 150) + (eyebrow === null ? 0 : 50), logo ? 170 : 0);
 }
 
-/** The heading of an upright video: the event and track in a line, the pilot's name, their ID, and
- *  the event's logo at the right, all `upright.side` in from the edges. Drawn `width` pixels wide
- *  with its top-left at the context's origin. */
-export function drawHeading(context, { title = null, badge = null, eyebrow = null, accent, width, logo = null }) {
+/** The heading of an upright video: the event and track in a line with the race's day, the pilot's
+ *  name, their ID, and the event's logo at the right, all `upright.side` in from the edges. Drawn
+ *  `width` pixels wide with its top-left at the context's origin. */
+export function drawHeading(context, { title = null, badge = null, eyebrow = null, date = null, accent, width, logo = null }) {
   const height = headingHeight({ title, badge, eyebrow, logo });
   if (height === 0) return;
   const pen = new Pen(context);
@@ -479,16 +496,18 @@ export function drawHeading(context, { title = null, badge = null, eyebrow = nul
   };
   const side = upright.side;
   if (eyebrow !== null) {
-    // The group and race in a line, made smaller to fit, as far as it reads; past that, cut short.
-    // With a logo, room is left at the right for it.
+    // The group and race in a line, then the race's day, made smaller to fit, as far as it reads;
+    // past that, the names are cut short and the day kept whole. With a logo, room is left at the
+    // right for it.
     const room = width - 2 * side - 3 - (logo ? 196 : 0);
-    let text = eyebrow.toUpperCase(), size = pen.spacedSize(text, 30, 800, room, 4);
+    const day = raceDay(date), end = day ? `  ·  ${day}` : "";
+    let text = eyebrow.toUpperCase(), size = pen.spacedSize(`${text}${end}`, 30, 800, room, 4);
     if (size < 18) {
       size = 18;
-      while (text.length > 1 && pen.width(`${text}…`, pen.font(size, 800), { kern: 4 }) > room) text = text.slice(0, -1).trimEnd();
+      while (text.length > 1 && pen.width(`${text}…${end}`, pen.font(size, 800), { kern: 4 }) > room) text = text.slice(0, -1).trimEnd();
       text = `${text}…`;
     }
-    put(text, pen.font(size, 800), white(0.85), 4, side + 3, 24);
+    put(`${text}${end}`, pen.font(size, 800), white(0.85), 4, side + 3, 24);
   }
   if (title !== null) put(title, pen.font(76, 800), white(1), 0, side, lift + (badge === null ? 75 : 46));
   if (badge !== null) put(badge.toUpperCase(), pen.font(30, 800), css(accent), 3, side + 3, lift + (title === null ? 75 : 120));

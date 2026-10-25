@@ -197,6 +197,8 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
       badge: details.id ? (details.idLabel ? `${details.idLabel} ${details.id}` : details.id) : null,
       event: details.name || null,
       track: trackName(track),
+      // The day the race was flown. A season's tracks have none: each is flown any day up to its deadline.
+      date: eventFolder(track) === library.seasonEvent ? null : library.state(track).date ?? null,
       position: library.settings.corner || "tr",
       logoFile: library.logo(eventFolder(track)),
     };
