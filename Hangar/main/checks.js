@@ -24,8 +24,10 @@
 //            track's page says one is plugged in, its recordings are listed with the new ones
 //            from the last day ticked, and the ones picked are copied in and the card left alone
 //   outside  other projects' tools: one opens over its place in the window, a list of devices is
-//            chosen from, and a made-up release of the program the app keeps up to date is fetched,
-//            checked and put in place, all in a folder of its own. With `--live` it also opens
+//            chosen from, and made-up releases of the programs the app keeps up to date are fetched,
+//            checked and put in place, all in a folder of their own: the ExpressLRS Configurator in
+//            the place of the copy there, EdgeTX Companion out of its zip and beside the family
+//            there. With `--live` it also opens
 //            Betaflight's app and the ExpressLRS flasher from their own sites, which needs the
 //            network, and reads that each arrived. No device is asked for or touched.
 //   uploads  uploading a run's videos. YouTube's: its steps show beside the column, the title and
@@ -737,8 +739,8 @@ async function outside(tools) {
   const { js, errors } = await page(tools);
   const mac = process.platform === "darwin";
   await js(`window.hangar_.app.editor?.close(); await window.hangar_.app.trackView?.close({ sure: true }); await window.hangar_.app.tool?.close(); await window.showForSnapshot("home")`);
-  const tiles = await js(`return ["betaflight", "elrsFlasher", "elrsConfigurator"].map((name) => { const tile = document.querySelector('[data-probe="tile ' + name + '"]'); return tile ? !tile.disabled : null; })`);
-  say(tiles.every((there) => there === true), "the first screen has Betaflight, the ExpressLRS flasher and the ExpressLRS Configurator to open", JSON.stringify(tiles));
+  const tiles = await js(`return ["betaflight", "elrsFlasher", "elrsConfigurator", "edgetxCompanion"].map((name) => { const tile = document.querySelector('[data-probe="tile ' + name + '"]'); return tile ? !tile.disabled : null; })`);
+  say(tiles.every((there) => there === true), "the first screen has Betaflight, the ExpressLRS flasher, the ExpressLRS Configurator and EdgeTX Companion to open", JSON.stringify(tiles));
 
   // A tool opens over its place on the page. Where it is put is what is looked at, not what it loads.
   try {
@@ -866,6 +868,55 @@ async function outside(tools) {
       // What this copy knew of the real program's releases before is what it knows again.
       setConfig({ programs: known });
       await js(`document.querySelectorAll("#sheets .backdrop").forEach((one) => one.remove())`);
+      rmSync(work, { recursive: true, force: true });
+    }
+  }
+
+  // A program whose copies don't say which version they are, each family kept beside the others:
+  // EdgeTX Companion. Its release is a zip with the disk image in it, and is checked against the
+  // checksum GitHub keeps for it. Made up, on a Mac, as above.
+  if (mac) {
+    const work = mkdtempSync(join(tmpdir(), "fpv-hangar-programs-")), place = join(work, "Programs"), feed = join(work, "Releases");
+    const bundle = (folder, family) => {
+      const contents = join(folder, `EdgeTX Companion ${family}.app`, "Contents");
+      mkdirSync(join(contents, "MacOS"), { recursive: true });
+      writeFileSync(join(contents, "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string></string></dict></plist>\n`);
+    };
+    const argv = process.argv.length, known = config().programs ?? {};
+    try {
+      bundle(place, "9.8");
+      bundle(join(work, "fresh"), "9.9");
+      mkdirSync(feed, { recursive: true });
+      const image = join(work, "edgetx-companion-9.9.9.dmg"), name = "edgetx-cpn-macos-v9.9.9.zip";
+      const made = spawnSync("/usr/bin/hdiutil", ["create", "-quiet", "-srcfolder", join(work, "fresh"), "-volname", "Made-up Companion", "-format", "UDZO", image], { encoding: "utf8" });
+      const zipped = made.status === 0 ? spawnSync("/usr/bin/zip", ["-q", "-j", join(feed, name), image], { encoding: "utf8" }) : made;
+      if (!say(zipped.status === 0, "a made-up EdgeTX release is put together to fetch", zipped.stderr.trim())) return;
+      const sum = createHash("sha256").update(readFileSync(join(feed, name))).digest("hex");
+      const at = (file) => `https://github.com/EdgeTX/edgetx/releases/download/v9.9.9/${file}`;
+      const release = (digest) => writeFileSync(join(feed, "release.json"), JSON.stringify({ tag_name: "v9.9.9", draft: false, prerelease: false, html_url: "https://github.com/EdgeTX/edgetx/releases/tag/v9.9.9", published_at: "2026-01-02T03:04:05Z", body: "A made-up change\n",
+        assets: [{ name, size: statSync(join(feed, name)).size, digest: `sha256:${digest}`, browser_download_url: at(name) }] }));
+      release(createHash("sha256").update("something else").digest("hex"));
+      process.argv.push("--programs", place, "--program-feed", feed);
+
+      let now = api.programsNow().edgetxCompanion;
+      say(now.installed === "9.8" && now.exact === false, "a copy that doesn't say which version it is is known by its family", `${now.installed}, exact ${now.exact}`);
+      now = (await api.checkProgram("edgetxCompanion")).edgetxCompanion;
+      say(now.latest?.version === "9.9.9" && Boolean(now.latest.sha256) && now.newer && now.problem === null, "its newest release is read, with the checksum GitHub keeps for it", `v${now.latest?.version}`);
+      // A download that isn't what GitHub has is turned away and nothing is changed.
+      now = (await api.installProgram("edgetxCompanion")).state.edgetxCompanion;
+      say(now.installed === "9.8" && /didn't arrive in one piece/.test(now.problem ?? ""), "a download that doesn't add up to GitHub's checksum is turned away, and the copy there is left alone", now.problem ?? "");
+      // The real one: out of its zip, out of its disk image, and in beside the family that was there.
+      release(sum);
+      await api.checkProgram("edgetxCompanion");
+      now = (await api.installProgram("edgetxCompanion")).state.edgetxCompanion;
+      const there = readdirSync(place).filter((one) => one.endsWith(".app")).sort();
+      say(now.installed === "9.9.9" && now.exact && !now.newer && now.problem === null && there.join(" | ") === "EdgeTX Companion 9.8.app | EdgeTX Companion 9.9.app" && !existsSync(join(place, "Replaced")),
+        "the newer family is fetched out of its zip and put beside the one that was there, which stays, and which version it is is remembered", `v${now.installed}: ${there.join(" | ")}${now.problem ? `: ${now.problem}` : ""}`);
+      const mounted = spawnSync("/usr/bin/hdiutil", ["info"], { encoding: "utf8" }).stdout.includes("fpv-hangar-program-");
+      say(!mounted, "and its download is put away afterwards");
+    } finally {
+      process.argv.length = argv;
+      setConfig({ programs: known });
       rmSync(work, { recursive: true, force: true });
     }
   }

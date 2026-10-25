@@ -21,7 +21,7 @@ function actionFor(tool) {
   if (tool === "leaderboards") return () => open({ name: "leaderboard" });
   // Another project's own app, shown in the window, or its program, which the app fetches.
   if (tool === "betaflight" || tool === "elrsFlasher") return () => openTool(tool);
-  if (tool === "elrsConfigurator") return () => showProgram(tool);
+  if (tool === "elrsConfigurator" || tool === "edgetxCompanion") return () => showProgram(tool);
   if (tool === "upload") return uploadAnyVideo;
   return null;
 }
@@ -47,7 +47,7 @@ function statusOf(tool) {
     return sent === 0 ? "Nothing submitted yet" : `${sent} track${sent === 1 ? "" : "s"} submitted`;
   }
   if (tool === "betaflight" || tool === "elrsFlasher") return "Always their newest";
-  if (tool === "elrsConfigurator") return programStatus(tool);
+  if (tool === "elrsConfigurator" || tool === "edgetxCompanion") return programStatus(tool);
   if (tool === "upload") return "YouTube, Shorts, TikTok, Instagram";
   return null;
 }

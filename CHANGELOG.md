@@ -2,6 +2,12 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.27.0 (25 October 2026)
+
+- **Radio**, a new section on the first screen, with **EdgeTX Companion**: EdgeTX's own program for setting a radio up on the computer, such as a RadioMaster TX15 Max. It has the radio's models, mixes, switches, telemetry and screens, a simulator to try them in, and a backup of it all, and it writes them to the radio and updates its firmware and what is on its SD card. For a TX15 Max, choose the RadioMaster TX15 as the radio in Companion's settings.
+- The app fetches Companion as it fetches the ExpressLRS Configurator: from EdgeTX's Releases page, checked against the checksum GitHub keeps for it there, and once a day it looks for a newer one. On a Mac it goes in your Applications folder; on Windows the app starts EdgeTX's own installer. Each version family, such as 2.12, is a program of its own, as EdgeTX makes it: a newer family goes in beside the one you have, which stays, and a newer version of the same family takes its place.
+- Its sheet has a link to EdgeTX's page on updating a TX15, which is updated differently from older radios, and the Radio section has links to edgetx.org and EdgeTX's manual.
+
 ## v0.26.0 (25 October 2026)
 
 - RaceGOW6 Track 3 is in the Hangar. Open **Track in 3D** on Track 3: its 20 sections, made from the series' video, with the parts lists the video shows (Start/Finish 3, 3 Lower Gates 6, 3 Wide Gap and Flag 6, 2 High Gate 3, Single Gate 2), and the lap as the video talks it through: through the start gate, left through the middle bottom gate and back through the first, up through the three-wide gap, through the two-high gate to the back, a right corkscrew back through the single gate, right through the third bottom gate, up and over back through the three-wide gap, round the back and through the two-high gate backwards, round the pole and over the whole structure, down through the three-wide gap again and round the start gate into the next lap. The video leaves the end to the pilot (over or round the gate); this is one way of it.

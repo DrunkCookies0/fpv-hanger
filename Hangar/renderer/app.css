@@ -731,6 +731,9 @@ textarea.field { resize: vertical; line-height: 1.38; }
 .alert.program { width: 560px; }
 .program-now { font: 700 13px/1.38 var(--face); }
 .program-said { font-size: 13px; line-height: 1.38; color: #ff9f0a; }
+.program-tip { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 9px; background: rgba(255, 214, 10, 0.08); }
+.program-tip span { flex: 1; font-size: 13px; line-height: 1.38; }
+.program-tip .button { flex: none; }
 .program-fetch { display: flex; align-items: center; gap: 12px; }
 .program-fetch .job-bar { flex: 1; width: auto; }
 .program-share { font: 600 12px var(--face); color: var(--dim); font-variant-numeric: tabular-nums; }
