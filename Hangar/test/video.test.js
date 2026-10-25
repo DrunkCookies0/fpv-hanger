@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { musicPlan, musicFilter, plan, stretch, shapes } from "../shared/video.js";
 import { Race, FrameRate } from "../shared/timing.js";
-import { raceDay } from "../shared/panel.js";
+import { raceDay, eyebrowLines, headingHeight } from "../shared/panel.js";
 
 test("the stretch a video covers", () => {
   const crossings = [10, 20, 30, 40];
@@ -78,6 +78,24 @@ test("a race's day is on its 16:9 video, at the right of the group's line", () =
   assert.equal(dated.panel.day, "11 APR 2026");
   assert.equal(dated.panel.stripLines, 2);
   assert.equal(dated.panel.height - undated.panel.height, 58 - 36);
+});
+
+test("a 9:16 video has the group above the race when they would be cut short or the race has a day", () => {
+  // A season's track shares a line with its series, as it always has.
+  assert.deepEqual(eyebrowLines({ event: "RaceGOW6", track: "Track 1" }), [["RACEGOW6  ·  TRACK 1", ""]]);
+  // A race with a day: the day follows the group, and the race has the line under them.
+  assert.deepEqual(eyebrowLines({ event: "Central Texas Drone Racing", track: "Practice Night 4", date: "2026-10-23" }),
+    [["CENTRAL TEXAS DRONE RACING", "  ·  23 OCT 2026"], ["PRACTICE NIGHT 4", ""]]);
+  // Names too long to share a line, beside a logo, without a day.
+  assert.equal(eyebrowLines({ event: "Circle City FPV", track: "Zero Traction Open Whoop Race #5", logo: {} }).length, 2);
+  // Only one name: the day goes after it on the one line.
+  assert.deepEqual(eyebrowLines({ track: "Spring Cup", date: "2026-04-11" }), [["SPRING CUP", "  ·  11 APR 2026"]]);
+  assert.deepEqual(eyebrowLines({}), []);
+  // Two lines over a name take no more room than one, so the heading still starts below the apps' bar.
+  const named = { title: "A Pilot", badge: "ID 042", event: "Central Texas Drone Racing", track: "Practice Night 4" };
+  assert.equal(headingHeight({ ...named, date: "2026-10-23" }), headingHeight(named));
+  assert.equal(headingHeight({ ...named, date: "2026-10-23" }), 200);
+  assert.equal(headingHeight({ event: "Central Texas Drone Racing", track: "Practice Night 4", date: "2026-10-23" }), 84);
 });
 
 test("a clip without exact times is read from its start and cut by frame", () => {

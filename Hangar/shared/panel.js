@@ -121,17 +121,18 @@ class Pen {
   }
 }
 
+/** About how wide words are in spaced-out capitals `size` high, such as the corner box's strip
+ *  (13) or the line above the name on an upright video (30), for laying things out before anything
+ *  is drawn. Drawing then fits them exactly. */
+function roughWidth(text, size = 13) {
+  let width = 0;
+  for (const character of text) width += character === " " ? 5.5 : 11.2;
+  return (width * size) / 13;
+}
+
 /** The timer box. `layout` is "stack", the corner box of a 16:9 frame, or "wide", the box under the
  *  picture of an upright video. */
 export class Panel {
-  /** About how wide a name is in the capitals of the corner box's strip, in reference points, for
-   *  laying the box out before anything is drawn. Drawing then fits it exactly. */
-  static #roughWidth(text) {
-    let width = 0;
-    for (const character of text) width += character === " " ? 5.5 : 11.2;
-    return width;
-  }
-
   /** How wide the wide box is, in reference points. Its scale is whatever makes that the width `upright` gives it. */
   static wideWidth = 600;
   /** The smaller laps in the wide box go three to a row. */
@@ -168,7 +169,7 @@ export class Panel {
       // The group and the race share a line, or have a line each when their names are too long for
       // one: a race's own name can be, where a track's number never was. A race's day goes at the
       // right of the group's line, and the race then has the line under it.
-      this.stripLines = event !== null && track && (this.day !== null || Panel.#roughWidth(`${event}${track}`) + 24 > 400 - 2 * 24) ? 2 : 1;
+      this.stripLines = event !== null && track && (this.day !== null || roughWidth(`${event}${track}`) + 24 > 400 - 2 * 24) ? 2 : 1;
       this.stripHeight = event === null && track === null ? 0 : this.stripLines === 2 ? 58 : 36;
       this.titleHeight = title === null && badge === null ? 0 : 44;
       this.rows = Math.min(race.lapCount, Math.max(0, maxRows));
@@ -471,20 +472,40 @@ export function corner(position, { boxWidth, boxHeight, frameWidth, frameHeight,
 /** How far from the frame's edge the corner box sits, in reference points. */
 export const cornerMargin = 54;
 
-/** How tall the heading of an upright video is, for what it holds. */
-export function headingHeight({ title = null, badge = null, eyebrow = null, logo = null }) {
-  if (title === null && badge === null && eyebrow === null && !logo) return 0;
-  return Math.max((title === null && badge === null ? 0 : 150) + (eyebrow === null ? 0 : 50), logo ? 170 : 0);
+/** How wide the lines above the name on an upright video can be: a logo has room left for it at the right. */
+const eyebrowRoom = (width, logo) => width - 2 * upright.side - 3 - (logo ? 196 : 0);
+
+/**
+ * The lines above the pilot's name on an upright video, in capitals, each as words that can be cut
+ * short and an end that is kept whole. The group and the race share a line, or, as in the 16:9
+ * video's box, the group is above the race when the race has a day or their names are too long to
+ * share one without being made smaller. The race's day follows the group.
+ */
+export function eyebrowLines({ event = null, track = null, date = null, logo = null, width = upright.width }) {
+  const day = raceDay(date), after = day ? `  ·  ${day}` : "";
+  const group = event ? event.toUpperCase() : null, race = track ? track.toUpperCase() : null;
+  if (group && race && (day !== null || roughWidth(`${group}  ·  ${race}`, 30) > eyebrowRoom(width, logo))) return [[group, after], [race, ""]];
+  const names = [group, race].filter(Boolean).join("  ·  ");
+  return names ? [[names, after]] : [];
 }
 
-/** The heading of an upright video: the event and track in a line with the race's day, the pilot's
- *  name, their ID, and the event's logo at the right, all `upright.side` in from the edges. Drawn
+/** How tall the heading of an upright video is, for what it holds. */
+export function headingHeight({ title = null, badge = null, event = null, track = null, date = null, logo = null, width = upright.width }) {
+  const lines = eyebrowLines({ event, track, date, logo, width }).length, named = title !== null || badge !== null;
+  if (!named && lines === 0 && !logo) return 0;
+  // Over a name, two lines take the room of one: the name comes down nearer its ID.
+  return Math.max(named ? 150 + (lines > 0 ? 50 : 0) : [0, 50, 84][lines], logo ? 170 : 0);
+}
+
+/** The heading of an upright video: the group, the race and its day in a line or two, the pilot's
+ *  name, their ID, and the group's logo at the right, all `upright.side` in from the edges. Drawn
  *  `width` pixels wide with its top-left at the context's origin. */
-export function drawHeading(context, { title = null, badge = null, eyebrow = null, date = null, accent, width, logo = null }) {
-  const height = headingHeight({ title, badge, eyebrow, logo });
+export function drawHeading(context, { title = null, badge = null, event = null, track = null, date = null, accent, width, logo = null }) {
+  const height = headingHeight({ title, badge, event, track, date, logo, width });
   if (height === 0) return;
+  const lines = eyebrowLines({ event, track, date, logo, width });
   const pen = new Pen(context);
-  const lift = eyebrow === null ? 0 : 50;
+  const lift = lines.length === 0 ? 0 : 50;
   context.save();
   context.shadowColor = "rgba(0, 0, 0, 0.6)";
   context.shadowBlur = 14;
@@ -495,21 +516,21 @@ export function drawHeading(context, { title = null, badge = null, eyebrow = nul
     wordsEnd = Math.max(wordsEnd, x + pen.put(text, font, color, { x, centerY, kern }));
   };
   const side = upright.side;
-  if (eyebrow !== null) {
-    // The group and race in a line, then the race's day, made smaller to fit, as far as it reads;
-    // past that, the names are cut short and the day kept whole. With a logo, room is left at the
-    // right for it.
-    const room = width - 2 * side - 3 - (logo ? 196 : 0);
-    const day = raceDay(date), end = day ? `  ·  ${day}` : "";
-    let text = eyebrow.toUpperCase(), size = pen.spacedSize(`${text}${end}`, 30, 800, room, 4);
-    if (size < 18) {
-      size = 18;
+  // The lines made smaller to fit, as far as they read, and two lines kept the same size as each
+  // other; past that, a line's words are cut short and its end kept whole. Two lines are a little
+  // smaller than one, and close together.
+  const room = eyebrowRoom(width, logo);
+  const fitted = lines.map(([words, end]) => pen.spacedSize(`${words}${end}`, lines.length === 2 ? 26 : 30, 800, room, 4));
+  const size = Math.max(18, Math.min(...fitted));
+  lines.forEach(([words, end], index) => {
+    let text = words;
+    if (fitted[index] < 18) {
       while (text.length > 1 && pen.width(`${text}…${end}`, pen.font(size, 800), { kern: 4 }) > room) text = text.slice(0, -1).trimEnd();
       text = `${text}…`;
     }
-    put(`${text}${end}`, pen.font(size, 800), white(0.85), 4, side + 3, 24);
-  }
-  if (title !== null) put(title, pen.font(76, 800), white(1), 0, side, lift + (badge === null ? 75 : 46));
+    put(`${text}${end}`, pen.font(size, 800), white(0.85), 4, side + 3, lines.length === 2 ? 19 + 31 * index : 24);
+  });
+  if (title !== null) put(title, pen.font(76, 800), white(1), 0, side, lift + (badge === null ? 75 : lines.length === 2 ? 62 : 46));
   if (badge !== null) put(badge.toUpperCase(), pen.font(30, 800), css(accent), 3, side + 3, lift + (title === null ? 75 : 120));
   if (logo) {
     // At the right, as far in from the edge as the words are from theirs, and no taller than they

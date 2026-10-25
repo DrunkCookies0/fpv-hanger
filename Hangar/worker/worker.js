@@ -3,7 +3,7 @@
 // given Node so that it can run FFmpeg itself, and only ever loads this page.
 
 import { Race, FrameRate } from "../shared/timing.js";
-import { plan, eyebrowOf } from "../shared/video.js";
+import { plan, headingOf } from "../shared/video.js";
 import { drawHeading, headingHeight, parseHexColor } from "../shared/panel.js";
 
 const { spawn } = require("node:child_process");
@@ -50,7 +50,7 @@ window.makeVideo = async (job) => {
     fs.mkdirSync(path.dirname(job.output), { recursive: true });
     if (job.shape === "upright") {
       // The heading doesn't change, so it is drawn once and given to FFmpeg as a picture.
-      const heading = { title: look.title ?? null, badge: look.badge ?? null, eyebrow: eyebrowOf(look), date: look.date ?? null, accent: look.accent, width: 1080, logo: look.logo };
+      const heading = { ...headingOf(look), accent: look.accent, width: 1080 };
       const height = headingHeight(heading);
       if (height > 0) {
         const canvas = new OffscreenCanvas(heading.width, height);
