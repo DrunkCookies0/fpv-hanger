@@ -33,6 +33,8 @@ export function lookFor(track) {
     badge: event.id ? (event.idLabel ? `${event.idLabel} ${event.id}` : event.id) : null,
     event: event.name || null,
     track: trackName(track),
+    // The day the race was flown. A season's tracks have none: each is flown any day up to its deadline.
+    date: event.isSeason ? null : event.tracks?.find((one) => one.path === track)?.date ?? null,
     position: settings.corner || "tr",
     logoAddress: event.logo ?? null,
   };
@@ -46,7 +48,7 @@ export function drawCornerTimer(canvas, { race, look, logo = null, seconds, maxR
   const context = canvas.getContext("2d");
   context.clearRect(0, 0, canvas.width, canvas.height);
   if (!race) return null;
-  const panel = new Panel({ race, scale: canvas.height / 1080, accent: look.accent, title: look.title, badge: look.badge, event: look.event, track: look.track, maxRows, logo });
+  const panel = new Panel({ race, scale: canvas.height / 1080, accent: look.accent, title: look.title, badge: look.badge, event: look.event, track: look.track, date: look.date, maxRows, logo });
   const at = corner(look.position, { boxWidth: panel.pixelWidth, boxHeight: panel.pixelHeight, frameWidth: canvas.width, frameHeight: canvas.height, inset: Math.round(cornerMargin * panel.scale) })
     ?? { x: canvas.width - panel.pixelWidth - Math.round(cornerMargin * panel.scale), y: Math.round(cornerMargin * panel.scale) };
   context.save();

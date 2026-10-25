@@ -214,7 +214,7 @@ export function plan(job) {
 
   let canvas;
   if (job.shape === "landscape") {
-    panel = new Panel({ race: job.race, scale: 1, accent: look.accent, title: look.title, badge: look.badge, event: look.event, track: look.track, maxRows: look.maxRows ?? 8, logo: look.logo ?? null });
+    panel = new Panel({ race: job.race, scale: 1, accent: look.accent, title: look.title, badge: look.badge, event: look.event, track: look.track, date: look.date ?? null, maxRows: look.maxRows ?? 8, logo: look.logo ?? null });
     at = corner(look.position ?? "tr", { boxWidth: panel.pixelWidth, boxHeight: panel.pixelHeight, frameWidth: shape.width, frameHeight: shape.height, inset: Math.round(cornerMargin * panel.scale) })
       ?? { x: shape.width - panel.pixelWidth - cornerMargin, y: cornerMargin };
     canvas = evenPlace({ ...at, width: panel.pixelWidth, height: panel.pixelHeight });
