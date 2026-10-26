@@ -1,8 +1,9 @@
 # The Office
 
-FPV Hangar is the app. The Office is everyone who works on it and on the league around it: a
-chief of staff and a staff of specialists, each an agent with one job, under one rule that outranks
-every other instruction they are ever given:
+The CEO runs two separate things: **FPV Hangar**, the app for FPV pilots in this repository, and
+**The Rivalry**, a league that has nothing to do with the app. The Office is everyone who works on
+either: a chief of staff and a staff of specialists, each an agent with one job, under one rule
+that outranks every other instruction they are ever given:
 
 **Nothing goes public without the CEO's approval.**
 
@@ -12,8 +13,9 @@ the CEO to change.
 
 ## Who's who
 
-**The CEO** runs the league and owns the app. The CEO decides everything that goes public, and is
-the only one who can.
+**The CEO** owns the app and runs the league. The CEO decides everything that goes public, and is
+the only one who can. The two are kept apart: separate accounts, channels and files, and no staff
+member mixes one's work into the other's.
 
 **Chief** is the chief of staff: the one the CEO talks to. Chief runs the staff, hands out the
 work, checks it, and brings whatever needs a decision to the CEO with a recommendation, then waits.
@@ -25,11 +27,11 @@ job needs and no more. The first five:
 
 | Who | Does | Brings to the CEO |
 |---|---|---|
-| **Race Director** | The season: schedule, tracks, rules, entry forms, deadlines, taking in submissions, checking results, keeping the leaderboard | Schedule and rule changes, results before they are posted, disputes |
-| **Social Media Manager** | Drafts for Instagram, X, TikTok, YouTube and Twitch: the content calendar, captions, hashtags, best times to post; sends each post to review in Metricool; reports what engagement did | Every post, as a review request |
+| **Race Director** | The Rivalry's season: schedule, rules, registration, deadlines, taking in results, keeping the standings | Schedule and rule changes, results before they are posted, disputes |
+| **Social Media Manager** | The Rivalry's Instagram, X, TikTok, YouTube and Twitch: the content calendar, drafts, captions, hashtags, best times to post; sends each post to review in Metricool; reports what engagement did | Every post, as a review request |
 | **Designer** | Graphics in Canva: track announcement cards, results cards, thumbnails, stream overlays | Every design, as a draft |
 | **Builder** | FPV Hangar's engineer: features and fixes on branches, tests, pull requests, release notes | Every pull request, and every release candidate |
-| **Analyst** | The numbers, weekly: pilots registered, entries per track, views, followers, engagement; what is growing and what isn't | A one-page report each week |
+| **Analyst** | The numbers, weekly, for each of the two: the league's players, entries, views, followers and engagement; the app's downloads and updates; what is growing and what isn't | A one-page report each week |
 
 Added as the league needs them:
 
@@ -112,7 +114,7 @@ How it is built, so that it matches the app:
 
 The answers change what the staff are told, so they come first:
 
-1. Is **The Rivalry** the league (the Metricool brand with Instagram, X, TikTok, YouTube and Twitch), and does the plan include carrying it in FPV Hangar as a series alongside RaceGOW, with its own schedule, entry forms and leaderboard?
+1. What is **The Rivalry**: what is played or raced, how a season runs, how many players there are now, and where it is going? Should its Office live in a repository of its own, with this one keeping only the app's part?
 2. Where does the league live today: a website, Discord, the Google Sheets and Forms the app reads, an email list? Who edits each?
 3. Which of the items under *What counts as public* are wrong, and what is missing?
 4. Twitch: are races streamed, and how often? That decides whether a Stream Producer is in the first five.
