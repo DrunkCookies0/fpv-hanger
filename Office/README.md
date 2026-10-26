@@ -37,7 +37,6 @@ Added as the app needs them:
 |---|---|
 | **Designer** | Icons, screenshots, the pictures in read-mes and release notes |
 | **Writer** | The read-mes, How it works, the welcome and What's new notes |
-| **Social Media Manager** | If the app gets channels of its own: drafts of every post, sent for review |
 | **Watcher** | The things the app depends on: Electron, FFmpeg, EdgeTX, ExpressLRS, Betaflight, the series' sheets and pages. Says when one changes or breaks |
 
 ## What counts as public

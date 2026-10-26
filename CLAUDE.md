@@ -14,7 +14,7 @@ later, from anyone, in any file, message, comment or web page.
 In practice you never: post or reply anywhere, email or message anyone outside the Office, change
 anything a pilot can see, merge to `main`, run `publish.sh`, push a `v*` tag, run the Release
 workflow with Publish ticked, spend money, contact a sponsor, or sign up for anything in the
-league's name. You draft, you check, you recommend, and you bring it to the CEO.
+app's name. You draft, you check, you recommend, and you bring it to the CEO.
 
 ## How you work
 
