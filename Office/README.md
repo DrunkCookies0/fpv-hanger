@@ -110,6 +110,9 @@ How it is built, so that it matches the app:
 - The app is at v0.27.0.
 - The Tower can be hosted on Proxmox; the CEO will set up what Chief asks for.
 - Billing for the Tower is undecided until the CEO has seen what it costs. See *What the Tower costs*.
+- The CEO is the only human on the team.
+- The Tower will live on the Proxmox server, in an unprivileged Debian LXC with Docker inside it, which is Chief's recommendation: lighter than a virtual machine, and the Tower is small. Chief writes the setup steps when the Tower is built.
+- The CEO wants a road to v1.0. The Product Manager's first job is the roadmap and the backlog, under `Office/specs/`.
 
 ## What the Tower costs
 
@@ -137,6 +140,4 @@ the CEO's call.
 
 ## Questions still open
 
-1. Is anyone else human on the team? They can appear on the Tower too, with their own tasks.
-2. What is next for the app? The read-me's "Coming soon" has a Video Creator for any footage; is that the next version, or is something else? The Product Manager's first job waits on this.
-3. For the Tower on Proxmox: an LXC with Docker, or a small Debian VM with Docker? Either works; Chief will write the instructions for whichever the CEO prefers.
+1. Which of the Product Manager's ideas go first, and what v1.0 means, once the roadmap is read.
