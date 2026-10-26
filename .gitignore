@@ -8,6 +8,9 @@
 !/package.sh
 !/publish.sh
 !/.github/
+!/.claude/
+!/CLAUDE.md
+!/Office/
 !/Dashboard/
 !/Lap Timer/
 !/Hangar/
@@ -25,3 +28,6 @@
 !/Hangar/vendor/README.txt
 /Hangar/dev/*
 !/Hangar/dev/colour/
+
+# Claude Code's settings for one person's own computer stay there; the shared ones are kept.
+/.claude/settings.local.json
