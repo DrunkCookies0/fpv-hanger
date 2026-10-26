@@ -6,15 +6,17 @@
 // which serial port, USB device or Bluetooth device to use, the list to choose from is put up
 // here, where a browser would put up its own.
 //
-// The third is a program of its own, the ExpressLRS Configurator, which the app fetches and keeps
-// up to date: `showProgram` is the sheet that says which version is here and which is the newest.
+// The others are programs of their own, the ExpressLRS Configurator and EdgeTX Companion, which the
+// app fetches and keeps up to date: `showProgram` is the sheet that says which version is here and
+// which is the newest.
 
 import { app, ask, hangar, render } from "../core.js";
 import { h, fill, label, primary, secondary, plain } from "../ui.js";
 import { showSheet } from "../sheets.js";
 import { openLink } from "../actions.js";
-import { computer } from "../words.js";
-import { outsideTools, programs, plainNotes, megabytes } from "../../shared/components.js";
+import { computer, tools } from "../words.js";
+import { outsideTools, programs, plainNotes, megabytes, goesBeside, familyOf } from "../../shared/components.js";
+import { backupLine } from "./radio.js";
 
 /** What each kind of device is called when a tool asks for one, and what to do when none shows. */
 const kinds = {
@@ -140,7 +142,7 @@ export function programStatus(id) {
  * the newest, what is new in it, and the buttons to open it, fetch it and look again.
  */
 export function showProgram(id) {
-  const program = programs[id];
+  const program = programs[id], words = tools[id];
   if (!program) return;
   let close = () => {}, said = null, bar = null;
   const body = h("div.alert.program");
@@ -168,7 +170,8 @@ export function showProgram(id) {
     const now = app.state.programs?.[id] ?? { installed: null, latest: null, busy: null, problem: null, newer: false };
     const latest = now.latest, fetching = now.busy?.kind === "fetching", checking = now.busy?.kind === "checking";
     const wanted = latest && (now.installed === null || now.newer);
-    const here = now.installed === null ? "It isn't on this computer yet." : now.installed ? `Version ${now.installed} is on this computer.` : "It is on this computer.";
+    // A copy that doesn't say which version it is may say its family.
+    const here = now.installed === null ? "It isn't on this computer yet." : !now.installed ? "It is on this computer." : now.exact === false ? `${program.title} ${now.installed} is on this computer.` : `Version ${now.installed} is on this computer.`;
     const newest = !latest ? (checking ? "Looking for the newest release…" : "")
       : now.newer ? `Version ${latest.version} came out${latest.published ? ` on ${day(latest.published)}` : ""}.`
         : now.installed === latest.version ? "That is the newest." : now.installed === null ? `The newest is version ${latest.version}${latest.published ? `, from ${day(latest.published)}` : ""}.` : "";
@@ -176,7 +179,11 @@ export function showProgram(id) {
     bar = fetching ? h("span.job-done", { style: { width: `${Math.round(now.busy.progress * 100)}%` } }) : null;
     fill(body,
       h("div.alert-title", program.title),
-      h("div.alert-message", `${program.owner}'s own program, for flashing over WiFi and building firmware yourself. It opens in a window of its own. FPV Hangar fetches it from ${program.owner}'s Releases page, checks it against the checksum published there, and tells you when a newer one is out.`),
+      h("div.alert-message", `${program.owner}'s own program, ${words.about}. It opens in a window of its own. FPV Hangar fetches it from ${program.owner}'s Releases page, checks it against the checksum ${program.sums ? "published there" : "GitHub keeps for it there"}, and tells you when a newer one is out.`),
+      words.tip && h("div.program-tip", h("span", words.tip), words.guide && plain(words.guide.title, () => openLink(words.guide.address), { icon: "arrowUpRight", help: `Opens ${words.guide.address} in your browser` })),
+      // A radio's settings: its backups, and what carries over.
+      words.keeps && h("div.program-notes.whole", label("YOUR RADIO'S SETTINGS"), h("p", backupLine()), words.keeps.map((line) => h("p", line))),
+      words.changes && h("div.program-notes.whole", label(words.changes.title), words.changes.items.map(([title, line]) => h("p", h("strong", title), " ", line))),
       h("p.program-now", here, newest && " ", newest),
       (said ?? now.problem) && h("p.program-said", said ?? now.problem),
       fetching && h("div.program-fetch", h("span.job-bar", bar), h("span.program-share", `Fetching ${megabytes(latest.size)}…`)),
@@ -189,7 +196,9 @@ export function showProgram(id) {
         now.installed !== null && (wanted ? secondary : primary)("Open", () => act("openProgram"), { disabled: fetching, probe: "program open" }),
         wanted && primary(`${now.installed === null ? "Get" : "Update to"} ${latest.version}`, () => act("installProgram"), {
           disabled: fetching, probe: "program get",
-          help: computer === "Mac" ? `Downloads ${megabytes(latest.size)}. ${now.installed === null ? "It goes in your Applications folder." : "The copy you have goes to the Trash."}` : `Downloads ${megabytes(latest.size)} and starts ${program.owner}'s own installer.`,
+          help: computer === "Mac"
+            ? `Downloads ${megabytes(latest.size)}. ${now.installed === null ? "It goes in your Applications folder." : goesBeside(program, now.installed, latest.version) ? `It goes in your Applications folder, beside ${program.title} ${familyOf(now.installed)}, which stays.` : "The copy you have goes to the Trash."}`
+            : `Downloads ${megabytes(latest.size)} and starts ${program.owner}'s own installer.`,
         }),
       ),
     );

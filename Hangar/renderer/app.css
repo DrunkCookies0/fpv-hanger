@@ -728,16 +728,29 @@ textarea.field { resize: vertical; line-height: 1.38; }
 .device-none { padding: 14px 12px; border-radius: 9px; background: rgba(255, 255, 255, 0.04); font-size: 13px; line-height: 1.38; color: var(--dim); }
 
 /* A program the app fetches and keeps up to date. */
-.alert.program { width: 560px; }
+.alert.program, .alert.backups { width: 560px; overflow-y: auto; }
+/* On a short window the sheet scrolls, rather than squeezing what is in it. */
+.alert.program > *, .alert.backups > * { flex-shrink: 0; }
 .program-now { font: 700 13px/1.38 var(--face); }
 .program-said { font-size: 13px; line-height: 1.38; color: #ff9f0a; }
+.program-tip { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 9px; background: rgba(255, 214, 10, 0.08); }
+.program-tip span { flex: 1; font-size: 13px; line-height: 1.38; }
+.program-tip .button { flex: none; }
 .program-fetch { display: flex; align-items: center; gap: 12px; }
 .program-fetch .job-bar { flex: 1; width: auto; }
 .program-share { font: 600 12px var(--face); color: var(--dim); font-variant-numeric: tabular-nums; }
 .program-notes { display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; padding: 12px; border-radius: 9px; background: rgba(255, 255, 255, 0.04); }
 .program-notes p { font-size: 12px; line-height: 1.4; color: rgba(255, 255, 255, 0.75); word-break: break-word; }
-.alert.program .alert-buttons { align-items: center; }
-.alert.program .alert-buttons .spacer { flex: 1; }
+.alert.program .alert-buttons, .alert.backups .alert-buttons { align-items: center; }
+.alert.program .alert-buttons .spacer, .alert.backups .alert-buttons .spacer { flex: 1; }
+.program-notes strong { color: #fff; font-weight: 700; }
+.program-notes.whole { max-height: none; overflow: visible; }
+/* The radio's backups. */
+.backup-list { display: flex; flex-direction: column; gap: 6px; }
+.backup { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 9px; background: rgba(255, 255, 255, 0.04); }
+.backup-words { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.backup-name { font: 700 13px var(--face); }
+.backup-detail, .backup-more { font-size: 12px; color: var(--dim); }
 
 /* The copy kept in Google Drive: the word about it at the head of a track's page. */
 .drive-word { display: inline-flex; align-items: center; gap: 6px; align-self: flex-end; margin-bottom: 13px; padding: 0; border: 0; background: none; font: 600 12px/1.2 var(--face); color: var(--dim); white-space: nowrap; cursor: pointer; }

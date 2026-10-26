@@ -61,6 +61,31 @@ export const tools = {
   elrsConfigurator: {
     title: "ExpressLRS Configurator", icon: "antenna", soon: null,
     summary: "The full Configurator, fetched and kept up to date for you: flashing over WiFi, and building firmware yourself. It opens in a window of its own.",
+    about: "for flashing over WiFi and building firmware yourself",
+  },
+  edgetxCompanion: {
+    title: "EdgeTX Companion", icon: "radio", soon: null,
+    summary: "Set your radio up on the computer: its models, mixes, switches, telemetry and screens, tried out in a simulator, then written to it. Fetched and kept up to date for you.",
+    about: "for setting a radio up on the computer: its models, mixes, switches, telemetry and screens, tried out in a simulator, then written to the radio, with a backup of it all. It also updates the radio's firmware and what is on its SD card",
+    tip: "For a RadioMaster TX15 Max, choose the RadioMaster TX15 as the radio in Companion's settings. Its firmware is written from Companion's Radio menu, with a USB-A to USB-C cable, and it is updated differently from older radios.",
+    guide: { title: "Updating a TX15", address: "https://manual.edgetx.org/installing-and-updating-edgetx/updating-your-stm32h7-radio" },
+    // What carries over, beside the radio's backups (renderer/views/radio.js).
+    keeps: [
+      "Updating Companion keeps its settings and radio profiles. A newer version family, such as 3.0, takes them from the one before the first time it opens, and the one before stays.",
+      "Writing new firmware leaves the models and settings on the radio's card as they are. Before it writes new firmware, Companion backs up the radio's firmware into the same folder as the card's backups, unless you untick that.",
+    ],
+    changes: {
+      title: "WHAT YOU CAN CHANGE ON A TX15 MAX",
+      items: [
+        ["The touch screen.", "On the radio itself: its theme, and each model's top bar and screens, with their layouts and widgets. New themes and widgets are folders added to THEMES and WIDGETS on its card."],
+        ["The switches' lights.", "The colours of the six customizable switches, on and off, for each model: in Companion under the model's Setup, Customizable Switches, or on the radio under Model Setup."],
+        ["The gimbals' lights.", "The ring round each gimbal is lit by a script from SCRIPTS/RGBLED on the card, which a model's special function RGB leds runs. EdgeTX's SD card content has some: gimbal.lua lights each ring as its stick moves, and there are plain colours."],
+      ],
+    },
+  },
+  radioBackups: {
+    title: "Radio backups", icon: "copies", soon: null,
+    summary: "Everything on your radio's SD card, its models and settings with its screens, themes, scripts and sounds, copied whenever it is plugged in with USB Storage chosen.",
   },
 };
 
@@ -77,6 +102,16 @@ export const suites = [
     summary: "The flight controller's and the radio link's own tools. They are Betaflight's and ExpressLRS's, not FPV Hangar's: open source projects, each kept current from its own site.",
     tools: ["betaflight", "elrsFlasher", "elrsConfigurator"],
     links: [{ title: "betaflight.com", address: "https://betaflight.com/" }, { title: "expresslrs.org", address: "https://www.expresslrs.org/" }],
+  },
+  {
+    title: "Radio",
+    summary: "For a RadioMaster TX15 Max or any radio that runs EdgeTX: its own setup program, and a backup of its card each time it is plugged in. Companion is EdgeTX's, not FPV Hangar's: open source, and kept current from its own Releases page.",
+    tools: ["edgetxCompanion", "radioBackups"],
+    links: [
+      { title: "edgetx.org", address: "https://edgetx.org/" },
+      { title: "Manual", address: "https://manual.edgetx.org/" },
+      { title: "Updating a TX15", address: "https://manual.edgetx.org/installing-and-updating-edgetx/updating-your-stm32h7-radio" },
+    ],
   },
   { title: "Any footage", summary: "For flying that isn't part of a series.", tools: ["anyFootage", "upload"], links: [] },
 ];
@@ -106,13 +141,23 @@ export const readMeFor = (mac) => ({
       ],
     },
     {
-      title: "Betaflight and ExpressLRS",
+      title: "Betaflight, ExpressLRS and EdgeTX",
       items: [
-        ["paragraph", "Under Firmware & setup on the first screen are three tools that are not FPV Hangar's own. They belong to the Betaflight and ExpressLRS projects, which are open source, and FPV Hangar only brings them to you."],
+        ["paragraph", "Under Firmware & setup and Radio on the first screen are four tools that are not FPV Hangar's own. They belong to the Betaflight, ExpressLRS and EdgeTX projects, which are open source, and FPV Hangar only brings them to you."],
         ["point", "Betaflight and the ExpressLRS Web Flasher open inside the app, from each project's own site. They are always that project's newest release, and they work without a connection once they have been opened."],
         ["point", "When one of them asks which serial port, USB device or Bluetooth device to use, the app shows you the list to choose from."],
         ["point", `The ExpressLRS Configurator is a program of its own. The app fetches it from ExpressLRS's Releases page, checks it against the checksum published there, opens it, and tells you when a newer one is out.${mac ? " It goes in your Applications folder, and updating it sends the copy you had to the Trash." : " On Windows the app starts ExpressLRS's own installer, and you follow that through."}`],
+        ["point", `EdgeTX Companion, under Radio, is fetched the same way, from EdgeTX's Releases page, and checked against the checksum GitHub keeps for it there. It sets up a radio that runs EdgeTX, such as a RadioMaster TX15 Max: its models, mixes, switches and screens, tried out in a simulator and then written to the radio. Each version family, such as 2.12, is a program of its own: a newer family goes in beside the one you have, which stays.${mac ? "" : " On Windows the app starts EdgeTX's own installer."}`],
         ...(mac ? [["point", "The first time one of them looks for devices, macOS asks whether FPV Hangar may use Bluetooth. Say yes if you connect to anything that way. USB works either way."]] : []),
+      ],
+    },
+    {
+      title: "Your radio's backups",
+      items: [
+        ["paragraph", "EdgeTX keeps all of a radio's models and settings on its SD card, with its themes, widgets, scripts and sounds. Whenever the radio is plugged in to this computer with USB Storage (SD) chosen on its screen, FPV Hangar copies everything on that card into a folder of its own, in Documents, EdgeTX, backups. Radio backups, under Radio on the first screen, lists them."],
+        ["point", "The radio's card is only read. A file that hasn't changed since the last backup is linked to its copy there, so a backup takes little room, and a backup that finds nothing changed isn't kept."],
+        ["point", "To put one back, plug the radio in with USB Storage (SD) chosen, delete the RADIO and MODELS folders on its card, and copy the backup's in their place. Or open the backup in EdgeTX Companion with File, Read Models and Settings from SD Path, then write it with Radio, Write Models and Settings to Radio."],
+        ["point", "Updating Companion keeps its settings. A newer version family takes them from the one before when it first opens. Writing new firmware leaves the card as it is, and Companion backs up the radio's firmware first, into the same folder."],
       ],
     },
     {
@@ -126,7 +171,7 @@ export const readMeFor = (mac) => ({
         ["point", "Lap times are as exact as your markers: one video frame, which is about 0.017 seconds at 60 frames a second."],
         ["point", "It has been used most with HDZero recordings (.ts). An .mp4 recording has been tested once. Other formats have not been tried."],
         ["point", `If you fly ${season}, its tracks appear by themselves: each one on the day it opens, with its deadline and, once the series posts it, its entry form. Every track has a form of its own.`],
-        ["point", `The app goes online for these things only: to read your Google Form, to check for a newer version, to read what the series publishes if you say you fly ${season} (its pilot list, its schedule, its entry forms and its leaderboards), to watch a track's video on YouTube when you ask it to read the track out of it, to open Betaflight's app and the ExpressLRS flasher from their own sites when you open them (what those tools then send is theirs to say), to show TikTok's and Instagram's own upload pages when you upload to them (what you post there, and how, is theirs; YouTube's opens in your own browser), to ask YouTube how many views, likes and comments your runs' videos have, if you give it a YouTube key of your own (only the videos' links go, with the key), to read NCS's and SoundScout's lists of songs when you open Find music, at most once a week, and to fetch a song from NCS when you add it, to read your Liked Songs and the artists you play most if you connect your Spotify (nothing in it is changed), and to look at ExpressLRS's Releases page for a newer Configurator, once a day if you have it and whenever you open its tile.`],
+        ["point", `The app goes online for these things only: to read your Google Form, to check for a newer version, to read what the series publishes if you say you fly ${season} (its pilot list, its schedule, its entry forms and its leaderboards), to watch a track's video on YouTube when you ask it to read the track out of it, to open Betaflight's app and the ExpressLRS flasher from their own sites when you open them (what those tools then send is theirs to say), to show TikTok's and Instagram's own upload pages when you upload to them (what you post there, and how, is theirs; YouTube's opens in your own browser), to ask YouTube how many views, likes and comments your runs' videos have, if you give it a YouTube key of your own (only the videos' links go, with the key), to read NCS's and SoundScout's lists of songs when you open Find music, at most once a week, and to fetch a song from NCS when you add it, to read your Liked Songs and the artists you play most if you connect your Spotify (nothing in it is changed), and to look at ExpressLRS's and EdgeTX's Releases pages for a newer Configurator and Companion, once a day for the ones you have and whenever you open their tiles.`],
         ["point", "With two computers, Pilot & settings can keep your library in Google Drive, so both open the same one. It needs Google's own Drive for desktop on each computer: FPV Hangar keeps the library in Drive's folder and Drive uploads it and brings down what the other computer did, so the app itself never signs in to Google or sends your files anywhere."],
         ["point", "Uploading goes through each site's own page, and you sign in on that page, as you would in a browser. FPV Hangar never sees your password and never posts anything: the site's own button does. Each site's sign-in is kept in a corner of the app of its own. Leaving a page while a video is still going up stops it, so the app asks first."],
         ["point", "With the card from your goggles plugged in, a track's page offers the recordings on it. The card is only read."],

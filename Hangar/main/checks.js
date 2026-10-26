@@ -23,9 +23,15 @@
 //   cards    a card from the goggles, with folders standing in for cards (`--cards <folder>`): the
 //            track's page says one is plugged in, its recordings are listed with the new ones
 //            from the last day ticked, and the ones picked are copied in and the card left alone
+//   radio    the radio's backups, with folders standing in for its card and for where they go
+//            (`--radios <folder> --radio-backups <folder>`): a radio plugged in is backed up whole
+//            and its card left as it was; plugged in again with nothing changed, no new backup is
+//            kept; with a model changed, one is, the rest linked to the last; the sheet lists them
 //   outside  other projects' tools: one opens over its place in the window, a list of devices is
-//            chosen from, and a made-up release of the program the app keeps up to date is fetched,
-//            checked and put in place, all in a folder of its own. With `--live` it also opens
+//            chosen from, and made-up releases of the programs the app keeps up to date are fetched,
+//            checked and put in place, all in a folder of their own: the ExpressLRS Configurator in
+//            the place of the copy there, EdgeTX Companion out of its zip and beside the family
+//            there. With `--live` it also opens
 //            Betaflight's app and the ExpressLRS flasher from their own sites, which needs the
 //            network, and reads that each arrived. No device is asked for or touched.
 //   uploads  uploading a run's videos. YouTube's: its steps show beside the column, the title and
@@ -87,7 +93,7 @@ function say(ok, what, detail = "") {
 }
 
 export async function run(which, tools) {
-  const checks = { editor, video, mp4, pages, form, bookends, trackview, trackvideo, outside, uploads, music, drive, cards, update, updating, carryover, everything };
+  const checks = { editor, video, mp4, pages, form, bookends, trackview, trackvideo, outside, uploads, music, drive, cards, radio, update, updating, carryover, everything };
   if (report) writeFileSync(report, "");
   if (!checks[which]) {
     console.error(`There is no check called ${which}. There are: ${Object.keys(checks).join(", ")}.`);
@@ -737,8 +743,8 @@ async function outside(tools) {
   const { js, errors } = await page(tools);
   const mac = process.platform === "darwin";
   await js(`window.hangar_.app.editor?.close(); await window.hangar_.app.trackView?.close({ sure: true }); await window.hangar_.app.tool?.close(); await window.showForSnapshot("home")`);
-  const tiles = await js(`return ["betaflight", "elrsFlasher", "elrsConfigurator"].map((name) => { const tile = document.querySelector('[data-probe="tile ' + name + '"]'); return tile ? !tile.disabled : null; })`);
-  say(tiles.every((there) => there === true), "the first screen has Betaflight, the ExpressLRS flasher and the ExpressLRS Configurator to open", JSON.stringify(tiles));
+  const tiles = await js(`return ["betaflight", "elrsFlasher", "elrsConfigurator", "edgetxCompanion"].map((name) => { const tile = document.querySelector('[data-probe="tile ' + name + '"]'); return tile ? !tile.disabled : null; })`);
+  say(tiles.every((there) => there === true), "the first screen has Betaflight, the ExpressLRS flasher, the ExpressLRS Configurator and EdgeTX Companion to open", JSON.stringify(tiles));
 
   // A tool opens over its place on the page. Where it is put is what is looked at, not what it loads.
   try {
@@ -866,6 +872,55 @@ async function outside(tools) {
       // What this copy knew of the real program's releases before is what it knows again.
       setConfig({ programs: known });
       await js(`document.querySelectorAll("#sheets .backdrop").forEach((one) => one.remove())`);
+      rmSync(work, { recursive: true, force: true });
+    }
+  }
+
+  // A program whose copies don't say which version they are, each family kept beside the others:
+  // EdgeTX Companion. Its release is a zip with the disk image in it, and is checked against the
+  // checksum GitHub keeps for it. Made up, on a Mac, as above.
+  if (mac) {
+    const work = mkdtempSync(join(tmpdir(), "fpv-hangar-programs-")), place = join(work, "Programs"), feed = join(work, "Releases");
+    const bundle = (folder, family) => {
+      const contents = join(folder, `EdgeTX Companion ${family}.app`, "Contents");
+      mkdirSync(join(contents, "MacOS"), { recursive: true });
+      writeFileSync(join(contents, "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string></string></dict></plist>\n`);
+    };
+    const argv = process.argv.length, known = config().programs ?? {};
+    try {
+      bundle(place, "9.8");
+      bundle(join(work, "fresh"), "9.9");
+      mkdirSync(feed, { recursive: true });
+      const image = join(work, "edgetx-companion-9.9.9.dmg"), name = "edgetx-cpn-macos-v9.9.9.zip";
+      const made = spawnSync("/usr/bin/hdiutil", ["create", "-quiet", "-srcfolder", join(work, "fresh"), "-volname", "Made-up Companion", "-format", "UDZO", image], { encoding: "utf8" });
+      const zipped = made.status === 0 ? spawnSync("/usr/bin/zip", ["-q", "-j", join(feed, name), image], { encoding: "utf8" }) : made;
+      if (!say(zipped.status === 0, "a made-up EdgeTX release is put together to fetch", zipped.stderr.trim())) return;
+      const sum = createHash("sha256").update(readFileSync(join(feed, name))).digest("hex");
+      const at = (file) => `https://github.com/EdgeTX/edgetx/releases/download/v9.9.9/${file}`;
+      const release = (digest) => writeFileSync(join(feed, "release.json"), JSON.stringify({ tag_name: "v9.9.9", draft: false, prerelease: false, html_url: "https://github.com/EdgeTX/edgetx/releases/tag/v9.9.9", published_at: "2026-01-02T03:04:05Z", body: "A made-up change\n",
+        assets: [{ name, size: statSync(join(feed, name)).size, digest: `sha256:${digest}`, browser_download_url: at(name) }] }));
+      release(createHash("sha256").update("something else").digest("hex"));
+      process.argv.push("--programs", place, "--program-feed", feed);
+
+      let now = api.programsNow().edgetxCompanion;
+      say(now.installed === "9.8" && now.exact === false, "a copy that doesn't say which version it is is known by its family", `${now.installed}, exact ${now.exact}`);
+      now = (await api.checkProgram("edgetxCompanion")).edgetxCompanion;
+      say(now.latest?.version === "9.9.9" && Boolean(now.latest.sha256) && now.newer && now.problem === null, "its newest release is read, with the checksum GitHub keeps for it", `v${now.latest?.version}`);
+      // A download that isn't what GitHub has is turned away and nothing is changed.
+      now = (await api.installProgram("edgetxCompanion")).state.edgetxCompanion;
+      say(now.installed === "9.8" && /didn't arrive in one piece/.test(now.problem ?? ""), "a download that doesn't add up to GitHub's checksum is turned away, and the copy there is left alone", now.problem ?? "");
+      // The real one: out of its zip, out of its disk image, and in beside the family that was there.
+      release(sum);
+      await api.checkProgram("edgetxCompanion");
+      now = (await api.installProgram("edgetxCompanion")).state.edgetxCompanion;
+      const there = readdirSync(place).filter((one) => one.endsWith(".app")).sort();
+      say(now.installed === "9.9.9" && now.exact && !now.newer && now.problem === null && there.join(" | ") === "EdgeTX Companion 9.8.app | EdgeTX Companion 9.9.app" && !existsSync(join(place, "Replaced")),
+        "the newer family is fetched out of its zip and put beside the one that was there, which stays, and which version it is is remembered", `v${now.installed}: ${there.join(" | ")}${now.problem ? `: ${now.problem}` : ""}`);
+      const mounted = spawnSync("/usr/bin/hdiutil", ["info"], { encoding: "utf8" }).stdout.includes("fpv-hangar-program-");
+      say(!mounted, "and its download is put away afterwards");
+    } finally {
+      process.argv.length = argv;
+      setConfig({ programs: known });
       rmSync(work, { recursive: true, force: true });
     }
   }
@@ -1565,6 +1620,78 @@ async function driveLibrary(tools, myDrive) {
 }
 
 /** A card from the goggles, with folders standing in for the disks that are plugged in. */
+/** The radio's backups. Its card is a folder with a radio's settings in it, as EdgeTX writes them,
+ *  and a little of everything else a card has. */
+async function radio(tools) {
+  const { api } = tools;
+  const place = argument("--radios"), kept = argument("--radio-backups");
+  if (!place || !kept) return note("   (give folders to stand in for a radio's card and for its backups with --radios and --radio-backups, and this is tried)");
+  rmSync(resolve(place), { recursive: true, force: true });
+  rmSync(resolve(kept), { recursive: true, force: true });
+  const card = join(resolve(place), "NO NAME");
+  const write = (path, what) => {
+    mkdirSync(dirname(join(card, ...path.split("/"))), { recursive: true });
+    writeFileSync(join(card, ...path.split("/")), what);
+  };
+  write("RADIO/radio.yml", "semver: 9.9.9\nboard: tx15\n");
+  write("MODELS/model00.yml", "header:\n  name: \"Made-up\"\n");
+  write("MODELS/labels.yml", "models:\n  model00.yml: {}\n");
+  write("THEMES/Made-up/theme.yml", "summary:\n  name: Made-up\n");
+  write("SCRIPTS/RGBLED/made-up.lua", "-- made up\n");
+  write("SOUNDS/en/made-up.wav", Buffer.alloc(200_000, 3));
+  write(".Spotlight-V100/Store-V2", "the computer's");
+  /** A folder's files, with their sizes and times, as lines. */
+  const listing = (folder, inside = "") => readdirSync(join(folder, inside), { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap((entry) => {
+    const path = inside ? `${inside}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) return listing(folder, path);
+    const facts = statSync(join(folder, path));
+    return [`${path} ${facts.size} ${Math.round(facts.mtimeMs / 2000)}`];
+  });
+  // Pulled out is somewhere else, where no disk is looked for.
+  const away = join(dirname(resolve(place)), "Radio pulled out");
+  const plugAgain = async () => {
+    renameSync(card, away);
+    const out = await api.lookForRadios(true);
+    renameSync(away, card);
+    return out.radios.length === 0 ? api.lookForRadios(true) : { ...out, problem: "it was still plugged in" };
+  };
+  const before = listing(card).join("\n"), known = config().radioBackups;
+  const { js, errors } = await page(tools);
+  try {
+    let now = await api.lookForRadios(true);
+    const first = now.backups[0];
+    say(now.radios.length === 1 && now.radios[0].board === "tx15" && now.radios[0].version === "9.9.9", "a radio's card is found by the settings on it", JSON.stringify(now.radios[0] ?? null));
+    const copy = first ? listing(first.folder).join("\n") : "";
+    say(Boolean(first) && first.files === 6 && copy === before.split("\n").filter((line) => !line.startsWith(".")).join("\n") && now.problem === null,
+      "everything on it is backed up, as it is on the card, and nothing the computer put there", first ? `${first.files} files in ${basename(first.folder)}` : now.problem ?? "no backup");
+    say(listing(card).join("\n") === before, "the card is left as it was");
+    now = await plugAgain();
+    say(now.count === 1 && now.last?.unchanged === true, "plugged in again with nothing changed, no new backup is kept", `${now.count} backups`);
+    // A model changed on the radio. A card keeps times to two seconds.
+    await pause(2100);
+    write("MODELS/model00.yml", "header:\n  name: \"Made-up, changed\"\n");
+    now = await plugAgain();
+    const second = now.backups[0], sound = (folder) => statSync(join(folder, "SOUNDS", "en", "made-up.wav"));
+    say(now.count === 2 && second?.copied === 1 && first && sound(first.folder).ino === sound(second.folder).ino && readFileSync(join(first.folder, "MODELS", "model00.yml"), "utf8").includes("\"Made-up\""),
+      "with a model changed, a new backup is kept: the model copied, the rest the same files as in the last backup, and the last backup as it was", `${now.count} backups, ${second?.copied} copied`);
+    // The sheet lists them, and its button backs the radio up again.
+    await js(`await window.showForSnapshot("home"); document.querySelector('[data-probe="tile radioBackups"]').click()`);
+    await pause(300);
+    const sheet = await js(`return { rows: document.querySelectorAll("#sheets .backup").length, now: document.querySelector("#sheets .program-now")?.textContent ?? "", button: !document.querySelector('[data-probe="radio back up"]')?.disabled }`);
+    say(sheet.rows === 2 && sheet.now.startsWith("TX15 is plugged in") && !sheet.now.includes("Nothing on its card has changed") && sheet.button, "its sheet lists the backups and says the radio is plugged in", JSON.stringify(sheet));
+    const was = api.radioNow().last?.at;
+    await js(`document.querySelector('[data-probe="radio back up"]').click()`);
+    for (let tries = 0; tries < 100 && (api.radioNow().last?.at === was || api.radioNow().backing); tries += 1) await pause(50);
+    now = api.radioNow();
+    say(now.count === 2 && now.last?.unchanged === true && now.problem === null, "Back up now looks at the card again, and keeps nothing new when nothing changed", JSON.stringify(now.last));
+  } finally {
+    await js(`document.querySelectorAll("#sheets .backdrop").forEach((one) => one.remove())`);
+    setConfig({ radioBackups: known });
+    for (const folder of [resolve(place), resolve(kept), away]) rmSync(folder, { recursive: true, force: true });
+  }
+  say(errors.length === 0, "nothing went wrong on the page", errors.join(" | "));
+}
+
 async function cards(tools) {
   const { api, library } = tools;
   const place = argument("--cards");
@@ -1941,7 +2068,7 @@ async function everything(tools) {
 
   const steps = [
     ["The marker editor", editor], ["Making the videos", video], ["A recording in an MP4", mp4], ["Before and after a video", bookends],
-    ["The track in 3D, and building one", trackview], ["Other projects' tools", outside], ["Uploading", uploads], ["Finding music", music], ["A card from the goggles", cards], ["The copy in Google Drive", drive], ["Every page", pages], ["Updating itself", updating],
+    ["The track in 3D, and building one", trackview], ["Other projects' tools", outside], ["Uploading", uploads], ["Finding music", music], ["A card from the goggles", cards], ["The radio's backups", radio], ["The copy in Google Drive", drive], ["Every page", pages], ["Updating itself", updating],
   ];
   for (const [title, step] of steps) {
     note(`-- ${title}`);
