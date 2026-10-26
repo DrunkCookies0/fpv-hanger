@@ -103,13 +103,40 @@ How it is built, so that it matches the app:
 2. **The Tower**: the container, the dashboard, the approval queue, the first duties on a schedule.
 3. **Growing the staff**: an employee is added when the app shows it needs one, never before.
 
-## Questions for the CEO
+## What the CEO has decided
 
-The answers change what the staff are told, so they come first:
+- The first five staff are the right five (26 October 2026). They are defined under `.claude/agents/`.
+- Pilots who know about the app reach the CEO directly on Discord. That is where Support's reports come from, passed on by the CEO; Support never speaks to a pilot.
+- The app is at v0.27.0.
+- The Tower can be hosted on Proxmox; the CEO will set up what Chief asks for.
+- Billing for the Tower is undecided until the CEO has seen what it costs. See *What the Tower costs*.
 
-1. Are these the right first five, and is anything on *What counts as public* wrong or missing?
-2. Where do pilots reach you about the app today: GitHub issues, a Discord, email, somewhere else? That is where Support listens.
-3. What is next for the app? The read-me's "Coming soon" has a Video Creator for any footage; is that the next version, or is something else?
-4. On Proxmox: is there a Docker host already (an LXC or a VM), or should the Tower come with instructions to make one?
-5. The staff in the Tower run on an Anthropic API key, billed by use, separate from the Claude subscription that Claude Code sessions use. Is that acceptable, and is there a monthly ceiling to keep under?
-6. Is anyone else human on the team? They can appear on the Tower too, with their own tasks.
+## What the Tower costs
+
+Until the Tower exists, the staff run inside Claude Code sessions like this one, on the CEO's
+Claude subscription, and cost nothing more. The Tower runs them on an Anthropic API key, which is
+billed by use: an account at console.anthropic.com, paid for in advance as credit, with a monthly
+spending limit the CEO sets there, so a runaway can't cost more than the limit.
+
+Prices per million tokens, Anthropic's own as of October 2026 (a token is about three quarters of
+a word; "in" is what a staff member reads, "out" what it writes):
+
+| Model | In | Out | Reading again what was read before |
+|---|---|---|---|
+| Claude Opus 5.5, the default | $4 | $20 | $0.20 |
+| Claude Sonnet 5.5 | $2 | $10 | $0.20 |
+| Claude Haiku 5.5 | $0.10 | $0.50 | |
+
+What that comes to is a guess until the Tower has run for a month, and the Log will say exactly.
+A fair guess on Opus 5.5 for an app with one engineer's worth of work a month: a Builder job that
+reads a few files and writes a change, with its tests, is a dollar or two; a Tester run under a
+dollar; the Analyst's weekly report about fifty cents; Support and the Product Manager pennies per
+item. Ten Builder jobs, ten Tester runs, four reports and some triage come to roughly twenty to
+forty dollars a month. Routine roles can run on Sonnet 5.5 at half that; which roles, if any, is
+the CEO's call.
+
+## Questions still open
+
+1. Is anyone else human on the team? They can appear on the Tower too, with their own tasks.
+2. What is next for the app? The read-me's "Coming soon" has a Video Creator for any footage; is that the next version, or is something else? The Product Manager's first job waits on this.
+3. For the Tower on Proxmox: an LXC with Docker, or a small Debian VM with Docker? Either works; Chief will write the instructions for whichever the CEO prefers.
