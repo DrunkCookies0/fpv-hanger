@@ -40,7 +40,7 @@ if (argument("--say-version")) {
 // temporary folder.
 if (process.argv.includes("--self-test") && !argument("--check")) {
   const scratch = mkdtempSync(join(tmpdir(), "fpv-hangar-self-test-"));
-  process.argv.push("--root", join(scratch, "library"), "--user-data", join(scratch, "memory"), "--drive", join(scratch, "Google Drive", "My Drive"), "--cards", join(scratch, "Cards"), "--check", "everything");
+  process.argv.push("--root", join(scratch, "library"), "--user-data", join(scratch, "memory"), "--drive", join(scratch, "Google Drive", "My Drive"), "--cards", join(scratch, "Cards"), "--radios", join(scratch, "Radios"), "--radio-backups", join(scratch, "Radio backups"), "--check", "everything");
 }
 const snapshot = argument("--snapshot");
 const check = argument("--check");

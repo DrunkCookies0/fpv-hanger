@@ -26,6 +26,7 @@ import { makeCounts } from "./counts.js";
 import { makeMusic } from "./music.js";
 import { videoIdOf } from "../shared/counts.js";
 import { makePrograms } from "./components.js";
+import { makeRadio } from "./radio.js";
 import { makeDriveCopy } from "./drive.js";
 import { measure, moveFolder } from "./move.js";
 import { driveHolding, isInDrive, libraryName } from "../shared/drive.js";
@@ -129,7 +130,10 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
   /** Other projects' tools: the ones shown inside the window, and the program that is fetched and kept up to date. */
   // A copy that shows no window is trying itself out: it opens a tool's place without calling on
   // the project's site, unless it was asked to (`--live`).
-  const outside = makeTools({ window, tell, still: quiet && !process.argv.includes("--live") }), kept = makePrograms({ tell, quiet });
+  /** The radio's SD card, backed up whenever it is plugged in. It is looked for once EdgeTX
+   *  Companion, which sets a radio up, has been put in place or opened. */
+  const radio = makeRadio({ tell, quiet });
+  const outside = makeTools({ window, tell, still: quiet && !process.argv.includes("--live") }), kept = makePrograms({ tell, quiet, used: (program) => program.backups && radio.watchForRadios() });
   /** A finished video going up through a site's own upload page. Its link there is kept with its run. */
   const uploads = makeUploads({ window, tell, quiet, staging: join(cache, "Uploading"), still: quiet && !process.argv.includes("--live"), keepLink: (track, run, site, link) => api.keepUpload(track, run, site, link ?? "") });
   /** How many views, likes and comments the runs' YouTube videos have, with the pilot's own key. */
@@ -294,6 +298,7 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
         /** This computer plays the marker editor's lighter copies, having played recordings unevenly. */
         lightPlayback: config().lightPlayback === true,
         programs: kept.programsNow(),
+        radio: radio.radioNow(),
         spotify: music.spotifyNow(),
         drive: drive.now(),
         job,
@@ -994,6 +999,7 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
 
     ...outside,
     ...kept,
+    ...radio,
 
     // Uploading to YouTube, TikTok and Instagram.
 
