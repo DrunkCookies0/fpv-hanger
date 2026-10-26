@@ -95,8 +95,9 @@ How it is built, so that it matches the app:
 - One container, from a `docker-compose.yml` under `Tower/`, run in an LXC or a small VM on Proxmox
 - Node, plain JavaScript modules and no build step, as `Hangar/` is; one SQLite file for its memory, on a mounted volume so it survives the container
 - The staff run inside it on the Claude Agent SDK, from the same definitions as `.claude/agents/`, so an employee behaves the same in a Claude Code session and in the Tower
-- The Office's own tools (make a task, report progress, ask for approval, publish) are one MCP server inside the container. Every tool that publishes anything refuses to run without the id of an approval the CEO gave in the Inbox, and the SDK's permission hook refuses the same call a second time before it reaches the tool, so there are two locks on the door
-- An Anthropic API key, kept in the container's environment and nowhere else. The Tower's own page shows what each task cost
+- The Office's own tools (make a task, report progress, ask for approval, publish) are one MCP server inside the container. Every tool that publishes anything refuses to run without the id of an approval the CEO gave in the Inbox. Before a call even reaches the tool, the SDK's pre-tool hook looks for the same approval: without one it parks the call in the Inbox and ends the employee's turn, which picks up where it stopped once the CEO decides, and a denial carries the CEO's note back to the employee. Two locks on the door, and an approval can take a day without anything waiting on it
+- An Anthropic API key, kept in the container's environment and nowhere else, billed by use. Anthropic's terms don't let a product built on the Agent SDK sign in with a Claude subscription, so the Tower can't share the one these Claude Code sessions run on. The Tower's own page shows what each task cost
+- The SQLite file and the staff's sessions live on the mounted volume, so a restart of the container loses nothing, not even an approval half-way through; and the staff run as an ordinary user inside it, never as root
 - The page is served on the home network only, behind the CEO's own login
 
 ## Phases
