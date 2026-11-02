@@ -201,6 +201,9 @@ export class Race {
 
   lap(index) { return this.bounds[index + 1] - this.bounds[index]; }
 
+  /** How long until lap 1 starts, in display units: 0 from then on. */
+  untilStart(now) { return Math.max(0, this.bounds[0] - now); }
+
   completed(now) {
     let count = 0;
     for (let index = 1; index < this.bounds.length; index += 1) if (this.bounds[index] <= now) count += 1;

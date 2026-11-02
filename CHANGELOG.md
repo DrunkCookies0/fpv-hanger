@@ -2,6 +2,13 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.28.0 (2 November 2026)
+
+- **The timer counts down to lap 1.** From the start of a video until you cross the start gate, the big time counts down in grey, where it used to wait on 0:00.000. With 5 seconds before lap 1, it starts at 0:05.000. It shows in Markers & music and on 16:9 and 9:16 videos. Make a video again to get it.
+- **Video start**, in Markers & music beside Preview, puts the playhead on the frame the finished video starts on, so you can play from there while you mark laps or place music. Shift+I does the same. If the clip is playing, it carries on from there, and a preview starts again.
+- Video start and Preview work as soon as the video's start is known: when the start gate is marked, or you have set a start. Preview used to stay off until a lap was marked. Until the video's end is known too, Preview runs on to the end of the clip.
+- A marker pressed during a Preview moves the end of the preview, as it moves the end of the video, and the music stays as the video will have it. A preview used to stop where the video ended when it was started, and its music lost its fade.
+
 ## v0.27.0 (25 October 2026)
 
 - **Radio**, a new section on the first screen, with **EdgeTX Companion**: EdgeTX's own program for setting a radio up on the computer, such as a RadioMaster TX15 Max. It has the radio's models, mixes, switches, telemetry and screens, a simulator to try them in, and a backup of it all, and it writes them to the radio and updates its firmware and what is on its SD card. For a TX15 Max, choose the RadioMaster TX15 as the radio in Companion's settings.

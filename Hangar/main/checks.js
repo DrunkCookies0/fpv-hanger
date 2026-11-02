@@ -320,6 +320,58 @@ async function editor(tools) {
     say(previewed.started.previewing && previewed.started.frame === previewed.from && previewed.started.button === "Stop" && previewed.midway > previewed.from && previewed.midway <= previewed.to && !previewed.playing && previewed.previewing === null && previewed.parked === previewed.to && previewed.button === "Preview",
       "Preview plays the finished video from its start, and stops on its last frame", `frames ${previewed.from} to ${previewed.to}: started on ${previewed.started.frame}, at ${previewed.midway} after 0.5 s, stopped on ${previewed.parked}`);
 
+    // While the laps are still being marked: the video's start can be gone to and played from as soon
+    // as it is known, and a preview keeps to what is marked under it.
+    const marking = await js(`
+      const e = window.hangar_.app.editor, wait = (milliseconds) => new Promise((done) => setTimeout(done, milliseconds));
+      const settle = async () => { for (let tries = 0; tries < 100 && !e.settled; tries += 1) await wait(20); };
+      const shiftI = () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "I", code: "KeyI", shiftKey: true, bubbles: true, cancelable: true }));
+      const button = () => document.querySelector('[data-probe="ed video start"]');
+      const kept = { markers: [...e.markers], videoStart: e.edit.videoStart, videoEnd: e.edit.videoEnd, history: e.history.length };
+      const gate = kept.markers[1], out = {};
+      e.edit.videoStart = e.edit.videoEnd = null;
+      e.markers = [];
+      e.drawAll();
+      out.noGate = button().disabled && document.querySelector('[data-probe="ed preview"]').disabled;
+      e.markers = [gate];
+      e.drawAll();
+      const begins = e.frameAt(Math.max(0, e.seconds(gate) - 3));
+      e.show(0);
+      await settle();
+      out.oneGate = !button().disabled && !document.querySelector('[data-probe="ed preview"]').disabled;
+      button().click();
+      await settle();
+      out.went = { frame: e.frame, begins, playing: e.playing };
+      e.togglePlay();
+      await wait(300);
+      shiftI();
+      out.again = { frame: e.frame, playing: e.playing, previewing: e.previewing };
+      await settle();
+      e.pause();
+      await settle();
+      out.setNothing = e.edit.videoStart === null;
+      e.edit.videoStart = e.seconds(gate) - 0.2;
+      e.preview();
+      out.open = { to: e.previewing?.to, duration: e.duration };
+      await wait(600);
+      e.addMarker();
+      out.followed = { to: e.previewing?.to, wanted: Math.min(e.seconds(e.markers.at(-1)) + 8, e.duration), playing: e.playing, button: document.querySelector('[data-probe="ed preview"]')?.textContent ?? null };
+      shiftI();
+      out.restarted = { previewing: Boolean(e.previewing), frame: e.frame, from: e.frameAt(e.edit.videoStart) };
+      e.pause();
+      await settle();
+      e.markers = kept.markers;
+      Object.assign(e.edit, { videoStart: kept.videoStart, videoEnd: kept.videoEnd });
+      e.history.length = kept.history;
+      e.drawChanged();
+      return out;`);
+    say(marking.noGate, "with nothing marked, Video start and Preview are off: the video's start isn't known yet");
+    say(marking.oneGate && marking.went.frame === marking.went.begins && !marking.went.playing, "with only the start gate marked, Video start goes to the frame the video will start on", `frame ${marking.went.frame}`);
+    say(marking.again.frame === marking.went.begins && marking.again.playing && !marking.again.previewing && marking.setNothing, "Shift-I goes back there and carries on playing, and sets nothing", `frame ${marking.again.frame}`);
+    say(marking.open.to === marking.open.duration, "a preview with only the start gate marked runs on to the end of the clip");
+    say(marking.followed.playing && marking.followed.button === "Stop" && Math.abs(marking.followed.to - marking.followed.wanted) < 0.001, "a marker pressed during a preview moves its end, as it moves the video's", `now ends at ${marking.followed.to?.toFixed(3)} s`);
+    say(marking.restarted.previewing && marking.restarted.frame === marking.restarted.from, "Shift-I during a preview starts it again from the video's start", `frame ${marking.restarted.frame}`);
+
     // A song: chosen, listened to, a drop put on the start gate.
     const songs = await js(`return window.hangar_.app.editor.songs`);
     if (say(songs.length > 0, "the library's songs are offered", songs.join(", "))) {

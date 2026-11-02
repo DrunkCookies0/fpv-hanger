@@ -152,6 +152,20 @@ export class Editor {
     const upper = Math.min(end, this.duration);
     return upper > start ? { from: start, to: upper } : null;
   }
+  /** Where the finished videos will start, as soon as that can be told: where it was set, or a
+   *  little before the start gate. Where they end has to wait for a lap to be marked. */
+  get videoBegins() {
+    if (this.edit.videoStart !== null) return this.edit.videoStart;
+    return this.markers.length > 0 ? Math.max(0, this.seconds(this.markers[0]) - leadIn) : null;
+  }
+  /** What a preview plays, as things stand: the finished video's stretch and its music's plan.
+   *  Until the end of the video can be told, it runs on to the end of the clip. */
+  get previewPlan() {
+    const from = this.videoBegins, to = this.stretch?.to ?? this.duration, song = this.songSpan;
+    if (from === null || !(to > from)) return null;
+    const music = song && musicPlan({ start: from, end: to, songLength: this.songLength, songStart: song.from, musicIn: this.edit.musicIn, musicOut: this.edit.musicOut });
+    return { from, to, music: music ?? null };
+  }
   /** Where the chosen song lies against the clip. */
   get songSpan() {
     if (!this.sound || !(this.songLength > 0) || this.edit.songStart === null) return null;
@@ -468,12 +482,22 @@ export class Editor {
     if (this.phase !== "ready") return;
     const was = this.previewing;
     this.pause();
-    const stretch = this.stretch;
-    if (was || !stretch) return;
-    this.show(this.frameAt(stretch.from));
-    const song = this.songSpan;
-    const plan = song && musicPlan({ start: stretch.from, end: stretch.to, songLength: this.songLength, songStart: song.from, musicIn: this.edit.musicIn, musicOut: this.edit.musicOut });
-    this.run({ ...stretch, music: plan ?? null });
+    const plan = this.previewPlan;
+    if (was || !plan) return;
+    this.show(this.frameAt(plan.from));
+    this.run(plan);
+  }
+
+  /** To the first frame of the finished video. If the clip is playing it carries on from there, so a
+   *  preview starts again. */
+  toVideoStart() {
+    if (this.phase !== "ready") return;
+    const from = this.videoBegins;
+    if (from === null) return this.beep();
+    const playing = this.playing, previewed = Boolean(this.previewing);
+    this.pause();
+    this.show(this.frameAt(from));
+    if (playing) this.run(previewed ? this.previewPlan : null);
   }
 
   /** Plays on from the playhead: the whole clip, or with `preview`, the finished video's stretch of it. */
@@ -482,6 +506,8 @@ export class Editor {
     this.previewing = preview;
     const video = this.video;
     video.playbackRate = this.speed;
+    // Started again straight after a pause, the last run's call for the next frame is still waiting.
+    if (this.frameCall) video.cancelVideoFrameCallback(this.frameCall);
     this.watch();
     video.play().catch(() => {});
     if (preview) this.startPreviewMusic(preview.from);
@@ -497,9 +523,9 @@ export class Editor {
         watching.ticks += 1;
         watching.drawingMost = Math.max(watching.drawingMost, took);
       }
-      video.requestVideoFrameCallback(each);
+      this.frameCall = video.requestVideoFrameCallback(each);
     };
-    video.requestVideoFrameCallback(each);
+    this.frameCall = video.requestVideoFrameCallback(each);
     video.onended = () => {
       // It ran off the end of the clip.
       if (!this.playing) return;
@@ -556,7 +582,8 @@ export class Editor {
   showing() { return Math.max(this.frame, this.frameAt(this.video.currentTime)); }
 
   tick(seconds) {
-    if (!this.playing) return;
+    // A frame from before a jump, still on its way, isn't where the clip is now.
+    if (!this.playing || !this.settled) return;
     // A preview stops where the finished video does, on its last frame.
     const preview = this.previewing;
     if (preview && seconds >= preview.to - 0.5 / this.fps.value) {
@@ -759,11 +786,14 @@ export class Editor {
     this.songs = listed.songs;
   }
 
-  /** After the song has moved under a clip that is playing. */
+  /** After the song has moved under a clip that is playing, or a marker has moved the video's ends:
+   *  a preview keeps to the finished video as it now stands. */
   restartMusic() {
     if (!this.playing) return;
     this.sound?.stop();
-    this.startMusic(this.video.currentTime);
+    if (this.previewing) this.previewing = this.previewPlan;
+    if (this.previewing) this.startPreviewMusic(this.video.currentTime);
+    else this.startMusic(this.video.currentTime);
   }
 
   /** Puts the start of the song at a clip time. */
@@ -1054,7 +1084,8 @@ export class Editor {
       return;
     }
     if (!command && !event.altKey && letter === "b") return take(), this.addSongMarkHere();
-    if (!command && !event.altKey && letter === "i") return take(), this.setVideoStart();
+    // As in Premiere, Shift-I goes to the start that I sets.
+    if (!command && !event.altKey && letter === "i") return take(), event.shiftKey ? this.toVideoStart() : this.setVideoStart();
     if (!command && !event.altKey && letter === "o") return take(), this.setVideoEnd();
     if (!command && !event.altKey && letter === "p") return take(), this.preview();
     if (command && letter === "z") return take(), this.undo();
@@ -1143,7 +1174,7 @@ export class Editor {
       h("div.ed-overview-holder", this.overview),
       h("div.ed-lanes-row", h("div.ed-lane-names", h("span", { style: { top: `${lanes.lapsTop + 9}px` } }, "LAPS"), h("span", { style: { top: `${lanes.videoTop + 3}px` } }, "VIDEO"), h("span", { style: { top: `${lanes.musicTop + 15}px` } }, "MUSIC")), this.lanes),
       h("div.ed-hints",
-        h("span.ed-hint", `Space play  ·  ← → one frame  ·  M mark  ·  ${keys("delete")} remove  ·  ${keys("cmd", "left")} ${keys("cmd", "right")} move marker  ·  ↑ ↓ markers  ·  I O video start, end  ·  P preview the video  ·  B mark the music  ·  double-click the music for its sound wave  ·  right-click for more`),
+        h("span.ed-hint", `Space play  ·  ← → one frame  ·  M mark  ·  ${keys("delete")} remove  ·  ${keys("cmd", "left")} ${keys("cmd", "right")} move marker  ·  ↑ ↓ markers  ·  I O video start, end  ·  ${keys("shift", "I")} go to its start  ·  P preview the video  ·  B mark the music  ·  double-click the music for its sound wave  ·  right-click for more`),
         h("span.spacer"),
         secondary("Whole clip", () => this.showAll()),
         this.runButton = secondary("The run", () => this.showRun()),
@@ -1202,8 +1233,12 @@ export class Editor {
       secondary("+1 s", () => this.step(second), { help: `Forward one second (${keys("alt", "right")})` }),
       button("skipForward", "Next marker (↓)", () => this.jump(1)),
       h("span.spacer"),
+      secondary("Video start", () => this.toVideoStart(), {
+        disabled: this.videoBegins === null, probe: "ed video start",
+        help: `Go to the frame the finished video starts on (${keys("shift", "I")}), to play from there. If it is playing, it carries on from there.`,
+      }),
       secondary(this.previewing ? "Stop" : "Preview", () => this.preview(), {
-        icon: this.previewing ? "pause" : "film", disabled: !this.stretch, probe: "ed preview",
+        icon: this.previewing ? "pause" : "film", disabled: this.videoBegins === null, probe: "ed preview",
         help: "Play the finished video as it will be: from its start to its end, with its music (P)",
       }),
       secondary(speeds.find(([speed]) => speed === this.speed)?.[2] ?? "1×", (event) => menu(event.currentTarget, [
@@ -1270,7 +1305,7 @@ export class Editor {
         secondary("Start here", () => this.setVideoStart(), { help: "Start the finished videos on this frame (I)" }),
         secondary("End here", () => this.setVideoEnd(), { help: "End the finished videos on this frame (O)" }),
         secondary("Automatic", () => this.automaticVideo(), { disabled: !custom }),
-        secondary("Preview", () => this.preview(), { disabled: !stretch, help: "Play the finished video as it will be: from its start to its end, with its music (P)" }),
+        secondary("Preview", () => this.preview(), { disabled: this.videoBegins === null, help: "Play the finished video as it will be: from its start to its end, with its music (P)" }),
       ),
     );
 

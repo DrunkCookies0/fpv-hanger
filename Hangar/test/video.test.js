@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { musicPlan, musicFilter, plan, stretch, shapes } from "../shared/video.js";
 import { Race, FrameRate } from "../shared/timing.js";
-import { raceDay, eyebrowLines, headingHeight } from "../shared/panel.js";
+import { Panel, raceDay, eyebrowLines, headingHeight } from "../shared/panel.js";
 
 test("the stretch a video covers", () => {
   const crossings = [10, 20, 30, 40];
@@ -40,6 +40,32 @@ test("the music's filter is exact to the sample", () => {
 const facts = { codec: "hevc", width: 1280, height: 720, fps: new FrameRate(60), frames: 6022, fullRange: true, matrix: "bt601" };
 const race = Race.from([10.033333, 19.716667, 29.433333, 39.566667, 48.816667, 59.5, 69.366667]);
 const look = { accent: [1, 0.84, 0.04], title: "A Pilot", badge: "ID 042", event: "An Event", track: "Track 1", position: "tr", logo: null };
+
+/** What a timer box writes at a moment of the clip, on a stand-in for a canvas: the words in each colour, run together. */
+function written(panel, seconds) {
+  const words = new Map();
+  panel.draw({
+    fillStyle: "", save() {}, restore() {}, scale() {}, beginPath() {}, roundRect() {}, clip() {}, fillRect() {},
+    measureText: (text) => ({ width: text.length * 10, actualBoundingBoxAscent: 10 }),
+    fillText(text) { words.set(this.fillStyle, (words.get(this.fillStyle) ?? "") + text); },
+  }, seconds);
+  return words;
+}
+
+test("before lap 1 the timer counts down to it in grey, in both boxes", () => {
+  const grey = "rgba(255, 255, 255, 0.5)";
+  const corner = new Panel({ race, scale: 1, accent: look.accent });
+  // Lap 1 starts 10.033 seconds into the clip.
+  assert.equal(written(corner, 5.033333).get(grey), "0:05.000");
+  assert.equal(written(corner, 10.016667).get(grey), "0:00.016");
+  assert.equal(written(corner, 10.033333).get(grey), undefined);
+  // Under an upright video the big time is the judged laps', here laps 2 to 4. It counts down to lap
+  // 1 all the same, then waits at nothing for them.
+  const wide = new Panel({ race, scale: 1, accent: look.accent, layout: "wide", room: 600 });
+  assert.equal(written(wide, 5.033333).get(grey), "0:05.000");
+  assert.equal(written(wide, 15).get(grey), "0:00.000");
+  assert.equal(written(wide, 19.716667).get(grey), undefined);
+});
 
 test("a 16:9 video: whole frames, one clock, the box in its corner", () => {
   const made = plan({ shape: "landscape", facts, source: "clip.mp4", exactTimes: true, start: 7.033333, end: 77.366667, race, look, output: "out.mp4" });

@@ -89,6 +89,9 @@ test("laps, and the best three in a row", () => {
   assert.deepEqual(race.best(3), { start: 0, total: 29534 });
   assert.equal(race.completed(19716), 0);
   assert.equal(race.completed(19717), 1);
+  assert.equal(race.untilStart(5033), 5000);
+  assert.equal(race.untilStart(10033), 0);
+  assert.equal(race.untilStart(19717), 0);
   assert.throws(() => Race.from([5]), Unusable);
   assert.throws(() => Race.from([-1, 5]), Unusable);
   // Two markers on the same thousandth are one crossing.

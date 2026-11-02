@@ -291,7 +291,8 @@ export class Panel {
     const headFont = pen.font(17, 800);
     const headWidth = pen.put(finished ? "FINISHED" : `LAP ${done + 1}`, headFont, accent, { x: pad, centerY: y + 31, kern: 1.6 });
     if (!finished) pen.put(`/ ${laps}`, headFont, white(0.45), { x: pad + headWidth + 7, centerY: y + 31, kern: 1.6 });
-    const running = finished ? race.lap(laps - 1) : started ? now - race.bounds[done] : 0;
+    // Before lap 1 it counts down to the start gate, in grey.
+    const running = finished ? race.lap(laps - 1) : started ? now - race.bounds[done] : race.untilStart(now);
     pen.put(race.time(running, true), pen.font(66, 800), white(started ? 1 : 0.5), { x: pad - 3, centerY: y + 77, tabular: true });
 
     // The laps, under it.
@@ -349,9 +350,9 @@ export class Panel {
   }
 
   /** The box under an upright video's picture. The judged laps are the point of it: one big time for
-   *  them together, which waits at nothing until the first of them starts, runs through them, and
-   *  stops on what they came to. Under it those laps, each with its own time, and under them the
-   *  other laps, smaller. A lap being flown shows its time as it runs. */
+   *  them together, which counts down in grey to lap 1, waits at nothing until the first of them
+   *  starts, runs through them, and stops on what they came to. Under it those laps, each with its
+   *  own time, and under them the other laps, smaller. A lap being flown shows its time as it runs. */
   #drawWide(context, pen, seconds) {
     const { race, width, pad, fit } = this;
     const accent = css(this.accent);
@@ -367,7 +368,7 @@ export class Panel {
     // The judged laps as one time.
     const opens = race.bounds[from], closes = race.bounds[to];
     const running = now >= opens, isSet = now >= closes;
-    const total = isSet ? closes - opens : running ? now - opens : 0;
+    const total = isSet ? closes - opens : running ? now - opens : race.untilStart(now);
     const headHeight = Panel.#wideHead * fit;
     if (isSet) {
       // It flashes as it lands, then stays lit.
