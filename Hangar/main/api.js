@@ -1,7 +1,7 @@
 // Everything the app's pages can ask the main process to do, by name. A page has no access to
 // files or programs of its own: it asks for one of these and gets an answer back.
 
-import { app, dialog, shell, clipboard, screen, WebContentsView } from "electron";
+import { app, dialog, shell, clipboard, screen, WebContentsView, powerSaveBlocker } from "electron";
 import { spawn } from "node:child_process";
 import { existsSync, statSync, statfsSync, readdirSync, readFileSync, writeFileSync, rmSync, utimesSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { eventFolder, trackName, trackNumber, videoExtensions, audioExtensions, pictureExtensions, bookendPictures, removalPhrase, bytes } from "./library.js";
 import { analysisOf, keptAnalysisOf, soundOf } from "./songs.js";
 import { pictureRect } from "./ffmpeg.js";
-import { config, setConfig, version, log, logFile, pointTo } from "./paths.js";
+import { config, setConfig, version, log, logFile, pointTo, argument } from "./paths.js";
 import { shapes, stretch } from "../shared/video.js";
 import { FrameRate } from "../shared/timing.js";
 import * as series from "../shared/series.js";
@@ -32,6 +32,8 @@ import { measure, moveFolder } from "./move.js";
 import { driveHolding, isInDrive, libraryName } from "../shared/drive.js";
 import { findCards } from "./cards.js";
 import { marked } from "../shared/cards.js";
+import { newPack, withTest, limitsChecked, defaultLimits } from "../shared/batteries.js";
+import { reworked } from "../shared/whoopstor.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const mac = process.platform === "darwin";
@@ -258,6 +260,26 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
   }
 
   const busy = () => (job ? { problem: "Wait for what is being made to finish first." } : null);
+  /** The batteries as kept, with any WhoopStor charge worked out an older way worked out again
+   *  from its readings, and kept so. */
+  function batteriesNow() {
+    const kept = library.batteries;
+    let changed = false;
+    for (const [id, test] of Object.entries(kept.tests)) {
+      const again = reworked(test);
+      if (again !== test) {
+        kept.tests[id] = again;
+        changed = true;
+      }
+    }
+    if (changed) library.keepBatteries(kept);
+    return kept;
+  }
+
+  /** The program standing in for the battery tester, while one is running (see testerSim). */
+  let testerSim = null;
+  /** The computer kept awake while a cycle test runs on the WhoopStor (see stayAwake). */
+  let awake = null;
 
   const api = {
     /** What every page needs to draw itself. */
@@ -299,6 +321,11 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
         lightPlayback: config().lightPlayback === true,
         programs: kept.programsNow(),
         radio: radio.radioNow(),
+        batteries: batteriesNow(),
+        /** Started with `--tester-sim <command>`: the battery page talks to that program in place of a tester. */
+        testerSim: Boolean(argument("--tester-sim")),
+        /** Started with `--whoopstor-sim <speed>`: the battery page has a pretend WhoopStor charger. */
+        whoopstorSim: argument("--whoopstor-sim") ? Number(argument("--whoopstor-sim")) || 1 : null,
         spotify: music.spotifyNow(),
         drive: drive.now(),
         job,
@@ -785,6 +812,121 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
 
     beep() {
       shell.beep();
+    },
+
+    // The battery tester (shared/batteries.js). The page talks to the tester itself, over serial;
+    // these keep the pilot's packs and what was measured on each.
+
+    /** Adds a pack: { name, mah, brand }. */
+    addPack(details) {
+      const made = newPack(details ?? {});
+      if (made.problem) return { problem: made.problem };
+      const kept = library.batteries;
+      kept.packs[made.pack.id] = made.pack;
+      library.keepBatteries(kept);
+      return { state: api.state(), pack: made.pack };
+    },
+
+    /** Renames a pack, changes its size, or retires it (retired: true) or brings it back (false). */
+    changePack(id, patch = {}) {
+      const kept = library.batteries;
+      const pack = kept.packs[id];
+      if (!pack) return { problem: "That pack isn't there any more." };
+      const next = { ...pack };
+      if (typeof patch.name === "string" && patch.name.trim() !== "") next.name = patch.name.trim();
+      if (Number.isFinite(Number(patch.mah)) && Number(patch.mah) >= 50 && Number(patch.mah) <= 5000) next.mah = Math.round(Number(patch.mah));
+      if (typeof patch.brand === "string") next.brand = patch.brand.trim();
+      if (patch.retired === true && !pack.retired) next.retired = new Date().toISOString();
+      if (patch.retired === false) next.retired = null;
+      if (Object.hasOwn(patch, "call")) next.call = ["race", "fun", "retire"].includes(patch.call) ? patch.call : null;
+      kept.packs[id] = next;
+      library.keepBatteries(kept);
+      return { state: api.state() };
+    },
+
+    /** Forgets a pack and everything measured on it. */
+    removePack(id) {
+      const kept = library.batteries;
+      delete kept.packs[id];
+      for (const [testId, test] of Object.entries(kept.tests)) if (test.pack === id) delete kept.tests[testId];
+      library.keepBatteries(kept);
+      return { state: api.state() };
+    },
+
+    /** Keeps what a test measured on a pack (from shared/batteries.js's keptFrom, or a charge on the
+     *  WhoopStor from shared/whoopstor.js's keptCharge, which may not have a pack yet). */
+    keepBatteryTest(test) {
+      const kinds = new Set(["sag", "capacity", "charge", "storage", "cycle"]);
+      const waiting = test?.source === "whoopstor" && test.pack === null;
+      if (!test || !kinds.has(test.kind) || (!waiting && !library.batteries.packs[test.pack])) return { problem: "That test isn't for a pack the Hangar knows." };
+      library.keepBatteries(withTest(library.batteries, test));
+      return { state: api.state() };
+    },
+
+    /** Keeps the computer from sleeping while a cycle test runs on the WhoopStor, which needs the app
+     *  to send the charger its next step, and lets it sleep again. */
+    stayAwake(on) {
+      if (on && awake === null) awake = powerSaveBlocker.start("prevent-app-suspension");
+      if (!on && awake !== null) {
+        powerSaveBlocker.stop(awake);
+        awake = null;
+      }
+      return { awake: awake !== null };
+    },
+
+    /** Sets where a pack's status changes (shared/batteries.js's defaultLimits), or puts them back
+     *  to the starting points with null. */
+    setBatteryLimits(limits) {
+      const checked = limits === null ? { ...defaultLimits } : limitsChecked(limits);
+      if (!checked) return { problem: "Those limits don't go together: FUN has to be looser than RACE, resistance between half and 3 times typical, and capacity between 30% and 100%." };
+      library.keepBatteries({ ...library.batteries, limits: checked });
+      return { state: api.state() };
+    },
+
+    /** Says which pack a charge on the WhoopStor was. */
+    assignBatteryTest(id, pack) {
+      const kept = library.batteries;
+      if (!kept.tests[id]) return { problem: "That charge isn't there any more." };
+      if (!kept.packs[pack]) return { problem: "That pack isn't there any more." };
+      library.keepBatteries(withTest(kept, { ...kept.tests[id], pack }));
+      return { state: api.state() };
+    },
+
+    /** Forgets one charge or test, such as a charge of a pack that isn't one of the pilot's. */
+    forgetBatteryTest(id) {
+      const kept = library.batteries;
+      delete kept.tests[id];
+      library.keepBatteries(kept);
+      return { state: api.state() };
+    },
+
+    /** A program standing in for the tester, for trying the battery page without one: started with
+     *  `--tester-sim <command>`. It reads the tester's commands a line at a time and answers as the
+     *  tester would. "start" starts it, "send" passes it a line, "stop" ends it. */
+    testerSim(action, line = "") {
+      const command = argument("--tester-sim");
+      if (!command) return false;
+      if (action === "start" && !testerSim) {
+        testerSim = spawn(command, { shell: true, stdio: ["pipe", "pipe", "ignore"] });
+        let partial = "";
+        testerSim.stdout.setEncoding("utf8");
+        testerSim.stdout.on("data", (text) => {
+          partial += text;
+          const lines = partial.split("\n");
+          partial = lines.pop();
+          for (const one of lines) tell("testerLine", one);
+        });
+        testerSim.on("exit", () => {
+          testerSim = null;
+          tell("testerLine", null);
+        });
+      }
+      if (action === "send" && testerSim) testerSim.stdin.write(`${line}\n`);
+      if (action === "stop" && testerSim) {
+        testerSim.kill();
+        testerSim = null;
+      }
+      return true;
     },
 
     /** A clip played unevenly in the marker editor: written down with what the computer's graphics

@@ -55,7 +55,7 @@ export const tools = {
     summary: "Betaflight's own app, here in the Hangar: plug a flight controller in to set it up, tune it and flash it. It is always their newest release.",
   },
   elrsFlasher: {
-    title: "ExpressLRS Web Flasher", icon: "bolt", soon: null,
+    title: "ExpressLRS Web Flasher", short: "ExpressLRS Flasher", icon: "bolt", soon: null,
     summary: "ExpressLRS's own flasher, here in the Hangar: update a transmitter module, a receiver or a backpack over USB or through the flight controller.",
   },
   elrsConfigurator: {
@@ -87,6 +87,10 @@ export const tools = {
     title: "Radio backups", icon: "copies", soon: null,
     summary: "Everything on your radio's SD card, its models and settings with its screens, themes, scripts and sounds, copied whenever it is plugged in with USB Storage chosen.",
   },
+  batteryTester: {
+    title: "Batteries", icon: "battery", soon: null,
+    summary: "Your 1S packs by their numbers: each charge on your WhoopStor kept with its pack, with what went in and the pack's resistance, so the tired ones stand out.",
+  },
 };
 
 /** The first screen lays the tools out by suite: what a set of tools is for. */
@@ -114,6 +118,16 @@ export const suites = [
     ],
   },
   { title: "Any footage", summary: "For flying that isn't part of a series.", tools: ["anyFootage", "upload"], links: [] },
+  { title: "Batteries", summary: "Your packs, and which of them still hold up.", tools: ["batteryTester"], links: [] },
+];
+
+/** The sidebar down the left of every page lists the tools that can be opened, by suite. The last
+ *  two suites share a heading, as each has only one tool to open so far. */
+export const sideGroups = [
+  { title: "RaceGOW", tools: ["videoCreator", "leaderboards"] },
+  { title: "Firmware & setup", tools: ["betaflight", "elrsFlasher", "elrsConfigurator"] },
+  { title: "Radio", tools: ["edgetxCompanion", "radioBackups"] },
+  { title: "Footage & batteries", tools: ["upload", "batteryTester"] },
 ];
 
 /** What a new pilot needs to know, written once. The welcome note shows it the first time the app is opened. */
@@ -216,5 +230,7 @@ export const guide = {
     "Pilot & settings can keep your library in Google Drive, so that your Mac and your PC open the same one. It needs Google's own Drive for desktop on each computer, which does the uploading and brings down what the other computer did. Press Keep my library in Google Drive on the computer that has your tracks first: it moves the library there. Then press it on the other, which opens that same library.",
     "Everything lives in the track's folder: Raw files, csv markers and music go in; landscape and vertical are what gets made. The tracks sit in your library folder, which Pilot & settings shows and can change.",
     "New versions are picked up from Pilot & settings, where Check for updates downloads and installs one in place.",
+    "Batteries, on the first screen, keeps your 1S packs by the numbers written on them. With a WhoopStor V3 that has WS3 Unlocked or OpenWS3 on it plugged into this computer's USB, it shows the six ports as they charge, asks which pack is in each, and keeps every charge with its pack: the port, the current, what went in and the pack's resistance, worked out as the charge starts. Start sets each port to 2C for the pack in it and starts the charger; Stop stops it; Cycle test charges, rests, takes each pack down to storage on the charger's own load and back, to see what each takes in and gives back. How a pack is charged stays the charger's own. Each pack is RACE, FUN or RETIRE against your typical pack of its size, by limits you can change, and the Hangar suggests limits from your own calls on your packs. The resistance includes the port's own plug and lead, so compare packs on the same port. Power the WhoopStor from its XT60 or barrel socket with DISABLE USB POWER set to YES before plugging it into this computer.",
+    "The same page works with a battery tester board of your own, once there is one: a Raspberry Pi Pico on a board that charges a 1S pack, pulls about 6.5 A from it for 2 seconds to measure how far it sags, and can drain it to measure what it holds.",
   ],
 };

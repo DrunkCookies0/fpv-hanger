@@ -11,6 +11,10 @@
 //   electron . --self-test [--report <file>]     tries itself out from start to finish on a library it
 //                                                makes for the purpose, shows no window, and writes
 //                                                down how it went. Nothing of the pilot's is opened.
+//   electron . --tester-sim <command>            the battery page talks to that program, a line at a
+//                                                time, in place of a battery tester
+//   electron . --whoopstor-sim <speed>           the battery page has a pretend WhoopStor charger in
+//                                                place of one, its time running <speed> times fast
 
 import { app, BrowserWindow, ipcMain, shell, Menu, session } from "electron";
 import { writeFileSync, mkdirSync, mkdtempSync, existsSync, copyFileSync, readdirSync, rmSync } from "node:fs";
@@ -24,6 +28,8 @@ import { Library } from "./library.js";
 import { clearStaging } from "./landing.js";
 import { VideoMaker } from "./videos.js";
 import { makeApi } from "./api.js";
+import { testerVendor } from "../shared/batteries.js";
+import { isWhoopstor } from "../shared/whoopstor.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const mac = process.platform === "darwin";
@@ -180,6 +186,23 @@ app.whenReady().then(async () => {
 
   // Nothing in the window is allowed to ask for the camera, the microphone or the like.
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, answer) => answer(false));
+  // The two devices the app's own page may reach: the battery tester, a Raspberry Pi Pico on a serial
+  // port, and the WhoopStor charger, on USB HID with WS3 Unlocked or OpenWS3 on it. When the page asks
+  // for one, it is picked without a list, as there is only one of each.
+  const isTester = (port) => Number(port?.vendorId) === testerVendor || Number.parseInt(port?.vendorId, 16) === testerVendor;
+  // A copy that shows no window, for a picture or a check, never reaches a real charger: one may be
+  // in the middle of a test. Its checks use the pretend one.
+  const ours = { serial: isTester, hid: (device) => !unseen && isWhoopstor(device) };
+  session.defaultSession.setPermissionCheckHandler((contents, permission) => Object.hasOwn(ours, permission) && contents?.getURL() === page);
+  session.defaultSession.setDevicePermissionHandler((details) => Object.hasOwn(ours, details.deviceType) && String(details.origin).startsWith("file://") && ours[details.deviceType](details.device));
+  session.defaultSession.on("select-serial-port", (event, ports, _contents, choose) => {
+    event.preventDefault();
+    choose(ports.find(isTester)?.portId ?? "");
+  });
+  session.defaultSession.on("select-hid-device", (event, details, choose) => {
+    event.preventDefault();
+    choose(details.deviceList.find(ours.hid)?.deviceId ?? "");
+  });
 
   menu(tell);
   app.on("second-instance", () => {

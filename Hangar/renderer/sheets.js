@@ -9,7 +9,7 @@ const layer = () => document.getElementById("sheets");
 /** Nothing under a sheet can be reached while it is up, by pointer or by keyboard. */
 function settle() {
   const covered = open.length > 0;
-  for (const id of ["stage", "status", "editor"]) document.getElementById(id)?.toggleAttribute("inert", covered);
+  for (const id of ["side", "stage", "status", "editor"]) document.getElementById(id)?.toggleAttribute("inert", covered);
   open.forEach((sheet, index) => sheet.backdrop.toggleAttribute("inert", index < open.length - 1));
 }
 

@@ -1,5 +1,6 @@
-// The Video Creator: a rail of its groups, the open group's races beside it, its first page with
-// everything at a glance, and a track's page with its runs, its clips and its entry form.
+// The Video Creator: a rail of its groups, beside the Hangar's own sidebar, the open group's races
+// beside that, its first page with everything at a glance, and a track's page with its runs, its
+// clips and its entry form.
 
 import { app, ask, go, open, refresh, render, eventOf, trackName, loadForm } from "../core.js";
 import { h, icon, label, primary, secondary, plain, testCopyBadge, when } from "../ui.js";
@@ -94,7 +95,6 @@ function rail(current) {
   const onFirst = app.page.name === "tracks";
   const button = (classes, props, ...inside) => h(`button.rail-btn${classes}`, { type: "button", ...props }, ...inside);
   return h("nav.rail", { "aria-label": "Groups" },
-    button(".rail-back", { help: "Back to all the tools", "aria-label": "Back to the Hangar", probe: "tool hangar", onclick: () => go({ name: "home" }) }, icon("chevronLeft", 14)),
     button(`.rail-home${onFirst ? ".on" : ""}`, { help: "Your flying: everything in the Video Creator", "aria-label": "Your flying", probe: "creator home", onclick: () => go({ name: "tracks" }) }, icon("home", 18)),
     h("span.rail-line"),
     h("div.rail-groups", { "data-scroll": "rail" },
@@ -104,10 +104,6 @@ function rail(current) {
       }, groupBadge(event))),
       !state.libraryAway && button(".rail-add", { help: "New group: a race series or a club you fly with, with its own races, its own name on the timer and its own ID.", "aria-label": "New group", probe: "new group", onclick: act.newEvent }, icon("plus", 16)),
     ),
-    h("span.spacer"),
-    button("", { help: "Pilot & settings", "aria-label": "Pilot & settings", probe: "tool settings", onclick: () => open({ name: "settings" }) },
-      icon("gear", 17), state.update?.kind === "available" && h("span.rail-dot")),
-    button("", { help: "How it works", "aria-label": "How it works", probe: "tool guide", onclick: () => open({ name: "guide" }) }, icon("book", 17)),
   );
 }
 
@@ -151,14 +147,6 @@ function groupColumn(event) {
     h("div.column-list", { "data-scroll": "side" },
       rows,
       !event.hasSeason && h("button.side-add", { type: "button", probe: "new track", onclick: () => act.newRace(event.folder) }, icon("plus"), event.isSeason ? "New track" : "New race"),
-    ),
-    h("div.side-foot",
-      updatePill(),
-      state.settings.pilot === ""
-        ? h("button.side-pilot.add", { type: "button", onclick: () => open({ name: "settings" }) }, "Add your pilot name")
-        : h("div.side-pilot", state.settings.pilot),
-      h("div.side-version", `FPV Hangar v${state.version}`),
-      state.testCopy && testCopyBadge(),
     ),
   );
 }

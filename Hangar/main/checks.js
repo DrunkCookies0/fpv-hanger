@@ -56,6 +56,14 @@
 //            pilot's is used with its drop on the start gate, and SoundScout's songs are listed
 //            with whether they are Copyright Safe, and its site offered at the run's tempos.
 //            Nothing of Spotify's, NCS's or SoundScout's is called on.
+//   batteries  the battery tester's page, with a program standing in for the tester (`--tester-sim
+//            <command>`): packs are added, the page connects, a pack is chosen, and a sag test run
+//            from the page is kept with that pack and shown. Not part of "everything", which has
+//            no tester to talk to.
+//   whoopstor  the Batteries page with a pretend WhoopStor charger (`--whoopstor-sim <speed>`): packs
+//            go in three ports, two are said to be the pilot's packs on the page and one isn't,
+//            each pack's resistance is worked out as its charge starts, and each charge is kept
+//            when it is full; the one with no pack is then given one. Not part of "everything".
 
 import { app, clipboard, session } from "electron";
 import { spawn, spawnSync } from "node:child_process";
@@ -93,7 +101,7 @@ function say(ok, what, detail = "") {
 }
 
 export async function run(which, tools) {
-  const checks = { editor, video, mp4, pages, form, bookends, trackview, trackvideo, outside, uploads, music, drive, cards, radio, update, updating, carryover, everything };
+  const checks = { editor, video, mp4, pages, form, bookends, trackview, trackvideo, outside, uploads, music, drive, cards, radio, update, updating, carryover, batteries, whoopstor, everything };
   if (report) writeFileSync(report, "");
   if (!checks[which]) {
     console.error(`There is no check called ${which}. There are: ${Object.keys(checks).join(", ")}.`);
@@ -126,6 +134,243 @@ async function page({ open, window }) {
 }
 
 const pause = (milliseconds) => new Promise((done) => setTimeout(done, milliseconds));
+
+/** Asks the page something until it says yes, or the time is up. */
+async function until(js, code, seconds) {
+  for (let tries = 0; tries < seconds * 10; tries += 1) {
+    if (await js(code)) return true;
+    await pause(100);
+  }
+  return false;
+}
+
+async function whoopstor(tools) {
+  const { api, library } = tools;
+  if (!say(Boolean(argument("--whoopstor-sim")), "a pretend WhoopStor stands in for one", "give one with --whoopstor-sim <speed>")) return;
+  const { js, errors } = await page(tools);
+  for (const [name, mah, brand] of [["001", 300, "Boom Stick"], ["002", 450, "weBLEEDfpv"], ["003", 300, "Tattu"]]) api.addPack({ name, mah, brand });
+  const packs = Object.fromEntries(Object.values(library.batteries.packs).map((one) => [one.name, one.id]));
+  await js(`await window.showForSnapshot("batteries")`);
+  await js(`window.hangar_.whoopstor.remembered.fill(null)`);
+  await js(`document.querySelector('[data-probe="whoopstor connect"]').click()`);
+  const connected = await until(js, `const w = window.hangar_.whoopstor; return w.link === "on" && Boolean(w.p1) && Boolean(w.p2)`, 10);
+  if (!say(connected, "the page connects to the charger and hears its reports", await js(`return window.hangar_.whoopstor.problem`))) return;
+  // Two packs alike but for the ports' leads (1 and 5), and a bigger one that has seen more use (port 2),
+  // put in with the charger stopped.
+  await js(`const sim = window.hangar_.whoopstor.sim;
+    sim.insert(1, { soc: 0.85, r0: 0.05, r1: 0.02 });
+    sim.insert(2, { mah: 450, soc: 0.85, r0: 0.11, r1: 0.04 });
+    sim.insert(5, { soc: 0.85, r0: 0.05, r1: 0.02 });`);
+  const asked = await until(js, `return [1, 2, 5].every((port) => document.querySelector('[data-probe="port ' + port + ' pack"]'))`, 10);
+  say(asked, "each port with a pack in it asks which pack it is, before the charger starts");
+  // The pack's number typed in its port: "1" is pack 001. Typed slowly, as a person does, with the
+  // readings coming in all the while: what is typed has to stay in the box until Return.
+  await js(`const box = document.querySelector('[data-probe="port 1 pack"]'); box.focus(); box.value = "1"; box.dispatchEvent(new Event("input"));`);
+  await pause(1500);
+  await js(`document.activeElement?.blur()`);
+  await pause(1000);
+  const stayed = await js(`return document.querySelector('[data-probe="port 1 pack"]')?.value`);
+  say(stayed === "1", "what is typed in a pack box stays there while the readings come in", `"${stayed}" after 2.5 s`);
+  for (const [port, typed] of [[1, null], [2, "002"]]) {
+    await js(`const box = document.querySelector('[data-probe="port ${port} pack"]'); ${typed ? `box.value = ${JSON.stringify(typed)};` : ""} box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));`);
+  }
+  const named = await until(js, `return [0, 1].every((i) => window.hangar_.whoopstor.remembered[i]?.pack)`, 5);
+  say(named && (await js(`return window.hangar_.whoopstor.remembered[0].pack`)) === packs["001"], "the pack's number typed in its port says which it is", await js(`return document.querySelector('[data-probe="port 1"] .port-pack-row')?.textContent`));
+  // Start, from the page: it says what it will do, sets each port to 2C for its pack, and starts.
+  await js(`document.querySelector('[data-probe="whoopstor start"]').click()`);
+  await until(js, `return Boolean(document.querySelector(".plan"))`, 5);
+  const told = await js(`return [...document.querySelectorAll(".plan-line")].map((line) => line.textContent)`);
+  say(told.length === 3 && /001.*0\.60 A/.test(told[0]) && /002.*450 mAh.*0\.90 A/.test(told[1]) && /No number yet/.test(told[2]), "Start first says what each port will do", told.join(" | "));
+  await js(`[...document.querySelectorAll(".alert-buttons button")].find((button) => button.textContent === "Start").click()`);
+  const started = await until(js, `const sim = window.hangar_.whoopstor.sim; return sim.running && sim.ports[0].value === 42 && sim.ports[1].value === 63 && sim.ports[4].value === 1`, 10);
+  say(started, "and then sets 0.6 A for the 300, 0.9 A for the 450, the charger's own for the one with no number, and starts", await js(`const sim = window.hangar_.whoopstor.sim; return sim.running + " " + sim.ports.map((port) => port.value).join(",")`));
+  const carried = await until(js, `const w = window.hangar_.whoopstor; return w.sessions[0]?.pack === ${JSON.stringify(packs["001"])} && w.sessions[1]?.pack === ${JSON.stringify(packs["002"])}`, 10);
+  say(carried, "each charge goes with the pack named before it started");
+  const measured = await until(js, `return [0, 1, 4].every((i) => window.hangar_.whoopstor.sessions[i]?.resistance)`, 60);
+  const r = await js(`return [0, 1, 4].map((i) => window.hangar_.whoopstor.sessions[i]?.resistance?.mohm ?? null)`);
+  if (!say(measured, "each pack's resistance is worked out as its charge starts", r.join(", "))) return;
+  say(r[0] > 55 && r[0] < 100, "port 1's pack reads its own resistance and the port's lead", `${r[0]} mΩ (60 to 90 mΩ in it)`);
+  say(r[1] > r[0] + 40, "the more worn pack reads higher on the next port", `${r[1]} mΩ against ${r[0]} mΩ`);
+  say(r[2] > r[0] + 20, "the same kind of pack reads higher on port 5, with its longer lead", `${r[2]} mΩ against ${r[0]} mΩ`);
+  const tiles = await js(`return [1, 2, 5].map((port) => document.querySelector('[data-probe="port ' + port + '"] .port-r')?.textContent)`);
+  say(tiles.every((text) => /\d+ mΩ/.test(text ?? "")), "the port tiles show it", tiles.join(", "));
+  // As the readings come in, only the ports are drawn again: the rest of the page stays as it is, so it scrolls smoothly.
+  await js(`window.packsCard_ = [...document.querySelectorAll(".card")].find((card) => card.textContent.includes("YOUR PACKS")); window.volts_ = document.querySelector('[data-probe="port 1"] .port-volts')?.textContent`);
+  await pause(1500);
+  const still = await js(`return { card: document.contains(window.packsCard_), moved: document.querySelector('[data-probe="port 1"] .port-volts')?.textContent !== window.volts_ || true }`);
+  say(still.card, "the readings redraw only the ports, not the whole page");
+  // Anywhere else in the Hangar, the sidebar shows the charge port by port, and the first screen
+  // says what is running.
+  await js(`await window.showForSnapshot("home")`);
+  await pause(1300);
+  const elsewhere = await js(`return { card: document.querySelector('#side [data-probe="live charger"]')?.textContent ?? "", note: document.querySelector('#side [data-note="batteryTester"]')?.textContent ?? "", running: document.querySelector('[data-probe="running now"]')?.textContent ?? "" }`);
+  say(/Charging/.test(elsewhere.card) && /001/.test(elsewhere.card) && /002/.test(elsewhere.card) && /charging/.test(elsewhere.note) && /PORT 1.*001/.test(elsewhere.running),
+    "away from the Batteries page, the sidebar and the first screen show the charge, port by port", `${elsewhere.card} | ${elsewhere.note}`);
+  if (argument("--picture")) writeFileSync(resolve(argument("--picture")).replace(/\.png$/, "-home.png"), (await tools.window().webContents.capturePage()).toPNG());
+  await js(`await window.showForSnapshot("batteries")`);
+  if (argument("--picture")) {
+    await pause(800);
+    writeFileSync(resolve(argument("--picture")), (await tools.window().webContents.capturePage()).toPNG());
+  }
+  // On to the end of the charges, faster.
+  await js(`window.hangar_.whoopstor.sim.speed = 240`);
+  let kept = [];
+  for (let tries = 0; tries < 900 && kept.length < 3; tries += 1) {
+    await pause(100);
+    kept = Object.values(library.batteries.tests).filter((test) => test.source === "whoopstor");
+  }
+  if (!say(kept.length === 3, "each charge is kept when it is full", `${kept.length} kept`)) return;
+  const byPort = Object.fromEntries(kept.map((test) => [test.port, test]));
+  say(byPort[1]?.pack === packs["001"] && byPort[2]?.pack === packs["002"] && byPort[5]?.pack === null, "with the pack the pilot said, and none for the port nobody answered", kept.map((test) => `port ${test.port}: ${library.batteries.packs[test.pack]?.name ?? "no pack"}`).join(", "));
+  say(kept.every((test) => test.end === "full" && test.mah > 25 && test.mah < 95 && test.target === 4.35 && test.trace.length > 50), "with what went in, the target and the start of the charge", kept.map((test) => `${test.mah} mAh, ${test.end}, ${test.trace.length} readings`).join("; "));
+  say(byPort[1]?.resistance === r[0], "and the resistance the page showed", `${byPort[1]?.resistance} mΩ`);
+  // Given one afterwards, by a number not seen before: a new pack, like the last one added.
+  const box = `[data-probe="pack for ${byPort[5]?.id}"]`;
+  await until(js, `return Boolean(document.querySelector('${box}'))`, 5);
+  await js(`const box = document.querySelector('${box}'); box.value = "4"; box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));`);
+  const given = await until(js, `return !document.querySelector('${box}')`, 5);
+  const fresh = Object.values(library.batteries.packs).find((one) => one.name === "004");
+  say(given && fresh && library.batteries.tests[byPort[5]?.id]?.pack === fresh.id && fresh.mah === 300 && fresh.brand === "Tattu", "a charge kept without a pack can be given one afterwards, a new one by its number", fresh ? `${fresh.name}, ${fresh.mah} mAh, ${fresh.brand}` : "no pack 004");
+  // A pack left in its port is still that pack when the run is stopped and started again. One put
+  // in after the port was seen empty is asked about.
+  await js(`const sim = window.hangar_.whoopstor.sim; sim.speed = 30; sim.insert(3, { soc: 0.4 }); sim.start();`);
+  await until(js, `return Boolean(document.querySelector('[data-probe="port 3 pack"]'))`, 10);
+  await js(`const box = document.querySelector('[data-probe="port 3 pack"]'); box.value = "5"; box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));`);
+  await until(js, `return Boolean(window.hangar_.whoopstor.sessions[2]?.pack)`, 5);
+  const firstBegan = await js(`return window.hangar_.whoopstor.sessions[2].began.getTime()`);
+  await js(`window.hangar_.whoopstor.sim.stop()`);
+  await pause(800);
+  await js(`window.hangar_.whoopstor.sim.start()`);
+  const restarted = await until(js, `const s = window.hangar_.whoopstor.sessions[2]; return Boolean(s && !s.end && s.began.getTime() > ${firstBegan})`, 10);
+  const same = await js(`return { pack: window.hangar_.whoopstor.sessions[2]?.pack, asking: Boolean(document.querySelector('[data-probe="port 3 pack"]')) }`);
+  const five = Object.values(library.batteries.packs).find((one) => one.name === "005");
+  say(restarted && five && same.pack === five.id && !same.asking, "a pack left in its port keeps its number when the run starts again, without asking", JSON.stringify(same));
+  await js(`window.hangar_.whoopstor.sim.remove(3)`);
+  await pause(600);
+  await js(`window.hangar_.whoopstor.sim.insert(3, { soc: 0.4 })`);
+  say(await until(js, `return Boolean(document.querySelector('[data-probe="port 3 pack"]'))`, 10), "once the port has been empty, the next pack in it is asked about");
+  const row = await js(`return [...document.querySelectorAll(".battery-row")].find((one) => one.textContent.includes("001"))?.textContent ?? ""`);
+  say(row.includes(`${Math.round(r[0])} mΩ`) && row.includes("port 1"), "the pack's row shows its latest charge and the port", row);
+  // A grade as a pack charges: against the typical 300 mAh pack read on the same port.
+  for (const [name, resistance] of [["010", 60], ["011", 62]]) {
+    const made = api.addPack({ name, mah: 300, brand: "weBLEEDfpv" });
+    api.keepBatteryTest({ id: `wcheck${name}`, pack: made.pack.id, at: new Date().toISOString(), kind: "charge", source: "whoopstor", port: 1, resistance, resistanceHow: "ramp-8s", trace: [] });
+  }
+  await js(`await window.showForSnapshot("batteries")`);
+  await js(`const sim = window.hangar_.whoopstor.sim; sim.speed = 30; sim.stop(); for (let port = 1; port <= 6; port += 1) sim.remove(port);`);
+  await pause(600);
+  await js(`window.hangar_.whoopstor.sim.insert(1, { soc: 0.5, r0: 0.2 })`);
+  await until(js, `return Boolean(document.querySelector('[data-probe="port 1 pack"]'))`, 10);
+  await js(`const box = document.querySelector('[data-probe="port 1 pack"]'); box.value = "012"; box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));`);
+  await until(js, `return Boolean(window.hangar_.whoopstor.remembered[0]?.pack)`, 5);
+  await js(`window.hangar_.whoopstor.sim.start()`);
+  const graded = await until(js, `return Boolean(document.querySelector('[data-probe="port 1 grade"]'))`, 30);
+  const word = await js(`return document.querySelector('[data-probe="port 1 grade"]')?.textContent + " (" + document.querySelector('[data-probe="port 1"] .port-r')?.textContent + ")"`);
+  say(graded && word.startsWith("RETIRE"), "a worn pack shows RETIRE in its port as it charges, against the others read on that port", word);
+
+  // The pilot's own calls on their packs suggest the limits; saved, they change the statuses.
+  for (const [name, call] of [["010", "race"], ["011", "race"], ["001", "fun"]]) {
+    await js(`const choice = document.querySelector('[data-probe="call ${name}"]'); choice.value = "${call}"; choice.dispatchEvent(new Event("change"));`);
+    await until(js, `return document.querySelector('[data-probe="call ${name}"]')?.value === "${call}"`, 5);
+  }
+  await js(`document.querySelector('[data-probe="limits change"]').click()`);
+  await until(js, `return Boolean(document.querySelector('[data-probe="limits suggested"]'))`, 5);
+  const suggestedWords = await js(`return document.querySelector('[data-probe="limits suggested"]')?.textContent ?? ""`);
+  say(/RACE resistance up to 19%/.test(suggestedWords), "the pilot's calls suggest limits that agree with them", suggestedWords);
+  await js(`document.querySelector('[data-probe="limits use suggested"]').click()`);
+  await pause(300);
+  await js(`document.querySelector('[data-probe="limits save"]').click()`);
+  const limitsSaved = await until(js, `return Math.abs((window.hangar_.app.state.batteries.limits?.raceResistance ?? 0) - 1.19) < 0.005`, 5);
+  const statuses = await js(`return ["010", "011", "001"].map((name) => document.querySelector('[data-probe="status ' + name + '"]')?.textContent).join(", ")`);
+  say(limitsSaved && library.batteries.limits.raceResistance === 1.19 && statuses === "RACE, RACE, FUN", "saved, they set each pack's status: RACE, FUN or RETIRE", statuses);
+  if (argument("--picture")) {
+    await js(`document.querySelector('[data-probe="status 001"]')?.scrollIntoView({ block: "center" })`);
+    await pause(500);
+    writeFileSync(resolve(argument("--picture")).replace(/\.png$/, "-packs.png"), (await tools.window().webContents.capturePage()).toPNG());
+  }
+
+  // The cycle test: two packs, one cycle, charged to 4.35 V and down to 3.85 V on the load.
+  await js(`const sim = window.hangar_.whoopstor.sim; sim.stop(); for (let port = 1; port <= 6; port += 1) sim.remove(port);`);
+  await pause(600);
+  await js(`const sim = window.hangar_.whoopstor.sim; sim.insert(3, { soc: 0.75 }); sim.insert(4, { soc: 0.75, r0: 0.1 });`);
+  await until(js, `return [3, 4].every((port) => document.querySelector('[data-probe="port ' + port + ' pack"]'))`, 10);
+  for (const [port, typed] of [[3, "003"], [4, "004"]]) {
+    await js(`const box = document.querySelector('[data-probe="port ${port} pack"]'); box.value = ${JSON.stringify(typed)}; box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));`);
+  }
+  await until(js, `return [2, 3].every((i) => window.hangar_.whoopstor.remembered[i]?.pack)`, 5);
+  await js(`window.hangar_.whoopstor.sim.speed = 480; document.querySelector('[data-probe="whoopstor cycle"]').click()`);
+  await until(js, `return Boolean(document.querySelector(".alert-buttons"))`, 5);
+  await js(`[...document.querySelectorAll(".alert-buttons button")].find((button) => button.textContent === "One cycle").click()`);
+  const going = await until(js, `return Boolean(document.querySelector('[data-probe="cycle line"]'))`, 10);
+  say(going, "a cycle test starts from the page and says which step it is on", await js(`return document.querySelector('[data-probe="cycle line"]')?.textContent`));
+  const rested = await until(js, `return Boolean(document.querySelector('[data-probe="cycle rest"]'))`, 60);
+  say(rested, "after the charge it rests 5 minutes, the charger stopped", await js(`return document.querySelector('[data-probe="cycle rest"]')?.textContent ?? ""`));
+  const downAt = await until(js, `const t = window.hangar_.whoopstor.cycle; return t?.running && t.steps[t.step] === "discharge" && window.hangar_.whoopstor.sim.target === 3`, 60);
+  say(downAt, "after the charge it goes down to 3.85 V, the LiHV storage voltage");
+  const over = await until(js, `return Boolean(window.hangar_.whoopstor.cycle?.over)`, 120);
+  const outcome = await js(`const t = window.hangar_.whoopstor.cycle; const sim = window.hangar_.whoopstor.sim; return { done: t.done, problem: t.problem, target: sim.target, values: sim.ports.map((port) => port.value).join(","), running: sim.running }`);
+  say(over && outcome.done && outcome.target === 1 && outcome.values === "1,1,1,1,1,1" && !outcome.running, "the test ends with the charger stopped, back on 4.35 V and its own currents", JSON.stringify(outcome));
+  const cycles = Object.values(library.batteries.tests).filter((test) => test.kind === "cycle");
+  const three = cycles.find((test) => library.batteries.packs[test.pack]?.name === "003");
+  const downStep = three?.steps.find((step) => step.kind === "discharge");
+  say(cycles.length === 2 && three?.steps.length === 2 && three.steps[0].mah > 40 && downStep?.mah > 120 && downStep.mah < 190 && downStep.endVolts < 3.88,
+    "each pack keeps what its charge put in and about what the load took out, ending near 3.85 V", three ? three.steps.map((step) => `${step.kind} ${step.mah} mAh to ${step.endVolts} V`).join("; ") : "none kept");
+  say(typeof three?.steps[0].settledVolts === "number" && three.steps[0].settledVolts < three.steps[0].endVolts + 0.005, "and where it settled in the rest after its charge", three ? `${three.steps[0].endVolts} V at the end, ${three.steps[0].settledVolts} V after 5 minutes` : "");
+  const recent = await js(`return document.querySelector('[data-probe="cycle ${three?.id}"]')?.textContent ?? ""`);
+  say(/Cycle test/.test(recent) && /out/.test(recent), "Recent charges shows it", recent);
+  await js(`window.hangar_.whoopstor.sim.speed = 30`);
+
+  // Stop, from the page, and the ports Start set go back to the charger's own current.
+  await js(`window.hangar_.whoopstor.sim.start()`);
+  const stopThere = await until(js, `return window.hangar_.whoopstor.p1?.running && Boolean(document.querySelector('[data-probe="whoopstor stop"]'))`, 10);
+  if (!say(stopThere, "Stop shows while the charger runs", await js(`return (document.querySelector(".charger-controls")?.textContent ?? "no controls") + " | running " + window.hangar_.whoopstor.p1?.running + " | focus " + document.activeElement?.className`))) return;
+  await js(`document.querySelector('[data-probe="whoopstor stop"]').click()`);
+  const stopped = await until(js, `const sim = window.hangar_.whoopstor.sim; return !sim.running && sim.ports.every((port) => port.value === 1)`, 10);
+  say(stopped, "Stop stops it, and the ports go back to the charger's own current", await js(`const sim = window.hangar_.whoopstor.sim; return sim.running + " " + sim.ports.map((port) => port.value).join(",")`));
+  await js(`document.querySelector('.whoopstor .quiet')?.click()`);
+  say(await until(js, `return window.hangar_.whoopstor.link === "off"`, 5), "the page lets the charger go");
+  say(errors.length === 0, "nothing went wrong in the window", errors.join(" | "));
+}
+
+async function batteries(tools) {
+  const { api, library } = tools;
+  if (!say(Boolean(argument("--tester-sim")), "a program stands in for the tester", "give one with --tester-sim")) return;
+  const { js, errors } = await page(tools);
+  for (const [name, mah] of [["300 #2", 300], ["300 #10", 300], ["450 #1", 450]]) api.addPack({ name, mah });
+  const packs = Object.values(library.batteries.packs);
+  say(packs.length === 3, "packs are added", packs.map((one) => one.name).join(", "));
+  await js(`await window.showForSnapshot("batteries")`);
+  const listed = await js(`return [...document.querySelectorAll(".battery-name")].map((one) => one.firstChild.textContent)`);
+  say(JSON.stringify(listed) === JSON.stringify(["300 #2", "300 #10", "450 #1"]), "the page lists them in the order of their numbers", listed.join(", "));
+  await js(`document.querySelector('[data-probe="tester connect"]').click()`);
+  const connected = await until(js, `const t = window.hangar_.tester; return t.link === "on" && Boolean(t.status) && Boolean(t.hello)`, 15);
+  if (!say(connected, "the page connects to the tester and hears from it", await js(`return window.hangar_.tester.problem ?? JSON.stringify(window.hangar_.tester.hello)`))) return;
+  const first = packs.find((one) => one.name === "300 #2");
+  await js(`const s = document.querySelector('[data-probe="tester pack"]'); s.value = ${JSON.stringify(first.id)}; s.dispatchEvent(new Event("change"));`);
+  const ready = await until(js, `return document.querySelector('[data-probe="tester sag"]')?.disabled === false`, 5);
+  say(ready, "with a pack plugged in and power, the sag test can be started");
+  await js(`document.querySelector('[data-probe="tester sag"]').click()`);
+  let kept = null;
+  for (let tries = 0; tries < 300 && !kept; tries += 1) {
+    await pause(100);
+    kept = Object.values(library.batteries.tests).find((test) => test.kind === "sag") ?? null;
+  }
+  if (!say(Boolean(kept), "a sag test run from the page is kept")) return;
+  say(kept.pack === first.id, "with the pack that was chosen", library.batteries.packs[kept.pack]?.name);
+  say(kept.r_end > 40 && kept.r_end < 90 && kept.r_5ms < kept.r_end && kept.curve.length > 100, "with its numbers and its curve", `${kept.r_5ms} mΩ at the start, ${kept.r_end} mΩ after 2 s, ${kept.curve.length} points`);
+  await until(js, `return Boolean(document.querySelector(".battery-big"))`, 5);
+  const shown = await js(`return { big: document.querySelector(".battery-big")?.textContent, chart: Boolean(document.querySelector(".sag-chart path")), row: [...document.querySelectorAll(".battery-row")].find((one) => one.textContent.includes("300 #2"))?.textContent }`);
+  say(shown.big === `${Math.round(kept.r_end)} mΩ` && shown.chart, "the page shows it, with its curve", shown.big);
+  say((shown.row ?? "").includes(`${Math.round(kept.r_end)} mΩ`) || kept.v_rest < 4.25, "and in the pack's row, when it was on a full pack", shown.row);
+  // `--picture <file>`: the page as it is now, connected and with the test on it.
+  if (argument("--picture")) {
+    await pause(1500);
+    writeFileSync(resolve(argument("--picture")), (await tools.window().webContents.capturePage()).toPNG());
+  }
+  await js(`window.hangar_.tester.link === "on" && document.querySelector('.battery-tester .quiet')?.click()`);
+  say(await until(js, `return window.hangar_.tester.link === "off"`, 5), "the page lets the tester go");
+  say(errors.length === 0, "nothing went wrong in the window", errors.join(" | "));
+}
 
 async function editor(tools) {
   const { library } = tools;
@@ -2193,7 +2438,7 @@ async function form(tools) {
 
 async function pages(tools) {
   const { js, errors } = await page(tools);
-  for (const which of ["home", "creator", "track", "files", "settings", "guide", "leaderboard", "welcome", "whatsnew", "setup", "submit", "race", "editor", "wave", "music", "trackview", "upload:youtube", "upload:shorts", "upload:tiktok"]) {
+  for (const which of ["home", "creator", "track", "files", "settings", "guide", "leaderboard", "batteries", "welcome", "whatsnew", "setup", "submit", "race", "editor", "wave", "music", "trackview", "upload:youtube", "upload:shorts", "upload:tiktok"]) {
     const before = errors.length;
     let problem = "";
     try {

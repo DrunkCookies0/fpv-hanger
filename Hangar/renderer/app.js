@@ -4,12 +4,16 @@
 import { app, ask, hangar, setDraw, render, refresh, update, go, open, loadTrack, loadForm, loadCards, allTracks, whenQuiet } from "./core.js";
 import { h, fill, redraw, icon } from "./ui.js";
 import { mac } from "./words.js";
-import { home } from "./views/home.js";
+import { home, drawHomeLive } from "./views/home.js";
 import { videoCreator } from "./views/creator.js";
 import { leaderboard, settings, guidePage } from "./views/pages.js";
+import { batteries } from "./views/batteries.js";
+import { tester } from "./tester.js";
+import { whoopstor, connectWhenThere } from "./whoopstor.js";
+import { drawSide, drawSideLive, showFind } from "./views/side.js";
 import { showNote, showSetUp } from "./views/notes.js";
 import { heardDrive } from "./views/drive.js";
-import { closeSheets } from "./sheets.js";
+import { closeSheets, sheetIsOpen } from "./sheets.js";
 import { typefaceReady } from "./timer.js";
 import * as act from "./actions.js";
 import { SongSound } from "./sound.js";
@@ -23,19 +27,14 @@ function pageView() {
     case "leaderboard": return leaderboard();
     case "settings": return settings();
     case "guide": return guidePage();
+    case "batteries": return batteries();
     default: return home();
   }
 }
 
-/** Shows what is being made, or the last thing that happened. */
+/** Shows the last thing that happened. What is being made shows in the sidebar, with what else is live. */
 function drawStatus() {
-  const job = app.state?.job;
-  if (job) {
-    fill(status, h("div.status.job",
-      h("span.job-title", job.title),
-      h("span.job-bar", h("span.job-done", { style: { width: `${Math.max(0, Math.min(1, job.progress)) * 100}%` } })),
-      h("span.job-percent", `${Math.floor(Math.max(0, Math.min(1, job.progress)) * 100)}%`)));
-  } else if (app.notice) {
+  if (app.notice) {
     fill(status, h("div.status.notice", h("span.notice-text", app.notice), h("button.notice-close", { type: "button", "aria-label": "Close", onclick: () => {
       app.notice = null;
       drawStatus();
@@ -53,6 +52,7 @@ function draw() {
   const scrolled = [...stage.querySelectorAll("[data-scroll]")].filter((one) => samePage || one.dataset.scroll === "side").map((one) => [one.dataset.scroll, one.scrollTop]);
   redraw(stage, h("div.stage", pageView()));
   stage.dataset.page = key;
+  drawSide();
   for (const [name, top] of scrolled) {
     const one = stage.querySelector(`[data-scroll="${name}"]`);
     if (one) one.scrollTop = top;
@@ -67,10 +67,13 @@ hangar.hear("job", (job) => {
   app.state.job = job;
   // Starting and finishing turn buttons off and on. In between, only the bar moves.
   if (was !== Boolean(job)) render();
-  else drawStatus();
+  else drawSideLive();
 });
 hangar.hear("changed", () => update());
-hangar.hear("drive", heardDrive);
+hangar.hear("drive", (now) => {
+  heardDrive(now);
+  drawSideLive();
+});
 hangar.hear("front", () => refresh({ quietly: true }));
 hangar.hear("menu", (what) => app.editor?.menu?.(what));
 
@@ -89,14 +92,30 @@ window.addEventListener("drop", (event) => event.preventDefault());
 
 document.body.classList.add(mac ? "mac" : "windows");
 setDraw(draw);
+// What the WhoopStor is doing shows in the sidebar on every page, drawn again as its readings come in.
+whoopstor.onSide = () => {
+  drawSideLive();
+  drawHomeLive();
+};
+
+// ⌘K (Ctrl+K on Windows) finds a tool, a track or a pack, from anywhere.
+window.addEventListener("keydown", (event) => {
+  if (event.key.toLowerCase() !== "k" || !(mac ? event.metaKey : event.ctrlKey) || event.shiftKey || event.altKey) return;
+  if (!app.state || sheetIsOpen() || document.querySelector(".menu")) return;
+  event.preventDefault();
+  showFind();
+});
 
 // For the app's checks of itself, which work it from outside.
-window.hangar_ = { app, loadCards };
+window.hangar_ = { app, loadCards, tester, whoopstor };
 
 const started = (async () => {
   app.state = await ask("refresh");
   SongSound.muted = app.state.quiet;
   render();
+  // A WhoopStor plugged in is followed from the start, so its charges show wherever the pilot is.
+  // A copy that shows no window leaves it alone.
+  if (!app.state.quiet) connectWhenThere();
   // The welcome note on the very first run, or what is new the first time a newer version is run.
   const hello = await ask("greet");
   if (hello.notice) {
@@ -111,7 +130,7 @@ const started = (async () => {
  * sheets and comes back once everything on it has arrived.
  *
  *   home, creator, track, track:<path>, files (a track with its first run's files showing),
- *   settings, guide, leaderboard, welcome, whatsnew, setup, setup:<pilot name> (the second
+ *   settings, guide, leaderboard, batteries, welcome, whatsnew, setup, setup:<pilot name> (the second
  *   question, looked up), race (the sheet for renaming or moving a race), editor, wave (the
  *   song's sound wave), music (Find music, with every source read), trackview,
  *   tool:<which>, program:<which>, upload:<site> (a site's upload page, for the first run's video),
@@ -144,7 +163,7 @@ window.showForSnapshot = async (which) => {
     await showTrack();
     const data = app.tracks.get(app.page.track);
     if (data?.summary.runs[0]) app.expanded.add(`${app.page.track}\n${data.summary.runs[0].name}`);
-  } else if (name === "settings" || name === "guide" || name === "leaderboard") open({ name });
+  } else if (name === "settings" || name === "guide" || name === "leaderboard" || name === "batteries") open({ name });
   else if (name === "welcome") await showNote({ kind: "welcome" });
   else if (name === "whatsnew") await showNote({ kind: "whatsNew", since: detail || null });
   else if (name === "setup") await showSetUp({ lookingUp: detail || null });

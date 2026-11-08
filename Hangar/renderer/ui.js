@@ -110,6 +110,7 @@ const drawings = {
   frameForward: solid("M4.500 5H7v14H4.500zM9.500 5.600v12.800a.6.6 0 00.950.490l8.900-6.400a.6.6 0 000-.980l-8.900-6.400a.6.6 0 00-.950.490z"),
   zoomIn: '<circle cx="10.500" cy="10.500" r="6.500"/>' + line("M15.500 15.500L20 20M10.500 7.800v5.400M7.800 10.500h5.400"),
   zoomOut: '<circle cx="10.500" cy="10.500" r="6.500"/>' + line("M15.500 15.500L20 20M7.800 10.500h5.400"),
+  search: '<circle cx="10.500" cy="10.500" r="6.500"/>' + line("M15.500 15.500L20 20"),
   diamond: solid("M12 3l7 9-7 9-7-9z"),
   chip: '<rect x="6.500" y="6.500" width="11" height="11" rx="1.800"/>' + line("M9.500 3.500v3M14.500 3.500v3M9.500 17.500v3M14.500 17.500v3M3.500 9.500h3M3.500 14.500h3M17.500 9.500h3M17.500 14.500h3"),
   bolt: line("M13 3L5 13.500h6L10 21l8.500-11H12.500z"),
@@ -118,6 +119,7 @@ const drawings = {
   triangleUp: solid("M12 5l8 14H4z"),
   pencil: line("M4 20l1-4.5L15.500 4l3.500 3.500L8.500 19 4 20zM13.500 6l3.500 3.500"),
   cloud: line("M7 18.500a4.500 4.500 0 01-.700-8.950 5.500 5.500 0 0110.700-1.300A4.800 4.800 0 0117.500 18.500z"),
+  battery: '<rect x="2.500" y="7" width="17" height="10" rx="2"/>' + line("M21.500 10.500v3") + solid("M5 9.500h7v5H5z"),
 };
 
 /** An icon, as big as the text around it unless a size is given. */

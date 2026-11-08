@@ -13,7 +13,8 @@ import { lookFor, drawCornerTimer, picture, typefaceReady } from "../timer.js";
 import { Race } from "../../shared/timing.js";
 
 /** The way back from a page that was opened from somewhere: to the hangar, or to the Video Creator. */
-const backLink = () => secondary(backTitle(), goBack, { icon: "chevronLeft", probe: "back", help: `Back to ${backTitle() === "Hangar" ? "all the tools" : "the Video Creator"}` });
+/** Back to the Video Creator, for a page opened from there. Everything else is in the sidebar. */
+const backLink = () => (backTitle() === "Hangar" ? null : secondary(backTitle(), goBack, { icon: "chevronLeft", probe: "back", help: "Back to the Video Creator" }));
 
 const page = (...content) => h("div.scroll", { "data-scroll": "page" }, h("div.plain-page", ...content));
 
@@ -74,7 +75,7 @@ export function leaderboard() {
   const soon = tabs.filter((tab) => tab.kind === "soon"), unread = tabs.filter((tab) => tab.kind === "unread");
   const names = (list) => list.map((tab) => tab.name).join(", ").replace(/, ([^,]*)$/, " and $1");
   return page(
-    h("div", backLink()),
+    backLink() && h("div", backLink()),
     h("h1.page-title", "LEADERBOARD"),
     h("div.row.board-head",
       h("div", label(`${season.toUpperCase()}, FROM THE SERIES`), h("div.faint.small", app.boardsReading ? "Reading the series' spreadsheet…" : boards?.read ? `Read ${when(boards.read).replace(/^[A-Z]/, (first) => first.toLowerCase())}` : "Not read yet")),
@@ -397,7 +398,7 @@ export function settings() {
   const state = app.state;
   const corners = [["tl", "Top left"], ["tr", "Top right"], ["bl", "Bottom left"], ["br", "Bottom right"]];
   return page(
-    h("div", backLink()),
+    backLink() && h("div", backLink()),
     h("h1.page-title", "PILOT & SETTINGS"),
     h("div.card.spaced",
       label("PILOT"),
@@ -455,7 +456,7 @@ export function settings() {
 
 export function guidePage() {
   return page(
-    h("div", backLink()),
+    backLink() && h("div", backLink()),
     h("div.row.baseline.guide-head",
       h("h1.page-title", "HOW IT WORKS"), h("span.spacer"),
       secondary("What's new", () => showNote({ kind: "whatsNew", since: null }), { help: "What changed in each version." }),

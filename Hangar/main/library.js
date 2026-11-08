@@ -24,6 +24,7 @@ import * as series from "../shared/series.js";
 import { merge, same } from "../shared/merge.js";
 import { isInDrive } from "../shared/drive.js";
 import { land, landNow } from "./landing.js";
+import { withDefaults as batteryDefaults } from "../shared/batteries.js";
 
 export const videoExtensions = new Set(["ts", "mts", "m2ts", "mp4", "m4v", "mov", "mkv", "avi", "mxf"]);
 export const audioExtensions = new Set(["mp3", "m4a", "aac", "wav", "aif", "aiff", "caf", "flac", "ogg", "opus"]);
@@ -772,6 +773,15 @@ export class Library {
 
   keepSongSource(name, from) {
     this.extras.songs = { ...(this.extras.songs ?? {}), [name]: from };
+    this.saveExtras();
+  }
+
+  /** The battery tester's packs and what was measured on each (see shared/batteries.js). Kept in
+   *  hangar.json, so a library in Google Drive has them on both computers. */
+  get batteries() { return batteryDefaults(this.extras.batteries); }
+
+  keepBatteries(batteries) {
+    this.extras.batteries = batteryDefaults(batteries);
     this.saveExtras();
   }
 

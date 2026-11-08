@@ -187,9 +187,10 @@ export function go(page) {
   render();
 }
 
-/** Goes to a page that has a way back, remembering where from. */
+/** Goes to a page that has a way back to the Video Creator when it was opened from there. From
+ *  anywhere else the way back is the sidebar. */
 export function open(page) {
-  if (app.page.name === "home" || inVideoCreator(app.page)) app.cameFrom = app.page;
+  if (!samePage(app.page, page)) app.cameFrom = inVideoCreator(app.page) ? app.page : { name: "home" };
   go(page);
 }
 
