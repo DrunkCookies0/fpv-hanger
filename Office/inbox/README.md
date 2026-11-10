@@ -1,0 +1,1 @@
+Things waiting on the CEO that aren't code: one file each, in a draft pull request, saying what it is, why now, what Chief recommends, and what happens if the answer is no. Merging is yes; closing is no.
