@@ -1,6 +1,7 @@
-// Other projects' own tools, shown inside the app's window: Betaflight's app and ExpressLRS's web
-// flasher. Each is that project's web app, loaded from the project's own site, so it is always
-// their newest release and looks after its own updates. Nothing of theirs is carried by the app.
+// Other projects' own tools, shown inside the app's window: Betaflight's app, its Blackbox Explorer
+// and ExpressLRS's web flasher. Each is that project's web app, loaded from the project's own site,
+// so it is always their newest release and looks after its own updates. Nothing of theirs is
+// carried by the app.
 //
 // A tool is a page in a corner of the browser of its own (kept between runs, so the tool can work
 // without a connection once it has been opened). It can reach flight controllers and radios over

@@ -185,3 +185,42 @@ test("a pack at a storage target is at storage, not full", () => {
   assert.equal(endedWords({ end: "full", target: 3.85 }), "At storage");
   assert.equal(endedWords({ end: "full", target: 4.35 }), "Full");
 });
+
+test("a charge goes on through the time the USB was out, what went in meanwhile made up", () => {
+  const charge = (out) => {
+    const sim = new PretendWhoopStor();
+    const { charges, seen } = watch();
+    sim.start();
+    run(sim, charges, 1000);
+    sim.insert(1, { soc: 0.5 });
+    run(sim, charges, 20 * 60 * 1000, { every: 20 });
+    if (out) {
+      // Two minutes unheard, the charger going on by itself, then heard again. (Across the change
+      // from a steady current to a falling one, a long gap is made up less well: it is a straight
+      // line between the currents either side.)
+      sim.step(2 * 60 * 1000);
+      charges.resume();
+    }
+    run(sim, charges, 3 * 3600 * 1000, { every: 20 });
+    return seen;
+  };
+  const whole = charge(false), gapped = charge(true);
+  assert.equal(gapped.began.length, 1, "still one charge");
+  assert.equal(gapped.ended.length, 1);
+  const a = whole.ended[0], b = gapped.ended[0];
+  assert.equal(b.end, "full");
+  assert.ok(Math.abs(a.mah - b.mah) < 0.02 * a.mah, `${a.mah} mAh heard throughout, ${b.mah} mAh with two minutes out`);
+  assert.ok(Math.abs(b.unseen - 120) < 1, `${b.unseen} s unseen`);
+  assert.equal(keptCharge(b).unseenSeconds, 120);
+  assert.equal(keptCharge(a).unseenSeconds, undefined);
+  // Without resume, a gap counts a second at most, as before.
+  const sim = new PretendWhoopStor();
+  const { charges, seen } = watch();
+  sim.start();
+  run(sim, charges, 1000);
+  sim.insert(1, { soc: 0.5 });
+  run(sim, charges, 20 * 60 * 1000, { every: 20 });
+  sim.step(2 * 60 * 1000);
+  run(sim, charges, 3 * 3600 * 1000, { every: 20 });
+  assert.ok(seen.ended[0].mah < a.mah - 8, `${seen.ended[0].mah} mAh`);
+});

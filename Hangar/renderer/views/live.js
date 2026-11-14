@@ -15,8 +15,10 @@ export function actionFor(tool) {
   if (tool === "videoCreator") return openVideoCreator;
   if (tool === "leaderboards") return () => open({ name: "leaderboard" });
   // Another project's own app, shown in the window, or its program, which the app fetches.
-  if (tool === "betaflight" || tool === "elrsFlasher") return () => openTool(tool);
+  if (tool === "betaflight" || tool === "blackbox" || tool === "elrsFlasher") return () => openTool(tool);
   if (tool === "elrsConfigurator" || tool === "edgetxCompanion") return () => showProgram(tool);
+  if (tool === "rates") return () => open({ name: "rates" });
+  if (tool === "osdFont") return () => open({ name: "osdfont" });
   if (tool === "radioBackups") return showRadioBackups;
   if (tool === "upload") return uploadAnyVideo;
   if (tool === "batteryTester") return () => open({ name: "batteries" });
@@ -33,6 +35,7 @@ export function showing() {
   if (name === "track" || name === "tracks" || name === "group") return "videoCreator";
   if (name === "leaderboard") return "leaderboards";
   if (name === "batteries") return "batteryTester";
+  if (name === "osdfont") return "osdFont";
   return name;
 }
 
@@ -84,7 +87,8 @@ const minutesSince = (moment) => Math.max(0, Math.floor((Date.now() - moment) / 
  */
 export function chargerNow() {
   const p1 = whoopstor.p1;
-  if (whoopstor.link !== "on" || !p1) return null;
+  // While a cycle test waits for the USB to come back, it is still shown, from the last readings.
+  if ((whoopstor.link !== "on" && !(whoopstor.link === "away" && whoopstor.cycle?.active)) || !p1) return null;
   const test = whoopstor.cycle?.active ? whoopstor.cycle : null;
   const charging = whoopstor.sessions.filter((session) => session && !session.end).length;
   if (!test && !p1.running) return null;
@@ -104,12 +108,13 @@ export function chargerNow() {
   const packs = ports.filter((one) => one.there).length;
   if (test) {
     const kind = test.steps[test.step];
-    const line = test.resting
+    const away = test.away ? new Date(test.away.until).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : null;
+    const line = away ? "USB out: plug it back in" : test.resting
       ? `Resting before step ${test.step + 2}`
       : test.running
         ? (kind === "charge" ? `Charging to ${test.fullVolts} V at 2C` : `Down to ${test.storageVolts} V on the load`)
         : "Setting up the next step";
-    const time = test.resting
+    const time = away ? `waits till ${away}` : test.resting
       ? `${Math.ceil((test.restLeft ?? 300000) / 60000)} min left`
       : test.running && test.stepStartedAt ? `${minutesSince(test.stepStartedAt)} min in` : "";
     // The steps with the rests between: charge, rest, down, rest, charge…
@@ -122,7 +127,7 @@ export function chargerNow() {
     });
     return {
       kind: "cycle", title: `Cycle test on ${test.ports.length} pack${test.ports.length === 1 ? "" : "s"}, step ${test.step + 1} of ${test.steps.length}`,
-      short: "Cycle test", badge: `${test.step + 1} / ${test.steps.length}`, line, time, steps, ports,
+      short: "Cycle test", badge: `${test.step + 1} / ${test.steps.length}`, line, time, steps, ports, away: Boolean(away),
     };
   }
   return {

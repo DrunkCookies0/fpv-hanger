@@ -1,7 +1,8 @@
 // Other projects' tools.
 //
-// Two are shown inside the window: Betaflight's app and ExpressLRS's web flasher, each loaded from
-// its project's own site into a place on this page (the main process lays it over `.tool-frame`).
+// Three are shown inside the window: Betaflight's app, its Blackbox Explorer and ExpressLRS's web
+// flasher, each loaded from its project's own site into a place on this page (the main process lays
+// it over `.tool-frame`).
 // While one is open it takes over the window, the way the marker editor does. When the tool asks
 // which serial port, USB device or Bluetooth device to use, the list to choose from is put up
 // here, where a browser would put up its own.

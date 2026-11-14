@@ -1,6 +1,6 @@
 // Other projects' tools that the app brings in.
 //
-// Two of them are web apps and are shown inside the app's window, from the project's own site, so
+// Three of them are web apps and are shown inside the app's window, from the project's own site, so
 // they are always that project's newest release and nothing of theirs is carried by the app. The
 // others are programs of their own, the ExpressLRS Configurator and EdgeTX Companion: the app
 // fetches each from the project's own Releases page, checks it against the checksum published
@@ -16,6 +16,14 @@ export const outsideTools = {
     address: "https://app.betaflight.com/",
     within: ["https://app.betaflight.com/"],
     partition: "persist:tool-betaflight",
+  },
+  // Betaflight's log viewer. It only opens the files the pilot picks, and needs no devices.
+  blackbox: {
+    title: "Blackbox Explorer",
+    owner: "the Betaflight project",
+    address: "https://blackbox.betaflight.com/",
+    within: ["https://blackbox.betaflight.com/"],
+    partition: "persist:tool-blackbox",
   },
   elrsFlasher: {
     title: "ExpressLRS Web Flasher",

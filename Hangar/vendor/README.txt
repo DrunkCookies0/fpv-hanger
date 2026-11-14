@@ -14,9 +14,9 @@ inside the packaged app.
     sha256 8923876afa8db5585022d7860ec7e589af192f441c56793971276d450ed3bbfa
     unpacked as darwin-arm64/ffmpeg
 
-  FFmpeg 8.1 for Windows, 64-bit (GPL build, with libx264): n8.1.3-34-ga35157abb9, built 7 November 2026
-    https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-07-12-47/ffmpeg-n8.1.3-34-ga35157abb9-win64-gpl-8.1.zip
-    sha256 06bfc0069beb764b75f9eed956acc90c4d651bf06aed340fbf0708d10a6f76dc
+  FFmpeg 8.1 for Windows, 64-bit (GPL build, with libx264): n8.1.3-35-gf1acb0a266, built 13 November 2026
+    https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-13-12-43/ffmpeg-n8.1.3-35-gf1acb0a266-win64-gpl-8.1.zip
+    sha256 096d0596ba87ee534c6357797dc68882e714b53aac76859fca4be9c012a6a91c
     ffmpeg.exe and its licence unpacked into win32-x64/
     The builder keeps a dated build like this one for about two weeks. For a release made after it
     has gone, take the newest dated build from https://github.com/BtbN/FFmpeg-Builds/releases, put

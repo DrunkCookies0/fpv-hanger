@@ -54,6 +54,18 @@ export const tools = {
     title: "Betaflight", icon: "chip", soon: null,
     summary: "Betaflight's own app, here in the Hangar: plug a flight controller in to set it up, tune it and flash it. It is always their newest release.",
   },
+  blackbox: {
+    title: "Blackbox Explorer", icon: "trace", soon: null,
+    summary: "Betaflight's own log viewer, here in the Hangar: open a blackbox log from the flight controller or its card, and see the gyro, the sticks and the motors through the flight, beside its video if you have it. It is always their newest release.",
+  },
+  rates: {
+    title: "Rates", icon: "curve", soon: null,
+    summary: "Your rates as curves, and the same feel in another rate type: Betaflight, Actual, Quick, KISS or Raceflight. Paste them from Betaflight's CLI and get the lines to paste back.",
+  },
+  osdFont: {
+    title: "OSD font", icon: "glyph", soon: null,
+    summary: "For an analog whoop: the letters, icons and boot logo its OSD draws with, changed dot by dot or made from a picture, starting from one of Betaflight's fonts, and saved for Betaflight's Font Manager to put on the whoop.",
+  },
   elrsFlasher: {
     title: "ExpressLRS Web Flasher", short: "ExpressLRS Flasher", icon: "bolt", soon: null,
     summary: "ExpressLRS's own flasher, here in the Hangar: update a transmitter module, a receiver or a backpack over USB or through the flight controller.",
@@ -103,8 +115,8 @@ export const suites = [
   },
   {
     title: "Firmware & setup",
-    summary: "The flight controller's and the radio link's own tools. They are Betaflight's and ExpressLRS's, not FPV Hangar's: open source projects, each kept current from its own site.",
-    tools: ["betaflight", "elrsFlasher", "elrsConfigurator"],
+    summary: "The flight controller's and the radio link's own tools, your rates and your OSD font. Betaflight, its Blackbox Explorer and ExpressLRS's tools are theirs, not FPV Hangar's: open source projects, each kept current from its own site.",
+    tools: ["betaflight", "blackbox", "rates", "osdFont", "elrsFlasher", "elrsConfigurator"],
     links: [{ title: "betaflight.com", address: "https://betaflight.com/" }, { title: "expresslrs.org", address: "https://www.expresslrs.org/" }],
   },
   {
@@ -125,7 +137,7 @@ export const suites = [
  *  two suites share a heading, as each has only one tool to open so far. */
 export const sideGroups = [
   { title: "RaceGOW", tools: ["videoCreator", "leaderboards"] },
-  { title: "Firmware & setup", tools: ["betaflight", "elrsFlasher", "elrsConfigurator"] },
+  { title: "Firmware & setup", tools: ["betaflight", "blackbox", "rates", "osdFont", "elrsFlasher", "elrsConfigurator"] },
   { title: "Radio", tools: ["edgetxCompanion", "radioBackups"] },
   { title: "Footage & batteries", tools: ["upload", "batteryTester"] },
 ];
@@ -157,8 +169,9 @@ export const readMeFor = (mac) => ({
     {
       title: "Betaflight, ExpressLRS and EdgeTX",
       items: [
-        ["paragraph", "Under Firmware & setup and Radio on the first screen are four tools that are not FPV Hangar's own. They belong to the Betaflight, ExpressLRS and EdgeTX projects, which are open source, and FPV Hangar only brings them to you."],
-        ["point", "Betaflight and the ExpressLRS Web Flasher open inside the app, from each project's own site. They are always that project's newest release, and they work without a connection once they have been opened."],
+        ["paragraph", "Under Firmware & setup and Radio on the first screen are five tools that are not FPV Hangar's own. They belong to the Betaflight, ExpressLRS and EdgeTX projects, which are open source, and FPV Hangar only brings them to you."],
+        ["point", "Betaflight, its Blackbox Explorer and the ExpressLRS Web Flasher open inside the app, from each project's own site. They are always that project's newest release, and they work without a connection once they have been opened."],
+        ["point", "Rates and OSD font are FPV Hangar's own. OSD font starts from one of Betaflight's fonts, fetched from Betaflight's own site when you ask for it and kept on this computer after that: the fonts are Betaflight's, and none of them comes with the app."],
         ["point", "When one of them asks which serial port, USB device or Bluetooth device to use, the app shows you the list to choose from."],
         ["point", `The ExpressLRS Configurator is a program of its own. The app fetches it from ExpressLRS's Releases page, checks it against the checksum published there, opens it, and tells you when a newer one is out.${mac ? " It goes in your Applications folder, and updating it sends the copy you had to the Trash." : " On Windows the app starts ExpressLRS's own installer, and you follow that through."}`],
         ["point", `EdgeTX Companion, under Radio, is fetched the same way, from EdgeTX's Releases page, and checked against the checksum GitHub keeps for it there. It sets up a radio that runs EdgeTX, such as a RadioMaster TX15 Max: its models, mixes, switches and screens, tried out in a simulator and then written to the radio. Each version family, such as 2.12, is a program of its own: a newer family goes in beside the one you have, which stays.${mac ? "" : " On Windows the app starts EdgeTX's own installer."}`],
@@ -185,7 +198,7 @@ export const readMeFor = (mac) => ({
         ["point", "Lap times are as exact as your markers: one video frame, which is about 0.017 seconds at 60 frames a second."],
         ["point", "It has been used most with HDZero recordings (.ts). An .mp4 recording has been tested once. Other formats have not been tried."],
         ["point", `If you fly ${season}, its tracks appear by themselves: each one on the day it opens, with its deadline and, once the series posts it, its entry form. Every track has a form of its own.`],
-        ["point", `The app goes online for these things only: to read your Google Form, to check for a newer version, to read what the series publishes if you say you fly ${season} (its pilot list, its schedule, its entry forms and its leaderboards), to watch a track's video on YouTube when you ask it to read the track out of it, to open Betaflight's app and the ExpressLRS flasher from their own sites when you open them (what those tools then send is theirs to say), to show TikTok's and Instagram's own upload pages when you upload to them (what you post there, and how, is theirs; YouTube's opens in your own browser), to ask YouTube how many views, likes and comments your runs' videos have, if you give it a YouTube key of your own (only the videos' links go, with the key), to read NCS's and SoundScout's lists of songs when you open Find music, at most once a week, and to fetch a song from NCS when you add it, to read your Liked Songs and the artists you play most if you connect your Spotify (nothing in it is changed), and to look at ExpressLRS's and EdgeTX's Releases pages for a newer Configurator and Companion, once a day for the ones you have and whenever you open their tiles.`],
+        ["point", `The app goes online for these things only: to read your Google Form, to check for a newer version, to read what the series publishes if you say you fly ${season} (its pilot list, its schedule, its entry forms and its leaderboards), to watch a track's video on YouTube when you ask it to read the track out of it, to open Betaflight's app, its Blackbox Explorer and the ExpressLRS flasher from their own sites when you open them (what those tools then send is theirs to say), to fetch one of Betaflight's OSD fonts from Betaflight when you start from it, at most once a week, to show TikTok's and Instagram's own upload pages when you upload to them (what you post there, and how, is theirs; YouTube's opens in your own browser), to ask YouTube how many views, likes and comments your runs' videos have, if you give it a YouTube key of your own (only the videos' links go, with the key), to read NCS's and SoundScout's lists of songs when you open Find music, at most once a week, and to fetch a song from NCS when you add it, to read your Liked Songs and the artists you play most if you connect your Spotify (nothing in it is changed), and to look at ExpressLRS's and EdgeTX's Releases pages for a newer Configurator and Companion, once a day for the ones you have and whenever you open their tiles.`],
         ["point", "With two computers, Pilot & settings can keep your library in Google Drive, so both open the same one. It needs Google's own Drive for desktop on each computer: FPV Hangar keeps the library in Drive's folder and Drive uploads it and brings down what the other computer did, so the app itself never signs in to Google or sends your files anywhere."],
         ["point", "Uploading goes through each site's own page, and you sign in on that page, as you would in a browser. FPV Hangar never sees your password and never posts anything: the site's own button does. Each site's sign-in is kept in a corner of the app of its own. Leaving a page while a video is still going up stops it, so the app asks first."],
         ["point", "With the card from your goggles plugged in, a track's page offers the recordings on it. The card is only read."],
@@ -230,7 +243,7 @@ export const guide = {
     "Pilot & settings can keep your library in Google Drive, so that your Mac and your PC open the same one. It needs Google's own Drive for desktop on each computer, which does the uploading and brings down what the other computer did. Press Keep my library in Google Drive on the computer that has your tracks first: it moves the library there. Then press it on the other, which opens that same library.",
     "Everything lives in the track's folder: Raw files, csv markers and music go in; landscape and vertical are what gets made. The tracks sit in your library folder, which Pilot & settings shows and can change.",
     "New versions are picked up from Pilot & settings, where Check for updates downloads and installs one in place.",
-    "Batteries, on the first screen, keeps your 1S packs by the numbers written on them. With a WhoopStor V3 that has WS3 Unlocked or OpenWS3 on it plugged into this computer's USB, it shows the six ports as they charge, asks which pack is in each, and keeps every charge with its pack: the port, the current, what went in and the pack's resistance, worked out as the charge starts. Start sets each port to 2C for the pack in it and starts the charger; Stop stops it; Cycle test charges, rests, takes each pack down to storage on the charger's own load and back, to see what each takes in and gives back. How a pack is charged stays the charger's own. Each pack is RACE, FUN or RETIRE against your typical pack of its size, by limits you can change, and the Hangar suggests limits from your own calls on your packs. The resistance includes the port's own plug and lead, so compare packs on the same port. Power the WhoopStor from its XT60 or barrel socket with DISABLE USB POWER set to YES before plugging it into this computer.",
+    "Batteries, on the first screen, keeps your 1S packs by the numbers written on them. With a WhoopStor V3 that has WS3 Unlocked or OpenWS3 on it plugged into this computer's USB, it shows the six ports as they charge, asks which pack is in each, and keeps every charge with its pack: the port, the current, what went in and the pack's resistance, worked out as the charge starts. Start sets each port to 2C for the pack in it and starts the charger; Stop stops it; Cycle test charges, rests, takes each pack down to storage on the charger's own load and back, to see what each takes in and gives back. How a pack is charged stays the charger's own. Each pack is RACE, FUN or RETIRE against your typical pack of its size, by limits you can change, and the Hangar suggests limits from your own calls on your packs. Packs are graded on their charging resistance from cycle tests, whose charges after the first all start from storage after a rest, so packs compare like for like on any port. Power the WhoopStor from its XT60 or barrel socket with DISABLE USB POWER set to YES before plugging it into this computer. If the WhoopStor's USB comes out during a cycle test, the test waits up to 30 minutes for it and picks up where it is. Open a pack for a graph of its charges and cycle tests: the voltage and current over the whole of each. Once a day the Hangar looks at WS3 Unlocked's Releases page and says beside the firmware, and on Home, when a newer version is out; flashing it stays with the project's own instructions.",
     "The same page works with a battery tester board of your own, once there is one: a Raspberry Pi Pico on a board that charges a 1S pack, pulls about 6.5 A from it for 2 seconds to measure how far it sags, and can drain it to measure what it holds.",
   ],
 };

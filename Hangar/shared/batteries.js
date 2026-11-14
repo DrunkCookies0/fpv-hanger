@@ -128,12 +128,13 @@ const median = (values) => {
 };
 
 /** Everything known about each pack: { [id]: { pack, sags, fullSags, capacities, latestSag, sag, firstSag, capacity,
- *  charges, latestCharge } }. `sag` is the latest sag test on a full pack, the one that compares with other packs'.
- *  `charges` are its charges on the WhoopStor with a resistance, oldest first. */
+ *  charges, latestCharge, cycles, latestCycle, readings, latestReading } }. `sag` is the latest sag test on a full
+ *  pack, the one that compares with other packs'. `charges` are its charges on the WhoopStor with a resistance,
+ *  oldest first; `readings` the ones of them that compare with other packs' (cycleReadings), oldest first. */
 export function factsOf(batteries) {
   const kept = withDefaults(batteries);
   const facts = {};
-  for (const pack of Object.values(kept.packs)) facts[pack.id] = { pack, sags: [], fullSags: [], capacities: [], latestSag: null, sag: null, firstSag: null, capacity: null, charges: [], latestCharge: null, cycles: [], latestCycle: null };
+  for (const pack of Object.values(kept.packs)) facts[pack.id] = { pack, sags: [], fullSags: [], capacities: [], latestSag: null, sag: null, firstSag: null, capacity: null, charges: [], latestCharge: null, cycles: [], latestCycle: null, readings: [], latestReading: null };
   for (const test of Object.values(kept.tests).sort(byTime)) {
     const one = facts[test.pack];
     if (!one) continue;
@@ -143,7 +144,10 @@ export function factsOf(batteries) {
     }
     if (test.kind === "capacity" && typeof test.mah === "number") one.capacities.push(test);
     if (test.source === "whoopstor" && typeof test.resistance === "number") one.charges.push(test);
-    if (test.kind === "cycle") one.cycles.push(test);
+    if (test.kind === "cycle") {
+      one.cycles.push(test);
+      one.readings.push(...cycleReadings(test));
+    }
   }
   for (const one of Object.values(facts)) {
     one.latestSag = one.sags.at(-1) ?? null;
@@ -152,6 +156,7 @@ export function factsOf(batteries) {
     one.capacity = one.capacities.at(-1) ?? null;
     one.latestCharge = one.charges.at(-1) ?? null;
     one.latestCycle = one.cycles.at(-1) ?? null;
+    one.latestReading = one.readings.at(-1) ?? null;
   }
   return facts;
 }
@@ -169,7 +174,7 @@ const percent = (ratio) => `${Math.round(Math.abs(ratio - 1) * 100)}%`;
  * What to make of a pack: { word, reasons }. The word is "race", "fun", "retire" (or "retired", for
  * one the pilot has retired), or null when there isn't enough to say. Each measure is against your
  * typical pack of its size, from three packs up: its sag on the tester board or its charging
- * resistance on the WhoopStor, with the ports allowed for, and its capacity, from the tester's full
+ * resistance from storage in the WhoopStor's cycle tests, and its capacity, from the tester's full
  * test against its label or the WhoopStor's cycle test against the typical one. The pack takes the
  * worst status any of them gives, by the pilot's `limits`.
  */
@@ -195,16 +200,18 @@ export function verdictOf(one, facts, limits = defaultLimits) {
     const held = one.capacity.mah / one.pack.mah;
     weigh(statusFromCapacity(held, limits.raceCapacity, limits.funCapacity), `Holds ${Math.round(held * 100)}% of its ${one.pack.mah} mAh`);
   }
-  const grade = chargeGrade(one, facts, one.latestCharge, limits);
+  const grade = chargeGrade(one, facts, one.latestReading, limits);
   if (grade) weigh(grade.word, grade.reason);
   const held = cycleGrade(one, facts, limits);
   if (held) weigh(held.word, held.reason);
   reasons.push(...chargeReasons(one), ...cycleReasons(one));
   if (worst === 0) {
-    if (one.latestCharge || one.latestCycle) {
+    if (one.latestReading || one.latestCycle) {
       reasons.push(`Needs three ${one.pack.mah} mAh packs measured the same way to compare with`);
       return { word: null, reasons };
     }
+    // Only plain charges: chargeReasons has said a cycle test grades it.
+    if (one.latestCharge) return { word: null, reasons };
     if (!one.sag) reasons.push(one.latestSag ? "Its sag tests so far weren't on a full charge" : "Not tested yet");
     else reasons.push("Test more packs of its size, or this one again later, to compare");
     return { word: null, reasons };
@@ -215,11 +222,11 @@ export function verdictOf(one, facts, limits = defaultLimits) {
 /** A pack's capacity from its latest cycle test (what going down to storage took out) against the
  *  typical pack of its size: { word, ratio, typical, reason } or null, from three packs up. */
 export function cycleGrade(one, facts, limits = defaultLimits) {
-  const mine = cycleWindow(one.latestCycle);
+  const mine = latestWindow(one);
   if (!mine) return null;
   const peers = Object.values(facts)
     .filter((other) => other.pack.mah === one.pack.mah && !other.pack.retired && other.pack.id !== one.pack.id)
-    .map((other) => cycleWindow(other.latestCycle))
+    .map(latestWindow)
     .filter((other) => other && other.fullVolts === mine.fullVolts);
   if (peers.length < 2) return null;
   const typical = median([mine.out, ...peers.map((other) => other.out)]);
@@ -267,97 +274,51 @@ export function recommendLimits(facts) {
   };
 }
 
-const knownPorts = new WeakMap();
-
 /**
- * How much each WhoopStor port adds to the resistance read there, as a factor: { factors: { [port]:
- * factor }, linked: a Set of ports }. Learnt from packs charged on more than one port: each pack's
- * latest reading on each port is taken as the pack's own resistance times its port's factor, and both
- * are fitted to all of them (in logarithms, a turn at a time). Only ports joined to each other through
- * such packs are linked, and their factors are relative to their average. A port no pack has moved to
- * or from isn't linked: its readings are compared only with each other.
+ * The charges in a cycle test that compare from pack to pack: each charge after its first, which starts
+ * from storage after the 5-minute rest, at the test's 2C, whichever port: `{ at, port, resistance,
+ * amps, test }`. A pack's other charges start wherever it happens to be (a first charge after sitting
+ * read up to 20% high, a top-up from full 25% low), so they aren't compared. The ports read alike
+ * this way (the pilot's packs of one make within about 5% on every port in each run), so no port is
+ * allowed for: what moves the readings more is the day, about 5% from one run to the next.
  */
-export function portFactors(facts) {
-  if (knownPorts.has(facts)) return knownPorts.get(facts);
-  const readings = [];
-  for (const one of Object.values(facts)) {
-    const latest = new Map();
-    for (const test of one.charges ?? []) if (test.resistance > 0) latest.set(test.port, test);
-    for (const [port, test] of latest) readings.push([one.pack.id, port, Math.log(test.resistance)]);
-  }
-  // Ports joined through packs read on more than one of them.
-  const group = {};
-  const root = (port) => (group[port] === port ? port : (group[port] = root(group[port])));
-  for (const [, port] of readings) group[port] ??= port;
-  const portsOf = {};
-  for (const [pack, port] of readings) (portsOf[pack] ??= []).push(port);
-  for (const ports of Object.values(portsOf)) for (const port of ports.slice(1)) group[root(port)] = root(ports[0]);
-  const sizes = {};
-  for (const port of Object.keys(group)) sizes[root(port)] = (sizes[root(port)] ?? 0) + 1;
-  const biggest = Object.entries(sizes).sort((a, b) => b[1] - a[1])[0];
-  const answer = { factors: {}, linked: new Set() };
-  if (biggest && biggest[1] >= 2) {
-    const linked = new Set(Object.keys(group).filter((port) => String(root(port)) === biggest[0]).map(Number));
-    const rows = readings.filter(([, port]) => linked.has(port));
-    const q = Object.fromEntries([...linked].map((port) => [port, 0]));
-    const p = {};
-    const mean = (values) => values.reduce((a, b) => a + b, 0) / values.length;
-    for (let turn = 0; turn < 60; turn += 1) {
-      for (const pack of new Set(rows.map(([one]) => one))) p[pack] = mean(rows.filter(([one]) => one === pack).map(([, port, r]) => r - q[port]));
-      for (const port of linked) q[port] = mean(rows.filter(([, one]) => one === port).map(([pack, , r]) => r - p[pack]));
-      const middle = mean(Object.values(q));
-      for (const port of linked) q[port] -= middle;
-    }
-    answer.linked = linked;
-    answer.factors = Object.fromEntries(Object.entries(q).map(([port, value]) => [port, Math.exp(value)]));
-  }
-  knownPorts.set(facts, answer);
-  return answer;
-}
-
-/** A pack's latest charging resistance, with its port's share taken out where that is known:
- *  { mohm, port, allowed } or null. `latest` stands in for its latest kept charge, for one going on. */
-export function chargeResistance(one, ports, latest = one.latestCharge) {
-  if (!latest) return null;
-  const factor = ports.linked.has(latest.port) ? ports.factors[latest.port] : null;
-  return { mohm: factor ? latest.resistance / factor : latest.resistance, port: latest.port, allowed: Boolean(factor) };
+export function cycleReadings(test) {
+  return (test?.steps ?? []).flatMap((step, index) => (index > 0 && step.kind === "charge" && step.resistance > 0
+    ? [{ at: test.at, port: test.port, resistance: step.resistance, amps: test.amps, test: test.id }]
+    : []));
 }
 
 /**
- * RACE, FUN or RETIRE from the WhoopStor's charges, as the words "race", "fun" and "retire":
- * { word, ratio, typical, reason }, or null without enough to go on. The pack's charging resistance
- * against the typical one of its size (the middle one): with the ports allowed for when its port is
- * linked to others, otherwise among packs last read on the same port. Three packs of its size first.
+ * RACE, FUN or RETIRE from the WhoopStor's cycle tests, as the words "race", "fun" and "retire":
+ * { word, ratio, typical, reason }, or null without enough to go on. The pack's charging resistance from
+ * storage (its latest cycle reading, or `latest`, a charge going on that is one) against the typical
+ * pack of its size (the middle one), each by its latest cycle reading. Three packs of its size first.
  * Where the status changes is the pilot's `limits`.
  */
-export function chargeGrade(one, facts, latest = one.latestCharge, limits = defaultLimits) {
-  const ports = portFactors(facts);
-  const mine = chargeResistance(one, ports, latest);
-  if (!mine) return null;
+export function chargeGrade(one, facts, latest = one.latestReading, limits = defaultLimits) {
+  if (!(latest?.resistance > 0)) return null;
   const peers = Object.values(facts)
-    .filter((other) => other.pack.mah === one.pack.mah && !other.pack.retired && other.pack.id !== one.pack.id)
-    .map((other) => chargeResistance(other, ports))
-    .filter((other) => other && (mine.allowed ? other.allowed : !other.allowed && other.port === mine.port));
+    .filter((other) => other.pack.mah === one.pack.mah && !other.pack.retired && other.pack.id !== one.pack.id && other.latestReading)
+    .map((other) => other.latestReading.resistance);
   if (peers.length < 2) return null;
-  const typical = median([mine.mohm, ...peers.map((other) => other.mohm)]);
-  const ratio = mine.mohm / typical;
+  const typical = median([latest.resistance, ...peers]);
+  const ratio = latest.resistance / typical;
   const word = statusFrom(ratio, limits.raceResistance, limits.funResistance);
-  const against = mine.allowed ? "with the ports allowed for" : `among packs read on port ${mine.port}`;
   const how = Math.abs(ratio - 1) < 0.005 ? "the same as" : ratio < 1 ? `${percent(ratio)} below` : `${percent(ratio)} above`;
-  return { word, ratio, typical, reason: `Charging resistance ${how} your typical ${one.pack.mah} mAh pack, ${against}` };
+  return { word, ratio, typical, reason: `Charging resistance from storage ${how} your typical ${one.pack.mah} mAh pack's, in cycle tests` };
 }
 
-/** What the WhoopStor's charges say about a pack, in words: its latest resistance, and how it has
- *  moved since its first on the same port. The ports' own plugs and leads differ, so readings from
- *  different ports aren't compared. */
+/** What the WhoopStor's charges say about a pack, in words: its latest resistance from storage in a
+ *  cycle test, and how it has moved since its first; or, with charges but no cycle test, that one
+ *  is needed to grade it. */
 export function chargeReasons(one) {
-  const last = one.latestCharge;
-  if (!last) return [];
-  const words = [`${Math.round(last.resistance)} mΩ charging on port ${last.port}`];
-  const first = one.charges.find((test) => test.port === last.port && test !== last);
-  if (first) {
+  const last = one.latestReading;
+  if (!last) return one.latestCharge ? ["A cycle test grades its charging resistance: its other charges started wherever the pack was"] : [];
+  const words = [`${Math.round(last.resistance)} mΩ charging from storage on port ${last.port}`];
+  const first = one.readings[0];
+  if (first && first !== last) {
     const ratio = last.resistance / first.resistance;
-    if (Math.abs(ratio - 1) >= 0.1) words.push(`${percent(ratio)} ${ratio > 1 ? "higher" : "lower"} than its first there, ${first.at.slice(0, 10)}`);
+    if (Math.abs(ratio - 1) >= 0.1) words.push(`${percent(ratio)} ${ratio > 1 ? "higher" : "lower"} than in its first cycle test, ${first.at.slice(0, 10)}`);
   }
   return words;
 }
@@ -367,17 +328,28 @@ export function chargeReasons(one) {
  *  test without both. */
 export function cycleWindow(test) {
   const steps = test?.steps ?? [];
+  // Only steps that got there: a test stopped part way keeps the step it was on, but not as a whole one.
+  const got = (step) => typeof step.endVolts !== "number" || (step.kind === "charge" ? step.endVolts >= test.fullVolts - 0.03 : step.endVolts <= test.storageVolts + 0.03);
   // A charge counts from the second step on: the first started wherever the pack was.
-  const ins = steps.filter((step, index) => step.kind === "charge" && index > 0).map((step) => step.mah);
-  const outs = steps.filter((step) => step.kind === "discharge").map((step) => step.mah);
+  const ins = steps.filter((step, index) => step.kind === "charge" && index > 0 && got(step)).map((step) => step.mah);
+  const outs = steps.filter((step) => step.kind === "discharge" && got(step)).map((step) => step.mah);
   if (!outs.length) return null;
   const mean = (values) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : null);
   return { in: mean(ins), out: mean(outs), fullVolts: test.fullVolts, storageVolts: test.storageVolts };
 }
 
+/** What a pack's latest cycle test that took it down to storage measured (cycleWindow), or null. */
+const latestWindow = (one) => {
+  for (let index = one.cycles.length - 1; index >= 0; index -= 1) {
+    const window = cycleWindow(one.cycles[index]);
+    if (window) return window;
+  }
+  return null;
+};
+
 /** What a pack's latest cycle test says, in words. */
 export function cycleReasons(one) {
-  const window = cycleWindow(one.latestCycle);
+  const window = latestWindow(one);
   if (!window) return [];
   const between = `between ${window.storageVolts} and ${window.fullVolts} V`;
   return [window.in !== null

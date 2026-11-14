@@ -33,7 +33,7 @@ function chargerCard(now) {
   if (showing() === "batteryTester") {
     // On the Batteries page itself the ports are on the page.
     return h("div.live-card.here", { probe: "live charger" },
-      h("div.live-head", icon("battery", 15, { class: "accent" }), h("span.live-title", `${now.short}${now.kind === "cycle" ? ` ${now.badge.replace(" / ", "/")}` : ""}`), h("span.dim.small", "On this page")));
+      h("div.live-head", icon("battery", 15, { class: "accent" }), h("span.live-title", `${now.short}${now.kind === "cycle" ? ` ${now.badge.replace(" / ", "/")}` : ""}`), now.away ? h("span.warn.small", "USB out") : h("span.dim.small", "On this page")));
   }
   return h("button.live-card", { type: "button", probe: "live charger", help: "Open Batteries", onclick: () => openFromSide("batteryTester") },
     h("div.live-head", icon("battery", 15, { class: "accent" }), h("span.live-title", now.short), h("span.live-badge", now.badge)),

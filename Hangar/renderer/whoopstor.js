@@ -7,12 +7,12 @@
 // them on every page.
 
 import { app, ask, render } from "./core.js";
-import { whoopstorVendor, whoopstorProduct, isWhoopstor, parseReport, Charges, keptCharge, firmwareWords, commands, commandBytes, chargePlan, chargeAndStorage, bleedMah } from "../shared/whoopstor.js";
+import { whoopstorVendor, whoopstorProduct, isWhoopstor, parseReport, Charges, keptCharge, firmwareWords, commands, commandBytes, chargePlan, chargeAndStorage, bleedMah, bleedOhms, curvePoint, stopWords } from "../shared/whoopstor.js";
 import { PretendWhoopStor } from "../shared/whoopstor-sim.js";
 
 /** What the page knows of the charger. */
 export const whoopstor = {
-  /** "off", "looking" or "on". */
+  /** "off", "looking" or "on"; "away" while a cycle test waits for the USB to come back. */
   link: "off",
   /** Why it isn't connected, in words, or null. */
   problem: null,
@@ -28,7 +28,9 @@ export const whoopstor = {
   sim: null,
 };
 
-let device = null, charges = null, timer = null, drawn = 0, sideDrawn = 0, triedQuietly = false;
+let device = null, charges = null, timer = null, drawn = 0, sideDrawn = 0, triedQuietly = false, askedWs3 = false;
+// The charger's clock at the last reading before the USB went, while a cycle test waits for it.
+let resumeFrom = null;
 
 // The pack the pilot said is in each port, { pack, skip }, until the port is seen empty: a pack left
 // in its port is still that pack when the run is stopped and started again, or the app is opened
@@ -75,17 +77,35 @@ function heard(bytes) {
   const report = parseReport(bytes);
   if (!report) return;
   lookForEmptyPorts(report);
+  // Back after the USB was out: a charger whose clock has gone back restarted meanwhile, and what
+  // it did then isn't known, so the cycle test can't go on.
+  if (report.page === 1 && resumeFrom !== null) {
+    if (report.ms < resumeFrom) cycleOver("The WhoopStor restarted while its USB was out, so the cycle test stopped.");
+    resumeFrom = null;
+  }
   const wasRunning = whoopstor.p1?.running;
   charges.heard(report);
   whoopstor.p1 = charges.p1;
   whoopstor.p2 = charges.p2;
   if (report.page === 1) {
     for (const [seq, done] of answers) if (report.cmdSeq === seq) done(report.cmdResult);
+    if (whoopstor.cycle?.active && report.phase === 7) cycleCurve(report);
     if (whoopstor.cycle?.running) cycleHeard(report);
     else if (whoopstor.cycle?.resting) restHeard(report);
     if (wasRunning !== false && !report.running && whoopstor.p2) putPortsBack();
   }
   whoopstor.sessions = charges.ports.map((port) => port.session);
+  // Once the charger has said which firmware it has, whether the project has a newer one: looked
+  // at on its Releases page once a day at most (main/firmware.js).
+  if (!askedWs3 && whoopstor.p1?.release && whoopstor.p2) {
+    askedWs3 = true;
+    try {
+      localStorage.setItem(firmwareFile, JSON.stringify({ release: whoopstor.p1.release, beta: whoopstor.p2.beta, build: whoopstor.p2.build, name: whoopstor.name }));
+    } catch {}
+    ask("ws3IfDue").then((now) => {
+      if (now && app.state) app.state.ws3 = now;
+    });
+  }
   // A report comes every 10 ms: the page is drawn again at most four times a second, and only the
   // battery page, and not while a pack's number is being typed, so its list of numbers stays open.
   const typing = document.activeElement?.matches?.("input.port-pack");
@@ -116,20 +136,84 @@ async function keep(session) {
 /** Connects to the charger: the one plugged in, or a pretend one. `quietly` doesn't ask Chromium for
  *  a device or complain when none is there, for trying when the page opens. */
 export async function connect({ quietly = false } = {}) {
-  if (whoopstor.link !== "off") return;
+  const resuming = whoopstor.link === "away";
+  if (whoopstor.link !== "off" && !resuming) return;
   whoopstor.link = "looking";
   whoopstor.problem = null;
   render();
-  charges = new Charges({ began, measured: () => render(), ended: (session) => keep(session) });
+  if (!resuming) charges = new Charges({ began, measured: () => render(), ended: (session) => keep(session) });
   try {
-    if (app.state.whoopstorSim) openSim(app.state.whoopstorSim);
-    else await openHid(quietly);
+    if (app.state.whoopstorSim) {
+      if (resuming && whoopstor.sim) whoopstor.sim.unplugged = false;
+      else openSim(app.state.whoopstorSim);
+    } else await openHid(quietly);
+    if (resuming) back();
     whoopstor.link = "on";
+    wake();
   } catch (error) {
+    if (resuming) {
+      whoopstor.link = "away";
+      if (!quietly) whoopstor.problem = error.message;
+      return render();
+    }
     await disconnect();
     if (!quietly) whoopstor.problem = error.message;
   }
   render();
+}
+
+// ---- The USB going out during a cycle test
+
+/** How long a cycle test waits for the WhoopStor's USB to come back. */
+const AWAY_MS = 30 * 60 * 1000;
+/** Commands waiting for the USB to come back. */
+let waiting = [];
+const whenBack = () => new Promise((done) => waiting.push(done));
+function wake() {
+  const all = waiting;
+  waiting = [];
+  for (const done of all) done();
+}
+
+/** Ends a cycle test wherever it is: a step or a rest. */
+function cycleOver(why) {
+  whoopstor.cycle?.finished?.(why);
+  whoopstor.cycle?.rested?.(why);
+}
+
+/** The USB went during a cycle test, as when a cable is knocked out. The charger carries on with the
+ *  step by itself, so the test waits for it, up to AWAY_MS, and picks up where it is: the charges
+ *  and the rest count on in the charger's own time, and the readings it missed are made up from
+ *  the ones either side. Commands wait too, and are sent once it is back. */
+function dropped() {
+  const test = whoopstor.cycle;
+  if (device) {
+    device.removeEventListener("inputreport", onInput);
+    device = null;
+  }
+  whoopstor.link = "away";
+  whoopstor.problem = null;
+  test.away = { since: Date.now(), until: Date.now() + AWAY_MS };
+  test.awayTimer = setTimeout(async () => {
+    cycleOver("The WhoopStor's USB was out for 30 minutes, so the cycle test stopped.");
+    await disconnect();
+    render();
+    whoopstor.onSide?.();
+  }, AWAY_MS);
+  render();
+  whoopstor.onSide?.();
+}
+
+/** The USB is back: the test goes on from the charger's next reading. */
+function back() {
+  const test = whoopstor.cycle;
+  clearTimeout(test?.awayTimer);
+  if (test?.away) test.awayFor = (test.awayFor ?? 0) + (Date.now() - test.away.since);
+  if (test) test.away = null;
+  if (test) test.bridging = true;
+  resumeFrom = whoopstor.p1?.ms ?? null;
+  charges.resume();
+  whoopstor.onSide?.();
 }
 
 async function openHid(quietly) {
@@ -161,15 +245,31 @@ function openSim(speed) {
       sim.step(10);
       const report = sim.report();
       const starting = sim.ports.some((port) => ["probe", "charge"].includes(port.state) && sim.ms - port.since < 15000);
-      if (starting || sim.speed <= 2 || (sim.ms / 10) % 20 < 2) heard(report);
+      // With its USB pretended out, it goes on charging, and nothing is heard.
+      if (!sim.unplugged && (starting || sim.speed <= 2 || (sim.ms / 10) % 20 < 2)) heard(report);
     }
   }, 20);
 }
+
+/** For the app's checks: the pretend charger's USB pulled out, and put back. */
+whoopstor.pretendUnplug = () => {
+  if (!whoopstor.sim) return;
+  whoopstor.sim.unplugged = true;
+  if (whoopstor.cycle?.active && whoopstor.link === "on") dropped();
+  else disconnect().then(render);
+};
+whoopstor.pretendPlugBack = () => {
+  if (!whoopstor.sim) return;
+  if (whoopstor.link === "away") connect({ quietly: true });
+};
 
 /** Lets the charger go. Charges still going are kept as far as they got. */
 export async function disconnect() {
   whoopstor.cycle?.finished?.("The WhoopStor's connection was lost, so the cycle test stopped.");
   whoopstor.cycle?.rested?.("The WhoopStor's connection was lost, so the cycle test stopped.");
+  clearTimeout(whoopstor.cycle?.awayTimer);
+  if (whoopstor.cycle) whoopstor.cycle.away = null;
+  resumeFrom = null;
   charges?.lost();
   clearInterval(timer);
   timer = null;
@@ -182,8 +282,24 @@ export async function disconnect() {
     device = null;
   }
   whoopstor.link = "off";
+  askedWs3 = false;
   whoopstor.p1 = whoopstor.p2 = null;
   whoopstor.sessions = [null, null, null, null, null, null];
+  wake();
+}
+
+// The firmware the charger last said it had, so Home can say a newer one is out while it is unplugged.
+const firmwareFile = "whoopstor firmware";
+
+/** The charger's firmware as `{ p1, p2, name }` for shared/ws3.js: as it says now, or as it said
+ *  when it was last connected. Null when it has never said. */
+export function firmwareSeen() {
+  if (whoopstor.p1?.release && whoopstor.p2) return { p1: whoopstor.p1, p2: whoopstor.p2, name: whoopstor.name ?? "" };
+  try {
+    const kept = JSON.parse(localStorage.getItem(firmwareFile) ?? "null");
+    if (kept?.release) return { p1: { release: kept.release }, p2: { beta: kept.beta, build: kept.build }, name: kept.name ?? "" };
+  } catch {}
+  return null;
 }
 
 /** Connects by itself as the app opens, and the first time the battery page shows, if a WhoopStor is
@@ -207,11 +323,30 @@ export const skippedIn = (index) => Boolean(whoopstor.sessions[index]?.skip ?? r
 
 /** Says which pack is in a port: a pack's id, or "skip" for one that isn't the pilot's. With no
  *  charge going, it is remembered for when one starts. A charge that has already been kept is
- *  changed to match. */
+ *  changed to match, and so is a cycle test going on. A pack is in one port at a time: given to a
+ *  port, it comes off any other port with a pack in it that said it, which then asks for its number
+ *  again. (A port since emptied keeps its last charge as it was: the pack was there then.) */
 export async function choosePack(port, pack) {
-  remember(port - 1, pack === "skip" ? { skip: true } : pack ? { pack } : null);
-  const session = charges?.ports[port - 1]?.session;
-  if (!session) return render();
+  const index = port - 1;
+  const moved = pack && pack !== "skip"
+    ? [0, 1, 2, 3, 4, 5].filter((other) => other !== index && (whoopstor.p1?.volts[other] ?? 0) >= 1 && packIn(other)?.id === pack)
+    : [];
+  for (const other of moved) await setPack(other, null);
+  await setPack(index, pack);
+  if (moved.length) {
+    const name = app.state.batteries.packs[pack]?.name ?? "That pack";
+    const ports = moved.map((other) => other + 1).join(" and ");
+    app.notice = `${name} was in port ${ports} too. It is in port ${port} now, so port ${ports} asks for its number again.`;
+  }
+  render();
+}
+
+async function setPack(index, pack) {
+  remember(index, pack === "skip" ? { skip: true } : pack ? { pack } : null);
+  const testing = whoopstor.cycle?.active ? whoopstor.cycle.ports.find((one) => one.index === index) : null;
+  if (testing) Object.assign(testing, { pack: pack && pack !== "skip" ? pack : null, skip: pack === "skip" });
+  const session = charges?.ports[index]?.session;
+  if (!session) return;
   let answer = null;
   if (pack === "skip") {
     session.skip = true;
@@ -220,11 +355,10 @@ export async function choosePack(port, pack) {
   } else {
     session.skip = false;
     session.pack = pack || null;
-    if (session.keptId && session.pack) answer = await ask("assignBatteryTest", session.keptId, session.pack);
-    else if (session.end && !session.keptId) await keep(session);
+    if (session.keptId) answer = await ask("assignBatteryTest", session.keptId, session.pack);
+    else if (session.end) await keep(session);
   }
   if (answer?.state) app.state = answer.state;
-  render();
 }
 
 // ---- Start and Stop
@@ -256,17 +390,24 @@ function send(bytes) {
  *  "no answer". The same report is sent again after half a second without an answer, as the
  *  firmware asks: it runs a number only once. */
 async function command(code, arg = 0, extra = 0) {
-  if (whoopstor.link !== "on") return "no answer";
+  if (whoopstor.link !== "on" && whoopstor.link !== "away") return "no answer";
   do sequence = (sequence % 254) + 1; while (whoopstor.p1?.cmdSeq === sequence);
   const seq = sequence, bytes = commandBytes(code, seq, arg, extra);
-  for (let tries = 0; tries < 6; tries += 1) {
-    const result = await new Promise((done) => {
-      answers.set(seq, done);
-      setTimeout(() => done(null), 500);
-      Promise.resolve(send(bytes)).catch(() => done(null));
-    });
-    answers.delete(seq);
-    if (result !== null) return ["done", "refused", "unknown"][result] ?? "unknown";
+  // While a cycle test waits for the USB to come back, a command waits with it and is sent again
+  // once it is: one that got through before it went isn't run twice, as the number is the same.
+  for (let round = 0; round < 2; round += 1) {
+    if (whoopstor.link === "away") await whenBack();
+    if (whoopstor.link !== "on") return "no answer";
+    for (let tries = 0; tries < 6 && whoopstor.link === "on"; tries += 1) {
+      const result = await new Promise((done) => {
+        answers.set(seq, done);
+        setTimeout(() => done(null), 500);
+        Promise.resolve(send(bytes)).catch(() => done(null));
+      });
+      answers.delete(seq);
+      if (result !== null) return ["done", "refused", "unknown"][result] ?? "unknown";
+    }
+    if (whoopstor.link !== "away") break;
   }
   return "no answer";
 }
@@ -356,7 +497,9 @@ export async function cycleTest(cycles = 2) {
     active: true, running: false, stopping: false, over: false, cycles, done: false, problem: null,
     steps: Array.from({ length: cycles }, () => ["charge", "discharge"]).flat(), step: 0,
     fullVolts, storageVolts, startedAt: new Date(), stepStartedAt: null, originalTarget: p1.targetIndex,
-    ports: testing.map((step) => ({ index: step.port - 1, pack: step.pack.id, amps: step.amps, results: [] })),
+    // The charger's clock as it started: the curve and each step's start and end are counted from it.
+    ms0: p1.ms,
+    ports: testing.map((step) => ({ index: step.port - 1, pack: step.pack.id, amps: step.amps, results: [], curve: [] })),
   };
   render();
   await ask("stayAwake", true);
@@ -367,9 +510,11 @@ export async function cycleTest(cycles = 2) {
       if (whoopstor.p1.targetIndex !== target && (await command(commands.target, target)) !== "done") throw new Error("The WhoopStor didn't take its target voltage. Is its menu open, or is ALLOW 4.35V set to NO?");
       const wrong = await setPorts(steps);
       if (wrong) throw new Error(wrong);
-      for (const port of test.ports) Object.assign(port, { moved: false, out: 0, startVolts: whoopstor.p1.volts[port.index] });
+      for (const port of test.ports) Object.assign(port, { moved: false, out: 0, startVolts: whoopstor.p1.volts[port.index], lastVolts: null, wasBleeding: false, session: null });
       test.stepStartedAt = Date.now();
+      test.stepFrom = testSeconds(test);
       test.lastMs = null;
+      test.stepUnseen = 0;
       const outcome = new Promise((done) => { test.finished = done; });
       if ((await command(commands.start)) !== "done") throw new Error("The WhoopStor didn't start. It won't while its menu is open or a problem shows on its screen.");
       test.running = true;
@@ -377,13 +522,17 @@ export async function cycleTest(cycles = 2) {
       const how = await outcome;
       test.running = false;
       for (const port of test.ports) {
-        const session = whoopstor.sessions[port.index];
+        const session = port.session;
         port.results.push({
           kind, minutes: Math.round((Date.now() - test.stepStartedAt) / 600) / 100,
-          startVolts: Math.round(port.startVolts * 1000) / 1000, endVolts: Math.round(whoopstor.p1.volts[port.index] * 1000) / 1000,
+          startVolts: Math.round(port.startVolts * 1000) / 1000, endVolts: Math.round((whoopstor.p1?.volts[port.index] ?? port.lastVolts ?? port.startVolts) * 1000) / 1000,
           mah: Math.round((kind === "charge" ? session?.mah ?? 0 : port.out) * 10) / 10,
           resistance: kind === "charge" ? session?.resistance?.mohm ?? null : null,
           ...(kind === "discharge" ? { worked: "from the voltage across the 18 ohm load" } : {}),
+          // The USB was out for part of the step: what went in or out then is made up.
+          ...(test.stepUnseen > 0 ? { unseenSeconds: Math.round(test.stepUnseen) } : {}),
+          // Where the step is on the test's curve, in seconds from the start.
+          fromS: test.stepFrom, toS: testSeconds(test, port),
         });
       }
       test.stopping = true;
@@ -409,11 +558,13 @@ export async function cycleTest(cycles = 2) {
     test.active = false;
     await putPortsBack();
     for (const port of test.ports) {
-      if (!port.results.length) continue;
+      if (!port.results.length || port.skip) continue;
       const kept = {
         id: `c${test.startedAt.getTime().toString(36)}${port.index + 1}`, pack: port.pack, at: test.startedAt.toISOString(),
         kind: "cycle", source: "whoopstor", port: port.index + 1, amps: port.amps, fullVolts, storageVolts, cycles,
         end: test.done ? "done" : "stopped", problem: test.problem, steps: port.results,
+        // The whole test, a reading every 15 seconds, rests and all, for its graph.
+        ...(port.curve.length > 1 ? { curve: port.curve } : {}),
       };
       const answer = await ask("keepBatteryTest", kept);
       if (answer?.state) app.state = answer.state;
@@ -422,7 +573,31 @@ export async function cycleTest(cycles = 2) {
     test.over = true;
     render();
   }
-  return test.problem;
+  return test.after ?? test.problem;
+}
+
+/** How often a cycle test keeps a reading of each pack for its graph, in the charger's time. */
+const CYCLE_CURVE_MS = 15000;
+
+/** Seconds since the test started, by the charger's clock: from the latest reading, or the port's
+ *  last point when there is none just now. */
+function testSeconds(test, port = null) {
+  if (whoopstor.p1 && whoopstor.p1.ms >= test.ms0) return Math.round((whoopstor.p1.ms - test.ms0) / 1000);
+  return port?.curve.at(-1)?.[0] ?? test.ports[0]?.curve.at(-1)?.[0] ?? 0;
+}
+
+/** Keeps a reading of each pack in the test every CYCLE_CURVE_MS, charging, going down or resting.
+ *  Going down, the current is the load's, worked out from the voltage, and below 0. */
+function cycleCurve(report) {
+  const test = whoopstor.cycle;
+  if (report.ms < test.ms0) return;
+  for (const port of test.ports) {
+    if (port.curveMs !== undefined && report.ms - port.curveMs < CYCLE_CURVE_MS) continue;
+    const volts = report.volts[port.index];
+    const amps = report.bleeding[port.index] ? -volts / bleedOhms : report.amps[port.index];
+    port.curve.push(curvePoint(report.ms - test.ms0, volts, amps));
+    port.curveMs = report.ms;
+  }
 }
 
 /** How long a cycle test rests between steps, in the charger's own time (so a pretend one, running
@@ -458,26 +633,53 @@ function restHeard(report) {
 /** Stops a cycle test, wherever it is: a step, a rest, or between. */
 export async function stopCycleTest() {
   const test = whoopstor.cycle;
-  test?.finished?.("The cycle test was stopped.");
-  test?.rested?.("The cycle test was stopped.");
+  if (whoopstor.link === "away" && test) {
+    // What the page says once the test has ended, in place of only "stopped".
+    test.after = "The cycle test is stopped. The WhoopStor's USB is still out, so it carries on with its step by itself: press its left button for half a second to stop it.";
+    cycleOver("The cycle test was stopped.");
+    await disconnect();
+    return null;
+  }
+  cycleOver("The cycle test was stopped.");
   return stop();
+}
+
+/** Why a cycle test ended when the charger stopped part way through a step, without the Hangar's Stop:
+ *  at the charger itself (its button), or by itself for the reason it gives (stopWords). */
+function stoppedWhy(code) {
+  if (code === 4) return "The WhoopStor was stopped on the charger itself, so the cycle test stopped.";
+  if (code > 0 && stopWords[code]) return `The WhoopStor stopped by itself: ${stopWords[code]}. So the cycle test stopped.`;
+  return "The WhoopStor stopped, so the cycle test stopped.";
 }
 
 /** Follows a cycle test's step from each report: what the load takes out of each pack, and when
  *  every pack in it has got where the step was taking it. */
 function cycleHeard(report) {
   const test = whoopstor.cycle;
-  const dt = test.lastMs === null ? 0 : Math.max(0, Math.min(1000, report.ms - test.lastMs));
+  // Readings come every 10 ms or so; the first after the USB was out comes after the whole gap.
+  const gap = test.lastMs === null ? 0 : report.ms - test.lastMs;
+  const dt = Math.max(0, Math.min(test.bridging ? gap : 1000, gap));
+  test.bridging = false;
   test.lastMs = report.ms;
+  if (dt > 1000) test.stepUnseen += dt / 1000;
+  for (const port of test.ports) port.session = charges?.ports[port.index]?.session ?? port.session;
   if (!report.running) {
-    if (!test.stopping) test.finished?.("The cycle test was stopped.");
+    if (!test.stopping) test.finished?.(stoppedWhy(report.stopped));
     return;
   }
   const kind = test.steps[test.step], elapsed = Date.now() - test.stepStartedAt;
   let all = true;
   for (const port of test.ports) {
     const state = report.states[port.index], volts = report.volts[port.index];
-    if (report.bleeding[port.index]) port.out += bleedMah(volts, dt);
+    const bleeding = report.bleeding[port.index];
+    if (dt > 1000) {
+      // Across the time the USB was out: the load took about this much, from the voltage either side,
+      // for all of it if it was on at both ends, and half if at one.
+      const share = (bleeding ? 0.5 : 0) + (port.wasBleeding ? 0.5 : 0);
+      port.out += bleedMah((volts + (port.lastVolts ?? volts)) / 2, dt * share);
+    } else if (bleeding) port.out += bleedMah(volts, dt);
+    port.lastVolts = volts;
+    port.wasBleeding = bleeding;
     if (["probe", "charge", "rest", "bleed"].includes(state)) port.moved = true;
     const there = volts < 1 || state === "fault" || (state === "full" && (port.moved || elapsed > 10000));
     if (!there) all = false;
@@ -488,10 +690,12 @@ function cycleHeard(report) {
 
 navigator.hid?.addEventListener("disconnect", async (event) => {
   if (event.device !== device) return;
+  // During a cycle test, it waits for the USB to come back.
+  if (whoopstor.cycle?.active && whoopstor.link === "on") return dropped();
   await disconnect();
   whoopstor.problem = "The WhoopStor was unplugged.";
   render();
 });
 navigator.hid?.addEventListener("connect", (event) => {
-  if (isWhoopstor(event.device) && whoopstor.link === "off" && app.state && !app.state.quiet) connect({ quietly: true });
+  if (isWhoopstor(event.device) && (whoopstor.link === "off" || whoopstor.link === "away") && app.state && !app.state.quiet) connect({ quietly: true });
 });

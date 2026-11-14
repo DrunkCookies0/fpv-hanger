@@ -16,6 +16,13 @@ test("a tool's page stays the tool only on the project's own address", () => {
   // Another project's pages on the same host are not the flasher.
   assert.ok(!isWithin(elrsFlasher, "https://expresslrs.github.io/somewhere-else/"));
   assert.ok(!isWithin(elrsFlasher, null));
+  // Betaflight's log viewer is its own site: Betaflight's app and its docs are not the viewer.
+  const { blackbox } = outsideTools;
+  assert.ok(isWithin(blackbox, "https://blackbox.betaflight.com/"));
+  assert.ok(isWithin(blackbox, "https://blackbox.betaflight.com/index.html"));
+  assert.ok(!isWithin(blackbox, "https://app.betaflight.com/"));
+  assert.ok(!isWithin(blackbox, "https://betaflight.com/docs/wiki/guides/current/Black-Box-logging-and-usage"));
+  assert.notEqual(blackbox.partition, outsideTools.betaflight.partition);
 });
 
 const sum = (letter) => `${letter.repeat(86)}==`;

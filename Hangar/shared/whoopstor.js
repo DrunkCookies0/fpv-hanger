@@ -29,6 +29,7 @@ const NO_CELL = 1.0;                 // volts: below this a port has no pack
 const LOOK_BACK_MS = 1500;           // how much of a port's readings before a charge starts are kept
 const TRACE_MS = 15000;              // how much of each charge's start is kept, reading by reading
 const FIT_MS = 8000;                 // how much of the current's ramp the resistance is worked out over
+export const CURVE_MS = 10000;       // a charge's whole curve, for its graph: a reading every 10 seconds
 const SETTLE_MS = 150;               // after a pack is plugged in, its first readings are left out
 
 /** A current setting by the name the charger gives it: its steps are 7 counts apart, 21 counts being
@@ -227,8 +228,18 @@ export class Charges {
     const last = this.p1;
     this.p1 = report;
     if (report.phase !== 7) return;                       // before the charger runs, its readings are zero
-    const dt = last ? Math.max(0, Math.min(1000, report.ms - last.ms)) : 0;
+    // A gap between readings counts as a second at most, except the time the USB was out (resume):
+    // the charger went on by itself meanwhile, and its clock says for how long.
+    const gap = last ? report.ms - last.ms : 0;
+    const dt = gap > 0 ? Math.min(gap, this.resuming ? Infinity : 1000) : 0;
+    this.resuming = false;
     report.states.forEach((state, index) => this.port(index, state, report, dt, last));
+  }
+
+  /** The USB is back after being out, with the charges still open: the next reading takes in the time
+   *  between, what went in meanwhile made up from the currents either side of it. */
+  resume() {
+    this.resuming = true;
   }
 
   port(index, state, report, dt, last) {
@@ -258,6 +269,7 @@ export class Charges {
           port: index + 1, began: this.now(), ms0: ms, msLast: ms, mah: 0, maxAmps: 0, amps: this.setFor(index) || report.current,
           target: report.target, startVolts: median(port.before.filter(([, , amps]) => amps === 0).map(([, volts]) => volts).concat(partial ? [] : [v])) || v,
           endVolts: v, resistance: null, end: null, partial, trace: [...port.before], kept: false,
+          curve: [curvePoint(0, v, a)], curveMs: ms, lastAmps: a,
         };
         port.before = [];
         this.began(session);
@@ -266,7 +278,15 @@ export class Charges {
     }
     session.msLast = ms;
     session.endVolts = v;
-    session.mah += (a * dt) / 3600;
+    session.lastAmps = a;
+    if (!session.end && ms - session.curveMs >= CURVE_MS) {
+      session.curve.push(curvePoint(ms - session.ms0, v, a));
+      session.curveMs = ms;
+    }
+    if (dt > 1000) {
+      session.mah += (((a + (last?.amps?.[index] ?? a)) / 2) * dt) / 3600;
+      session.unseen = (session.unseen ?? 0) + dt / 1000;
+    } else session.mah += (a * dt) / 3600;
     session.maxAmps = Math.max(session.maxAmps, a);
     if (this.setFor(index)) session.amps = this.setFor(index);
     if (ms - session.ms0 <= TRACE_MS) session.trace.push([ms, v, a]);
@@ -296,6 +316,9 @@ export class Charges {
     const session = port.session;
     if (!session) return;
     if (!session.end) {
+      // The last reading ends its curve.
+      const at = session.msLast - session.ms0;
+      if (session.curve?.length && at > (session.curve.at(-1)[0] * 1000)) session.curve.push(curvePoint(at, session.endVolts, session.lastAmps ?? 0));
       session.end = why;
       session.minutes = Math.round((session.msLast - session.ms0) / 600) / 100;
       this.ended(session);
@@ -314,6 +337,10 @@ export class Charges {
   }
 }
 
+/** A point of a charge's curve, as kept: [seconds from its start, millivolts, milliamps]. A pack going
+ *  down on the charger's load has its current below 0. */
+export const curvePoint = (ms, volts, amps) => [Math.round(ms / 1000), Math.round(volts * 1000), Math.round(amps * 1000)];
+
 /** One charge, as the library keeps it, from a session. Null when there's nothing worth keeping. */
 export function keptCharge(session, { pack = null, firmware = null } = {}) {
   if (!session || (session.mah < 1 && !session.resistance)) return null;
@@ -327,6 +354,10 @@ export function keptCharge(session, { pack = null, firmware = null } = {}) {
     startVolts: Math.round(session.startVolts * 1000) / 1000, endVolts: Math.round(session.endVolts * 1000) / 1000,
     resistance: session.resistance?.mohm ?? null, resistanceHow: session.resistance?.how ?? resistanceMethod, upTo: session.resistance?.upTo ?? null,
     end: session.end, partial: Boolean(session.partial), firmware,
+    // Seconds the USB was out during the charge, when it was: what went in then is made up.
+    ...(session.unseen ? { unseenSeconds: Math.round(session.unseen) } : {}),
+    // The whole charge, a reading every 10 seconds, for its graph.
+    ...(session.curve?.length > 1 ? { curve: session.curve } : {}),
     // The start of the charge, reading by reading, so the resistance can be worked out again later.
     trace: session.trace.map(([ms, v, a]) => [ms - t0, Math.round(v * 10000) / 10000, Math.round(a * 10000) / 10000]),
   };

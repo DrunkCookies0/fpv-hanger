@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Lines, newPack, keptFrom, withTest, factsOf, typicalSag, verdictOf, limitsFor, withDefaults, portFactors, chargeGrade, recommendLimits, limitsChecked, defaultLimits } from "../shared/batteries.js";
+import { Lines, newPack, keptFrom, withTest, factsOf, typicalSag, verdictOf, limitsFor, withDefaults, chargeGrade, recommendLimits, limitsChecked, defaultLimits, cycleWindow, cycleGrade } from "../shared/batteries.js";
 
 const at = (minute) => new Date(Date.UTC(2026, 9, 26, 12, minute));
 const sag = (pack, r_end, minute, v_rest = 4.33) => keptFrom({ type: "sag", v_rest, r_5ms: r_end * 0.7, r_1s: r_end * 0.9, r_end, v_end: 3.9, a_end: 6.5, curve: [[0, 4.3, 0], [5, 4.0, 6.4]] }, { pack, at: at(minute) });
@@ -105,39 +105,72 @@ function charged(readings, packs = { a: 300, b: 300, c: 300, d: 300 }) {
   return kept;
 }
 
-test("the ports' own share of the resistance is learnt from packs read on more than one", () => {
-  // Port 5 reads 80% higher than port 1. True: a 60, b 65, c 62, d 110.
-  const facts = factsOf(charged([["a", 1, 60], ["a", 5, 108], ["b", 1, 65], ["c", 5, 111.6], ["d", 1, 110], ["d", 5, 198]]));
-  const ports = portFactors(facts);
-  assert.deepEqual([...ports.linked].sort(), [1, 5]);
-  assert.ok(Math.abs(ports.factors[5] / ports.factors[1] - 1.8) < 0.01, `${ports.factors[5] / ports.factors[1]}`);
-  const words = ["a", "b", "c", "d"].map((id) => chargeGrade(facts[id], facts).word);
-  assert.deepEqual(words, ["race", "race", "race", "retire"]);
-  assert.match(chargeGrade(facts.d, facts).reason, /above your typical 300 mAh pack, with the ports allowed for/);
-  assert.equal(verdictOf(facts.d, facts).word, "retire");
+/** A library of WhoopStor cycle tests: [pack, port, mΩ from storage], in the order they happened.
+ *  Each one's first charge reads 20% higher, as one after sitting can, and isn't the one graded. */
+function cycled(readings, packs = { a: 300, b: 300, c: 300, d: 300 }, kept = null) {
+  kept ??= withDefaults({ packs: Object.fromEntries(Object.entries(packs).map(([id, mah]) => [id, { id, name: id, mah, retired: null }])) });
+  readings.forEach(([pack, port, resistance], index) => {
+    kept = withTest(kept, {
+      id: `y${index}`, pack, at: at(100 + index).toISOString(), kind: "cycle", source: "whoopstor", port, amps: 0.6, fullVolts: 4.35, storageVolts: 3.85, cycles: 2, end: "done",
+      steps: [
+        { kind: "charge", endVolts: 4.35, mah: 170, resistance: resistance * 1.2 }, { kind: "discharge", endVolts: 3.85, mah: 158 },
+        { kind: "charge", endVolts: 4.35, mah: 171, resistance }, { kind: "discharge", endVolts: 3.85, mah: 157 },
+      ],
+    });
+  });
+  return kept;
+}
+
+test("packs are graded on their cycle tests' charges from storage, alike on every port", () => {
+  // Other charges, before and after, start wherever the packs were: a top-up from full on port 6
+  // reads low, a first charge after sitting high. Neither counts.
+  const plain = charged([["a", 1, 190], ["d", 6, 100], ["b", 2, 150]]);
+  const facts = factsOf(cycled([["a", 1, 140], ["b", 2, 145], ["c", 3, 150], ["d", 6, 200]], undefined, plain));
+  // Typical: 147.5 mΩ, the middle of the four.
+  assert.deepEqual(["a", "b", "c", "d"].map((id) => chargeGrade(facts[id], facts).word), ["race", "race", "race", "fun"]);
+  assert.equal(facts.d.latestReading.resistance, 200);
+  assert.match(chargeGrade(facts.d, facts).reason, /^Charging resistance from storage 36% above your typical 300 mAh pack's, in cycle tests$/);
+  assert.equal(verdictOf(facts.d, facts).word, "fun");
+  assert.ok(verdictOf(facts.d, facts).reasons.includes("200 mΩ charging from storage on port 6"));
+  // A charge going on in a cycle test, after its first, is graded as it will be once kept.
+  // Typical with it: the middle of 400, 145, 150 and 200, 175 mΩ.
+  assert.equal(chargeGrade(facts.a, facts, { resistance: 400, port: 1 }).word, "retire");
 });
 
-test("with no pack moved between ports, packs are graded only against others read on the same port", () => {
-  const facts = factsOf(charged([["a", 1, 60], ["b", 1, 65], ["d", 1, 110], ["c", 5, 111.6]]));
-  assert.equal(portFactors(facts).linked.size, 0);
-  assert.equal(chargeGrade(facts.d, facts).word, "retire");
-  assert.match(chargeGrade(facts.d, facts).reason, /among packs read on port 1/);
-  assert.equal(chargeGrade(facts.c, facts), null);
-  // Fewer than three of a size: nothing to say.
-  const two = factsOf(charged([["a", 1, 60], ["b", 1, 90]]));
+test("a pack with charges but no cycle test isn't graded on them, and says what would", () => {
+  const facts = factsOf(cycled([["a", 1, 140], ["b", 2, 145], ["c", 3, 150]], undefined, charged([["d", 1, 400]])));
+  assert.equal(chargeGrade(facts.d, facts), null);
+  const verdict = verdictOf(facts.d, facts);
+  assert.equal(verdict.word, null);
+  assert.ok(verdict.reasons.some((reason) => /A cycle test grades its charging resistance/.test(reason)), verdict.reasons.join(" | "));
+  // Fewer than three of a size with cycle tests: nothing to say.
+  const two = factsOf(cycled([["a", 1, 60], ["b", 1, 90]]));
   assert.equal(chargeGrade(two.b, two), null);
+});
+
+test("a step a stopped test was on isn't counted as a whole one", () => {
+  const stopped = (steps) => ({ fullVolts: 4.35, storageVolts: 3.85, steps });
+  // Stopped two minutes into its second charge, as run 5 was: what came out counts, the 22 mAh in doesn't.
+  const partCharge = cycleWindow(stopped([{ kind: "charge", endVolts: 4.349, mah: 170 }, { kind: "discharge", endVolts: 3.853, mah: 159 }, { kind: "charge", endVolts: 3.994, mah: 22 }]));
+  assert.deepEqual([partCharge.in, partCharge.out], [null, 159]);
+  // Stopped on the way down: nothing to go by.
+  assert.equal(cycleWindow(stopped([{ kind: "charge", endVolts: 4.35, mah: 170 }, { kind: "discharge", endVolts: 4.02, mah: 60 }])), null);
+  // Its capacity goes by the latest test that got down to storage.
+  let kept = cycled([["a", 1, 140], ["b", 2, 145], ["c", 3, 150]]);
+  kept = withTest(kept, { id: "late", pack: "a", at: at(200).toISOString(), kind: "cycle", source: "whoopstor", port: 1, ...stopped([{ kind: "charge", endVolts: 4.35, mah: 170 }, { kind: "discharge", endVolts: 4.02, mah: 60 }]) });
+  const facts = factsOf(kept);
+  assert.equal(cycleGrade(facts.a, facts).word, "race");
 });
 
 test("limits are suggested from the pilot's own calls on their packs", () => {
   // Charging resistance against the typical 300 (the middle one, 76 mΩ): a 0.80, b 0.87, c 1.0, d 1.2, e 1.84.
-  let kept = charged([["a", 1, 61], ["b", 1, 66], ["c", 1, 76], ["d", 1, 91.5], ["e", 1, 140]], { a: 300, b: 300, c: 300, d: 300, e: 300 });
+  let kept = cycled([["a", 1, 61], ["b", 2, 66], ["c", 3, 76], ["d", 4, 91.5], ["e", 5, 140]], { a: 300, b: 300, c: 300, d: 300, e: 300 });
   const call = (id, word) => { kept.packs[id] = { ...kept.packs[id], call: word }; };
   call("a", "race"); call("b", "race"); call("c", "fun"); call("e", "retire");
   const suggested = recommendLimits(factsOf(kept));
   assert.equal(suggested.calls, 4);
   assert.ok(suggested.raceResistance > 0.87 && suggested.raceResistance < 1.0, `${suggested.raceResistance}`);
   assert.ok(suggested.funResistance > 1.0 && suggested.funResistance < 1.84, `${suggested.funResistance}`);
-  assert.equal(suggested.raceCapacity, null);                     // no cycle tests to go by
   // Nothing on one side of a limit: nothing to suggest for it.
   call("e", "fun");
   assert.equal(recommendLimits(factsOf(kept)).funResistance, null);

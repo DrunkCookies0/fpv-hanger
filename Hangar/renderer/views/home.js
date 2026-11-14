@@ -10,8 +10,9 @@ import { showNote } from "./notes.js";
 import { programStatus } from "./tool.js";
 import { radioStatus } from "./radio.js";
 import { factsOf, verdictOf } from "../../shared/batteries.js";
-import { stop as stopCharger, stopCycleTest } from "../whoopstor.js";
+import { stop as stopCharger, stopCycleTest, firmwareSeen } from "../whoopstor.js";
 import { openFromSide, chargerNow, statusColour } from "./live.js";
+import { ws3Note } from "./ws3.js";
 
 /** Says a newer version is ready. Pressing it goes to where it is installed. */
 export function updatePill() {
@@ -22,7 +23,9 @@ export function updatePill() {
 
 /** A line about where one of the setup tools stands. */
 function setupStatus(tool) {
-  if (tool === "betaflight" || tool === "elrsFlasher") return "Always their newest";
+  if (tool === "betaflight" || tool === "blackbox" || tool === "elrsFlasher") return "Always their newest";
+  if (tool === "rates") return "Any rate type, as a curve";
+  if (tool === "osdFont") return "Letters, icons and logo, for analog";
   if (tool === "elrsConfigurator" || tool === "edgetxCompanion") return programStatus(tool);
   if (tool === "radioBackups") return radioStatus();
   return "";
@@ -154,6 +157,7 @@ function batteriesCard() {
         h("div.row.wrap.small.home-legend",
           ["race", "fun", "retire"].map((word) => h("span", h("b", { style: { color: statusColour[word] } }, String(counts[word])), ` ${word.toUpperCase()}`)),
           counts.none > 0 && h("span.dim", `${counts.none} not measured yet`)),
+        ws3Note(firmwareSeen()),
         untried.length > 0 && h("p.small.home-note", untried.length > 8 ? `${untried.length} packs haven't been charged on the WhoopStor yet.` : `${untried.length === 1 ? "Pack" : "Packs"} ${numbersInWords(untried)} ${untried.length === 1 ? "hasn't" : "haven't"} been charged on the WhoopStor yet.`),
       ],
     h("div.row.tight.home-card-foot", secondary("Open Batteries", () => openFromSide("batteryTester"), { probe: "home open batteries" })),
@@ -163,7 +167,7 @@ function batteriesCard() {
 function setupCard() {
   return h("section.card.home-card", { "aria-label": "Firmware, setup and radio" },
     label("FIRMWARE, SETUP & RADIO"),
-    h("div.home-rows", ["betaflight", "elrsFlasher", "elrsConfigurator", "edgetxCompanion", "radioBackups"].map((name) => h("button.home-row", { type: "button", probe: `home ${name}`, onclick: () => openFromSide(name) },
+    h("div.home-rows", ["betaflight", "blackbox", "rates", "osdFont", "elrsFlasher", "elrsConfigurator", "edgetxCompanion", "radioBackups"].map((name) => h("button.home-row", { type: "button", probe: `home ${name}`, onclick: () => openFromSide(name) },
       h("span.home-row-icon", icon(tools[name].icon, 15)),
       h("span.home-row-words", h("span.home-row-title", tools[name].short ?? tools[name].title), h("span.dim.small", setupStatus(name)))))),
   );

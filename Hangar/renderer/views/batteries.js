@@ -5,10 +5,12 @@ import { app, ask, take, goBack, backTitle, render, open } from "../core.js";
 import { h, label, primary, secondary, plain, field, when, redraw } from "../ui.js";
 import { confirm, question } from "../sheets.js";
 import { tester, connect, disconnect, start, command } from "../tester.js";
-import { whoopstor, connect as connectCharger, disconnect as disconnectCharger, connectWhenThere, choosePack, packIn, skippedIn, plan, start as startCharger, stop as stopCharger, cycleTest, cycleProblem, stopCycleTest } from "../whoopstor.js";
+import { whoopstor, firmwareSeen, connect as connectCharger, disconnect as disconnectCharger, connectWhenThere, choosePack, packIn, skippedIn, plan, start as startCharger, stop as stopCharger, cycleTest, cycleProblem, stopCycleTest } from "../whoopstor.js";
 import { factsOf, verdictOf, limitsFor, nextPackName, cycleWindow, chargeGrade, statusWords, defaultLimits, recommendLimits, phaseWords, problemWords, refusalWords } from "../../shared/batteries.js";
 import { firmwareWords, portWords, endedWords, endWords, stopWords } from "../../shared/whoopstor.js";
 import { statusColour } from "./live.js";
+import { ws3News } from "./ws3.js";
+import { curveChart, sparkline } from "./curve.js";
 
 /** Back to the Video Creator, for a page opened from there. Everything else is in the sidebar. */
 const backLink = () => (backTitle() === "Hangar" ? null : secondary(backTitle(), goBack, { icon: "chevronLeft", probe: "back", help: "Back to the Video Creator" }));
@@ -24,6 +26,8 @@ const typed = new Map();
 let editing = null;
 /** Packs whose tests are showing. */
 const opened = new Set();
+/** The test whose graph shows in an open pack's row, by the pack, when it isn't the latest. */
+const graphOf = new Map();
 /** The tester board's part of the page, which stays out of the way until there is a board. */
 let showTester = false;
 /** Which packs the list shows: "all", a status ("race", "fun", "retire"), or a size in mAh. */
@@ -204,11 +208,36 @@ function testLine(test) {
   }
   if (test.kind === "cycle") {
     const steps = test.steps.map((step) => `${step.kind === "charge" ? `${Math.round(step.mah)} in` : `~${Math.round(step.mah)} out`}${typeof step.settledVolts === "number" ? `, settled ${step.settledVolts.toFixed(2)} V` : ""}`);
-    return [at, `Cycle test, port ${test.port}, ${test.storageVolts}–${test.fullVolts} V`, `${steps.join(" · ")}${test.end === "done" ? "" : " · stopped"}`];
+    const out = test.steps.reduce((sum, step) => sum + (step.unseenSeconds ?? 0), 0);
+    return [at, `Cycle test, port ${test.port}, ${test.storageVolts}–${test.fullVolts} V`, `${steps.join(" · ")}${test.end === "done" ? "" : " · stopped"}${out ? ` · USB out ${minutesOrSeconds(out)}, that part worked out` : ""}`];
   }
   if (test.kind === "charge" && test.source === "whoopstor") return [at, `WhoopStor port ${test.port}, ${amps(test.amps)} to ${test.target} V`, chargeWords(test)];
   if (test.kind === "charge") return [at, "Charge", `${Math.round(test.mah ?? 0)} mAh in`];
   return [at, "Storage", `${volts(test.v_rest)}`];
+}
+
+/** The test whose graph shows for a pack: the one picked, or its latest with a curve, taking a cycle
+ *  test over the charges it was made of. */
+function shownGraph(pack, tests) {
+  const graphed = tests.filter((test) => test.curve?.length > 1);
+  const picked = graphed.find((test) => test.id === graphOf.get(pack.id));
+  if (picked || !graphed.length) return picked ?? null;
+  const cycle = graphed.find((test) => test.kind === "cycle");
+  const ends = cycle ? Date.parse(cycle.at) + (cycle.curve.at(-1)[0] + 60) * 1000 : 0;
+  return cycle && Date.parse(graphed[0].at) <= ends ? cycle : graphed[0];
+}
+
+/** The graph at the head of an open pack's tests: its voltage and current through a charge or a
+ *  cycle test. */
+function packGraph(pack, tests) {
+  const test = shownGraph(pack, tests);
+  if (!test) return tests.some((one) => one.source === "whoopstor") ? h("p.dim.small", "Its graph starts with its next charge on the WhoopStor: earlier ones were kept without one.") : null;
+  const what = test.kind === "cycle"
+    ? `Cycle test on port ${test.port}, ${test.storageVolts}–${test.fullVolts} V`
+    : `Charge on port ${test.port}, ${amps(test.amps)} to ${test.target} V`;
+  return h("div.pack-graph", { probe: `pack graph ${pack.name}` },
+    h("div.row.baseline", h("span.label", what.toUpperCase()), h("span.spacer"), h("span.dim.small", when(test.at))),
+    curveChart(test));
 }
 
 function packRow(one, facts) {
@@ -219,7 +248,9 @@ function packRow(one, facts) {
   return [
     h(`div.battery-row${pack.retired ? ".retired" : ""}`, { probe: `pack ${pack.name}` },
       h("button.battery-name", { type: "button", help: open ? "Hide its tests" : "Show its tests", onclick: () => { if (open) opened.delete(pack.id); else opened.add(pack.id); render(); } }, pack.name, h("span.dim", ` ${pack.mah} mAh${pack.brand ? ` · ${pack.brand}` : ""}`)),
-      h("span.battery-cell", { help: "Its resistance from its latest charge on the WhoopStor. It includes the port's plug and lead, so it compares with readings on the same port." }, one.latestCharge ? [mohm(one.latestCharge.resistance), h("span.dim.small", ` port ${one.latestCharge.port}`)] : "–"),
+      one.latestReading
+        ? h("span.battery-cell", { help: "Its charging resistance from storage, in its latest cycle test on the WhoopStor: the one it is graded on" }, mohm(one.latestReading.resistance), h("span.dim.small", ` port ${one.latestReading.port}`))
+        : h("span.battery-cell.dim", { help: "From its latest charge on the WhoopStor, which started wherever the pack was: a cycle test grades it" }, one.latestCharge ? [mohm(one.latestCharge.resistance), h("span.small", ` port ${one.latestCharge.port}`)] : "–"),
       h("span.battery-cell", { help: "Sag resistance after 2 s, from its latest sag test on a full pack, on the tester board" }, mohm(one.sag?.r_end)),
       h("span.battery-cell", { help: "From its latest full test" }, one.capacity ? `${Math.round(one.capacity.mah)} mAh` : "–"),
       h(`span.verdict${verdict.word ? `.${verdict.word}` : ""}`, { probe: `status ${pack.name}` }, verdict.word ? statusWords[verdict.word] : "–"),
@@ -230,7 +261,14 @@ function packRow(one, facts) {
       h("span.battery-why.dim.small", verdict.reasons.join(". ")),
     ),
     open && h("div.battery-tests",
-      tests.length === 0 ? h("p.dim.small", "Nothing measured yet.") : tests.slice(0, 30).map((test) => h("div.battery-test", testLine(test).map((part) => h("span", part)))),
+      packGraph(pack, tests),
+      tests.length === 0 ? h("p.dim.small", "Nothing measured yet.") : tests.slice(0, 30).map((test) => h("div.battery-test",
+        testLine(test).map((part) => h("span", part)),
+        test.curve?.length > 1
+          ? (shownGraph(pack, tests) === test
+            ? h("span.dim.small.graph-on", "Graph above")
+            : plain("Graph", () => { graphOf.set(pack.id, test.id); render(); }, { class: "quiet small", probe: `graph ${test.id}`, help: "Show this one's graph above" }))
+          : h("span"))),
       editing?.id === pack.id
         ? h("div.battery-add",
           field("Number", editing.name, (value) => { editing.name = value; }, { key: "edit name", width: 120 }),
@@ -357,7 +395,8 @@ export function batteries() {
   const testerThere = showTester || tester.link !== "off" || app.state.testerSim || Object.values(app.state.batteries.tests).some((test) => test.kind === "sag" || test.kind === "capacity");
   const charger = whoopstor.link === "on"
     ? ["WHOOPSTOR", whoopstor.name?.toUpperCase(), "CONNECTED"]
-    : [whoopstor.link === "looking" ? "LOOKING FOR THE WHOOPSTOR" : "WHOOPSTOR NOT CONNECTED"];
+    : whoopstor.link === "away" ? ["WHOOPSTOR", whoopstor.name?.toUpperCase(), "USB OUT"]
+      : [whoopstor.link === "looking" ? "LOOKING FOR THE WHOOPSTOR" : "WHOOPSTOR NOT CONNECTED"];
   return page(
     backLink() && h("div", backLink()),
     h("header.page-head",
@@ -380,11 +419,14 @@ const amps = (a) => (typeof a === "number" ? `${a.toFixed(2)} A` : "–");
 const cRate = (a, pack) => (pack && a ? `${(a / (pack.mah / 1000)).toFixed(1).replace(/\.0$/, "")}C` : null);
 const packsInOrder = () => Object.values(app.state.batteries.packs).filter((one) => !one.retired).sort((a, b) => natural(a.name, b.name));
 
+const minutesOrSeconds = (seconds) => (seconds < 90 ? `${Math.round(seconds)} s` : `${Math.round(seconds / 60)} min`);
+
 function chargeWords(test) {
   const parts = [`${Math.round(test.mah ?? 0)} mAh in`];
   if (typeof test.resistance === "number") parts.push(`${mohm(test.resistance)}`);
   else if (test.partial) parts.push("joined part way, no resistance");
   if (test.end && test.end !== "full") parts.push(endWords[test.end] ?? test.end);
+  if (test.unseenSeconds) parts.push(`USB out ${minutesOrSeconds(test.unseenSeconds)}`);
   return parts.join(", ");
 }
 
@@ -433,7 +475,7 @@ function packChoice(port) {
     return h("div.row.port-pack-row",
       pack ? h("span.dim.small", `${pack.mah} mAh${pack.brand ? ` · ${pack.brand}` : ""}`) : h("span.dim.small", "Not one of mine: not kept"),
       h("span.spacer"),
-      plain("Change", () => { changing.add(port); render(); }, { class: "quiet", probe: `port ${port} change` }),
+      secondary("Change", () => { changing.add(port); render(); }, { class: "port-change", probe: `port ${port} change`, help: "Say which pack is in this port. A pack in another port too comes off that one." }),
     );
   }
   return h("div.port-pack-row.column",
@@ -458,13 +500,15 @@ function portTile(index) {
   const overRate = Boolean(session && !session.end && pack && session.amps > (2.05 * pack.mah) / 1000);
   const word = portWords({ state, present, running: p1?.running, target: p1?.target, ended: session?.end });
   const facts = pack ? factsOf(app.state.batteries) : null;
-  // The status beside the pack's number: from this charge's resistance once it is worked out, graded
-  // as it would be once kept (against the typical pack of its size, the ports allowed for), or else
-  // the pack's own status.
-  const grade = session?.resistance && pack && facts[pack.id] ? chargeGrade(facts[pack.id], facts, { resistance: session.resistance.mohm, port: index + 1 }, limitsNow()) : null;
+  // The status beside the pack's number: in a cycle test's charge after its first, which starts from
+  // storage after a rest and so compares with other packs', from this charge's resistance once it is
+  // worked out, graded as it will be once kept; or else the pack's own status.
+  const test = whoopstor.cycle;
+  const comparable = Boolean(test?.active && test.step > 0 && test.steps[test.step] === "charge" && test.ports.some((one) => one.index === index));
+  const grade = comparable && session?.resistance && pack && facts[pack.id] ? chargeGrade(facts[pack.id], facts, { resistance: session.resistance.mohm, port: index + 1 }, limitsNow()) : null;
   const status = grade ? grade.word : pack && facts[pack.id] ? verdictOf(facts[pack.id], facts, limitsNow()).word : null;
   let resistance = null;
-  if (session?.resistance) resistance = h("span.port-r", { help: "This charge's resistance. It includes this port's plug and lead, which the grade allows for once packs have been on more than one port" }, mohm(session.resistance.mohm));
+  if (session?.resistance) resistance = h("span.port-r", { help: comparable ? "This charge's resistance, from storage: it grades the pack against your others" : "This charge's resistance. Only a cycle test's charges from storage grade the pack: this one started wherever the pack was" }, mohm(session.resistance.mohm));
   else if (session?.partial) resistance = h("span.dim.small", "Joined part way: no resistance");
   else if (session && !session.end) resistance = h("span.dim.small", { help: "Worked out over the first 8 seconds of the current coming up" }, "Measuring…");
   // How full the pack is by its voltage, from 3.3 V to full.
@@ -475,13 +519,14 @@ function portTile(index) {
     h("div.row.baseline.port-main",
       h("span.port-name", pack ? pack.name : present ? "–" : ""),
       h("span.spacer"),
-      status && h(`span.verdict.${status}`, { help: grade?.reason, probe: grade ? `port ${index + 1} grade` : null }, statusWords[status])),
+      status && h(`span.verdict.${status}`, { help: grade?.reason, probe: grade ? `port ${index + 1} grade` : `port ${index + 1} status` }, statusWords[status])),
     present && h("div.row.baseline.port-line",
       h("span.port-volts", volts(v)),
       state === "charge" && h("span", amps(a)),
       h("span.spacer"),
       resistance),
     present && h("div.port-fill", h("span", { style: { width: `${Math.round(fill * 100)}%`, background: status ? statusColour[status] : "var(--accent)" } })),
+    present && sparkline(tileCurve(index)),
     session && h("div.dim.small", [
       `${Math.round(session.mah)} mAh in`,
       cRate(session.amps, pack) && `set ${amps(session.amps)} (${cRate(session.amps, pack)})`,
@@ -492,6 +537,14 @@ function portTile(index) {
   );
 }
 
+/** A port's voltage so far: the cycle test's, rests and all, while one is going, or else this charge's. */
+function tileCurve(index) {
+  const testing = whoopstor.cycle?.active ? whoopstor.cycle.ports.find((one) => one.index === index) : null;
+  if (testing?.curve?.length > 1) return testing.curve;
+  const session = whoopstor.sessions[index];
+  return session?.curve?.length > 1 ? session.curve : null;
+}
+
 /** The part of the charger's card that changes with every reading: its line and the six ports. */
 function chargerLive() {
   const p1 = whoopstor.p1, p2 = whoopstor.p2;
@@ -499,7 +552,7 @@ function chargerLive() {
   return [
     h("div.row.wrap.dim.small",
       h("span", whoopstor.name),
-      firmware && [h("span", "·"), h("span", `Firmware ${firmware}`)],
+      firmware && [h("span", "·"), h("span", `Firmware ${firmware}`), ws3News(firmwareSeen())],
       p1 && [h("span", "·"), h("span", `Input ${p1.input.toFixed(1)} V`)],
       p1 && [h("span", "·"), h("span", `To ${p1.target} V at ${amps(p1.current)}`)],
       p1 && [h("span", "·"), p1.running ? h("span", "Charging") : h("span", p1.stopped > 0 && p1.stopped !== 4 ? `Stopped: ${stopWords[p1.stopped] ?? "it stopped"}` : "Stopped")],
@@ -514,7 +567,7 @@ function chargerLive() {
           secondary("Cycle test…", cyclePressed, { probe: "whoopstor cycle", help: "Charge, down to storage, charge, down to storage: what each pack takes in and gives back" }),
         ],
       h("span.dim.small", p1.running ? "Charging. Stop is always taken." : "Put the packs in and give each its number, then Start: each charges at 2C for its size.")),
-    p1 && h("div.port-grid", [0, 1, 2, 3, 4, 5].map(portTile)),
+    p1 && h(`div.port-grid${whoopstor.link === "away" ? ".stale" : ""}`, [0, 1, 2, 3, 4, 5].map(portTile)),
   ];
 }
 
@@ -522,6 +575,16 @@ function chargerLive() {
 function cycleLine() {
   const test = whoopstor.cycle, kind = test.steps[test.step];
   const minutes = test.stepStartedAt ? Math.round((Date.now() - test.stepStartedAt) / 60000) : 0;
+  if (test.away) {
+    const until = new Date(test.away.until).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    return h("div.cycle-away", { probe: "cycle away" },
+      h("div.row.wrap.charger-controls",
+        primary("Connect again", () => connectCharger(), { probe: "cycle reconnect", help: "Looks for the WhoopStor again. It is looked for by itself as soon as it is plugged back in." }),
+        secondary("Stop the test", async () => tell(await stopCycleTest()), { probe: "cycle stop" }),
+        h("span.warn", `The WhoopStor's USB is out, ${test.resting ? `in the rest before step ${test.step + 2}` : `in step ${test.step + 1} of ${test.steps.length}`}.`)),
+      h("p.dim.small", `The charger carries on by itself. Plug its USB back in and the test picks up where it is, counting what it missed from the readings either side. It waits until ${until}, then stops the test.`),
+      whoopstor.problem && h("p.warn.small", whoopstor.problem));
+  }
   return h("div.row.wrap.charger-controls", { probe: "cycle line" },
     primary("Stop the test", async () => tell(await stopCycleTest()), { probe: "cycle stop" }),
     test.resting
@@ -579,7 +642,7 @@ function drawLive() {
 whoopstor.onLive = drawLive;
 
 function chargerCard() {
-  if (whoopstor.link !== "on") {
+  if (whoopstor.link !== "on" && whoopstor.link !== "away") {
     return h("div.card.roomy",
       label("THE WHOOPSTOR"),
       h("p.dim", "Your WhoopStor V3, with WS3 Unlocked or OpenWS3 on it, tells the Hangar what each of its ports is doing, and starts and stops when you press Start and Stop here. How a pack is charged, its voltages and cut-offs, stays the charger's own. Plug its USB-C into this computer, through a USB hub if it drops off on its own."),
@@ -591,7 +654,7 @@ function chargerCard() {
   return h("div.card.roomy.whoopstor",
     h("div.row", label("THE WHOOPSTOR"), h("span.spacer"), plain("Disconnect", () => disconnectCharger().then(render), { class: "quiet", help: "Stop listening to the WhoopStor. It goes on charging." })),
     h("div", { "data-live": "whoopstor" }, chargerLive()),
-    whoopstor.p1 && h("p.dim.small", "Each pack's resistance is worked out over the first 8 seconds of its charge, from how its voltage rises as the current comes up. It includes the port's own plug and lead, and the ports differ: the grade allows for that once packs have been charged on more than one port, so move them around between charges."),
+    whoopstor.p1 && h("p.dim.small", "Each pack's resistance is worked out over the first 8 seconds of its charge, from how its voltage rises as the current comes up. Packs are graded on it from cycle tests only: each charge after the first starts from storage after a rest, at 2C, so they compare like for like on any port. Other charges start wherever the pack is, and read up to 25% off. Readings can move about 5% from one day to the next."),
     whoopstor.sim && h("div.row.wrap",
       secondary("Pretend: put a pack in", () => {
         const free = whoopstor.sim.ports.findIndex((port) => !port.cell);
@@ -618,7 +681,9 @@ function recentCard() {
         const window = cycleWindow(test);
         return h("div.charge-row", { probe: `cycle ${test.id}` },
           h("span.dim.small", when(test.at)),
-          h("span.charge-pack", pack?.name ?? "–"),
+          pack
+            ? h("span.charge-pack", pack.name)
+            : packBox(`pack for ${test.id}`, async (one) => { take(await ask("assignBatteryTest", test.id, one.id)); render(); }, "Which pack? Number, Return"),
           h("span", `Port ${test.port}`),
           h("span", `Cycle test, ${test.cycles === 1 ? "1 cycle" : `${test.cycles} cycles`}`),
           h("span.battery-cell", window?.in !== null && window ? `${Math.round(window.in)} in` : "–"),

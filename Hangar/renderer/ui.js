@@ -120,6 +120,12 @@ const drawings = {
   pencil: line("M4 20l1-4.5L15.500 4l3.500 3.500L8.500 19 4 20zM13.500 6l3.500 3.500"),
   cloud: line("M7 18.500a4.500 4.500 0 01-.700-8.950 5.500 5.500 0 0110.700-1.300A4.800 4.800 0 0117.500 18.500z"),
   battery: '<rect x="2.500" y="7" width="17" height="10" rx="2"/>' + line("M21.500 10.500v3") + solid("M5 9.500h7v5H5z"),
+  // A trace through a flight, as a log viewer draws it.
+  trace: line("M2.500 13h3l2.500-7 3.500 12 3-9 2 5 1.500-2h3.500"),
+  // A rate curve: slow round the middle of the stick, fast at its ends.
+  curve: line("M3.500 3.500v17h17") + line("M6.500 18c6 0 8-1.500 10-5s2.500-6 3-9"),
+  // A letter on a picture's square: a font for the OSD.
+  glyph: '<rect x="3.500" y="3.500" width="17" height="17" rx="2.500"/>' + line("M8.500 16.500l3.500-9 3.500 9M9.800 13.500h4.400"),
 };
 
 /** An icon, as big as the text around it unless a size is given. */

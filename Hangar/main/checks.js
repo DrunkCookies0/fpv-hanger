@@ -31,9 +31,17 @@
 //            chosen from, and made-up releases of the programs the app keeps up to date are fetched,
 //            checked and put in place, all in a folder of their own: the ExpressLRS Configurator in
 //            the place of the copy there, EdgeTX Companion out of its zip and beside the family
-//            there. With `--live` it also opens
-//            Betaflight's app and the ExpressLRS flasher from their own sites, which needs the
-//            network, and reads that each arrived. No device is asked for or touched.
+//            there. With `--live` it also opens Betaflight's app, its Blackbox Explorer and the
+//            ExpressLRS flasher from their own sites, which needs the network, and reads that each
+//            arrived. No device is asked for or touched.
+//   osdfont  the OSD font page, with made-up fonts standing in for Betaflight's (`--osd-font-feed`
+//            is set by the check): one is opened, a picture picked from all 256, painted and the
+//            paint taken back, letters taken from another font, the logo painted, the font saved
+//            to the library's OSD fonts folder, then replaced only once the pilot says so, and a
+//            made-up picture made into the logo
+//   rates    the Rates page: rates typed in are shown in another type with the lines for
+//            Betaflight's CLI, a made-up diff all pasted in gives its rate profiles to choose
+//            from, and Copy puts the lines on the clipboard (put back as it was afterwards)
 //   uploads  uploading a run's videos. YouTube's: its steps show beside the column, the title and
 //            the description are made from the run and the title is on the clipboard, the pilot's
 //            own lines are kept and go on the end, the page and the video named for what it is
@@ -63,7 +71,9 @@
 //   whoopstor  the Batteries page with a pretend WhoopStor charger (`--whoopstor-sim <speed>`): packs
 //            go in three ports, two are said to be the pilot's packs on the page and one isn't,
 //            each pack's resistance is worked out as its charge starts, and each charge is kept
-//            when it is full; the one with no pack is then given one. Not part of "everything".
+//            when it is full; the one with no pack is then given one. WS3 Unlocked's releases are
+//            read from a folder standing in for its page: the charger's firmware is the newest,
+//            then a newer one is out, beside the firmware and on Home. Not part of "everything".
 
 import { app, clipboard, session } from "electron";
 import { spawn, spawnSync } from "node:child_process";
@@ -81,6 +91,7 @@ import { Library } from "./library.js";
 import { numberedRecording, numbersIn, frameTimes } from "./numbered.js";
 import { copyName, libraryName } from "../shared/drive.js";
 import { fileName, sites, words } from "../shared/uploads.js";
+import { readFont, writeFont, emptyFont, setDot, glyphOf, logoOf, WHITE, BLACK } from "../shared/osdfont.js";
 
 /** With `--report <file>`, everything said is written there too, a line at a time as it happens,
  *  so a check that stops halfway still leaves what it had found. */
@@ -101,7 +112,7 @@ function say(ok, what, detail = "") {
 }
 
 export async function run(which, tools) {
-  const checks = { editor, video, mp4, pages, form, bookends, trackview, trackvideo, outside, uploads, music, drive, cards, radio, update, updating, carryover, batteries, whoopstor, everything };
+  const checks = { editor, video, mp4, pages, form, bookends, trackview, trackvideo, outside, rates, osdfont, uploads, music, drive, cards, radio, update, updating, carryover, batteries, whoopstor, everything };
   if (report) writeFileSync(report, "");
   if (!checks[which]) {
     console.error(`There is no check called ${which}. There are: ${Object.keys(checks).join(", ")}.`);
@@ -147,6 +158,16 @@ async function until(js, code, seconds) {
 async function whoopstor(tools) {
   const { api, library } = tools;
   if (!say(Boolean(argument("--whoopstor-sim")), "a pretend WhoopStor stands in for one", "give one with --whoopstor-sim <speed>")) return;
+  // WS3 Unlocked's Releases page, as a folder: the pretend charger's 0.2-beta.6 is the newest there.
+  const ws3Feed = mkdtempSync(join(tmpdir(), "fpv-hangar-ws3-"));
+  const ws3Release = (tag, at) => ({ tag_name: tag, draft: false, prerelease: true, published_at: at, html_url: `https://github.com/Pogaldock/ws3-unlocked/releases/tag/${tag}` });
+  const ws3Releases = [ws3Release("rot-latest", "2026-11-03T19:01:22Z"), ws3Release("v0.2.0-beta.6", "2026-11-06T22:57:50Z")];
+  writeFileSync(join(ws3Feed, "releases.json"), JSON.stringify(ws3Releases));
+  writeFileSync(join(ws3Feed, "tags.json"), JSON.stringify([{ name: "v0.2.0-beta.6", commit: { sha: "6bb3f90d2f4cf66d9f76a4e82eca759df452b751" } }]));
+  const feedAt = process.argv.indexOf("--ws3-feed");
+  if (feedAt >= 0) process.argv[feedAt + 1] = ws3Feed;
+  else process.argv.push("--ws3-feed", ws3Feed);
+  setConfig({ ws3: null });
   const { js, errors } = await page(tools);
   for (const [name, mah, brand] of [["001", 300, "Boom Stick"], ["002", 450, "weBLEEDfpv"], ["003", 300, "Tattu"]]) api.addPack({ name, mah, brand });
   const packs = Object.fromEntries(Object.values(library.batteries.packs).map((one) => [one.name, one.id]));
@@ -155,6 +176,8 @@ async function whoopstor(tools) {
   await js(`document.querySelector('[data-probe="whoopstor connect"]').click()`);
   const connected = await until(js, `const w = window.hangar_.whoopstor; return w.link === "on" && Boolean(w.p1) && Boolean(w.p2)`, 10);
   if (!say(connected, "the page connects to the charger and hears its reports", await js(`return window.hangar_.whoopstor.problem`))) return;
+  const newest = await until(js, `return Boolean(document.querySelector('[data-probe="ws3 current"]'))`, 10);
+  say(newest && config().ws3?.releases?.[0]?.tag === "v0.2.0-beta.6", "once it says its firmware, WS3 Unlocked's releases are looked at, and 0.2-beta.6 is the newest", await js(`return document.querySelector('.whoopstor .row.wrap.dim.small')?.textContent ?? ""`));
   // Two packs alike but for the ports' leads (1 and 5), and a bigger one that has seen more use (port 2),
   // put in with the charger stopped.
   await js(`const sim = window.hangar_.whoopstor.sim;
@@ -176,6 +199,18 @@ async function whoopstor(tools) {
   }
   const named = await until(js, `return [0, 1].every((i) => window.hangar_.whoopstor.remembered[i]?.pack)`, 5);
   say(named && (await js(`return window.hangar_.whoopstor.remembered[0].pack`)) === packs["001"], "the pack's number typed in its port says which it is", await js(`return document.querySelector('[data-probe="port 1"] .port-pack-row')?.textContent`));
+  // A pack is in one port at a time: given to port 5 too, 001 comes off port 1, which asks for its
+  // number again. Then Change on port 5, and 001 back in port 1.
+  await js(`const box = document.querySelector('[data-probe="port 5 pack"]'); box.value = "1"; box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));`);
+  const movedOver = await until(js, `const r = window.hangar_.whoopstor.remembered; return r[4]?.pack === ${JSON.stringify(packs["001"])} && !r[0] && Boolean(document.querySelector('[data-probe="port 1 pack"]'))`, 5);
+  const movedNote = await js(`return window.hangar_.app.notice ?? ""`);
+  say(movedOver && /001 was in port 1 too/.test(movedNote), "a pack given to a second port comes off the first, which asks for its number again", movedNote);
+  await js(`document.querySelector('[data-probe="port 5 change"]')?.click()`);
+  const changeBox = await until(js, `return Boolean(document.querySelector('[data-probe="port 5 pack"]'))`, 5);
+  await js(`const box = document.querySelector('[data-probe="port 1 pack"]'); box.value = "1"; box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));`);
+  const movedBack = await until(js, `const r = window.hangar_.whoopstor.remembered; return r[0]?.pack === ${JSON.stringify(packs["001"])} && !r[4] && Boolean(document.querySelector('[data-probe="port 5 pack"]'))`, 5);
+  say(changeBox && movedBack, "Change opens the box, and the pack can go back", await js(`return [1, 5].map((port) => document.querySelector('[data-probe="port ' + port + '"] .port-pack-row')?.textContent).join(" | ")`));
+  await js(`window.hangar_.app.notice = null`);
   // Start, from the page: it says what it will do, sets each port to 2C for its pack, and starts.
   await js(`document.querySelector('[data-probe="whoopstor start"]').click()`);
   await until(js, `return Boolean(document.querySelector(".plan"))`, 5);
@@ -251,12 +286,19 @@ async function whoopstor(tools) {
   say(await until(js, `return Boolean(document.querySelector('[data-probe="port 3 pack"]'))`, 10), "once the port has been empty, the next pack in it is asked about");
   const row = await js(`return [...document.querySelectorAll(".battery-row")].find((one) => one.textContent.includes("001"))?.textContent ?? ""`);
   say(row.includes(`${Math.round(r[0])} mΩ`) && row.includes("port 1"), "the pack's row shows its latest charge and the port", row);
-  // A grade as a pack charges: against the typical 300 mAh pack read on the same port.
-  for (const [name, resistance] of [["010", 60], ["011", 62]]) {
-    const made = api.addPack({ name, mah: 300, brand: "weBLEEDfpv" });
-    api.keepBatteryTest({ id: `wcheck${name}`, pack: made.pack.id, at: new Date().toISOString(), kind: "charge", source: "whoopstor", port: 1, resistance, resistanceHow: "ramp-8s", trace: [] });
-  }
+  // Packs are graded from cycle tests: each by its charge from storage after the first, against the
+  // typical 300 mAh pack's (the middle one, 62 mΩ here). Kept for five packs: 012 worn.
+  const cycleKept = (pack, port, resistance) => api.keepBatteryTest({
+    id: `wcycle${pack}`, pack, at: new Date().toISOString(), kind: "cycle", source: "whoopstor", port, amps: 0.6, fullVolts: 4.35, storageVolts: 3.85, cycles: 2, end: "done", problem: null,
+    // The first charge reads high, as one after sitting can: it isn't the one graded.
+    steps: [["charge", 4.35, 170, resistance * 1.3], ["discharge", 3.85, 158, null], ["charge", 4.35, 171, resistance], ["discharge", 3.85, 158, null]]
+      .map(([kind, endVolts, mah, mohm]) => ({ kind, minutes: 20, startVolts: 3.86, endVolts, mah, resistance: mohm })),
+  });
+  for (const [name, resistance] of [["010", 60], ["011", 62], ["013", 61], ["012", 200]]) cycleKept(api.addPack({ name, mah: 300, brand: "weBLEEDfpv" }).pack.id, 2, resistance);
+  cycleKept(packs["001"], 1, 86);
   await js(`await window.showForSnapshot("batteries")`);
+  const graded001 = await js(`return [...document.querySelectorAll(".battery-row")].find((one) => one.textContent.includes("001"))?.textContent ?? ""`);
+  say(/86 mΩ/.test(graded001) && /39% above your typical 300 mAh pack's, in cycle tests/.test(graded001), "a pack is graded on its cycle test's charge from storage, not on its other charges", graded001);
   await js(`const sim = window.hangar_.whoopstor.sim; sim.speed = 30; sim.stop(); for (let port = 1; port <= 6; port += 1) sim.remove(port);`);
   await pause(600);
   await js(`window.hangar_.whoopstor.sim.insert(1, { soc: 0.5, r0: 0.2 })`);
@@ -264,9 +306,9 @@ async function whoopstor(tools) {
   await js(`const box = document.querySelector('[data-probe="port 1 pack"]'); box.value = "012"; box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));`);
   await until(js, `return Boolean(window.hangar_.whoopstor.remembered[0]?.pack)`, 5);
   await js(`window.hangar_.whoopstor.sim.start()`);
-  const graded = await until(js, `return Boolean(document.querySelector('[data-probe="port 1 grade"]'))`, 30);
-  const word = await js(`return document.querySelector('[data-probe="port 1 grade"]')?.textContent + " (" + document.querySelector('[data-probe="port 1"] .port-r')?.textContent + ")"`);
-  say(graded && word.startsWith("RETIRE"), "a worn pack shows RETIRE in its port as it charges, against the others read on that port", word);
+  const measuredHere = await until(js, `return Boolean(document.querySelector('[data-probe="port 1"] .port-r'))`, 30);
+  const word = await js(`return (document.querySelector('[data-probe="port 1 status"]')?.textContent ?? "no status") + (document.querySelector('[data-probe="port 1 grade"]') ? " and a grade of this charge" : "") + " (" + document.querySelector('[data-probe="port 1"] .port-r')?.textContent + ")"`);
+  say(measuredHere && word.startsWith("RETIRE (") , "a worn pack shows RETIRE in its port, from its cycle tests: a plain charge isn't graded itself", word);
 
   // The pilot's own calls on their packs suggest the limits; saved, they change the statuses.
   for (const [name, call] of [["010", "race"], ["011", "race"], ["001", "fun"]]) {
@@ -303,6 +345,33 @@ async function whoopstor(tools) {
   await js(`[...document.querySelectorAll(".alert-buttons button")].find((button) => button.textContent === "One cycle").click()`);
   const going = await until(js, `return Boolean(document.querySelector('[data-probe="cycle line"]'))`, 10);
   say(going, "a cycle test starts from the page and says which step it is on", await js(`return document.querySelector('[data-probe="cycle line"]')?.textContent`));
+  // A number changed once the test has started goes with the test's results: port 4 is 005 after all.
+  await js(`document.querySelector('[data-probe="port 4 change"]')?.click()`);
+  await until(js, `return Boolean(document.querySelector('[data-probe="port 4 pack"]'))`, 5);
+  await js(`const box = document.querySelector('[data-probe="port 4 pack"]'); box.value = "5"; box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));`);
+  await until(js, `return window.hangar_.whoopstor.cycle?.ports.find((port) => port.index === 3)?.pack === window.hangar_.whoopstor.remembered[3]?.pack`, 5);
+  // The USB pulled out part way through the charge, the charger going on by itself, and put back.
+  await until(js, `const w = window.hangar_.whoopstor; return w.cycle?.running && Boolean(w.sessions[2]) && !w.sessions[2].end`, 10);
+  await js(`window.hangar_.whoopstor.pretendUnplug()`);
+  const waits = await until(js, `return window.hangar_.whoopstor.link === "away" && Boolean(document.querySelector('[data-probe="cycle away"]'))`, 5);
+  say(waits, "with its USB pulled out, the test waits for it and says so", await js(`return document.querySelector('[data-probe="cycle away"]')?.textContent ?? window.hangar_.whoopstor.link`));
+  if (argument("--picture")) {
+    await js(`document.querySelector('[data-scroll="page"]')?.scrollTo(0, 0)`);
+    await pause(200);
+    writeFileSync(resolve(argument("--picture")).replace(/\.png$/, "-away.png"), (await tools.window().webContents.capturePage()).toPNG());
+  }
+  const sideWaits = await js(`return document.querySelector("#side")?.textContent ?? ""`);
+  say(/USB out/.test(sideWaits), "the sidebar too", sideWaits.slice(0, 160));
+  await pause(250);
+  await js(`window.hangar_.whoopstor.pretendPlugBack()`);
+  if (argument("--picture")) {
+    await pause(600);
+    writeFileSync(resolve(argument("--picture")).replace(/\.png$/, "-tiles.png"), (await tools.window().webContents.capturePage()).toPNG());
+  }
+  const goesOn = await until(js, `const w = window.hangar_.whoopstor; return w.link === "on" && w.cycle?.active && !w.cycle.away && Boolean(document.querySelector('[data-probe="cycle line"], [data-probe="cycle rest"]'))`, 5);
+  const spark = await until(js, `return Boolean(document.querySelector('[data-probe="port 3"] .port-spark path'))`, 5);
+  say(spark, "each port in the test shows a little line of its voltage", await js(`return document.querySelector('[data-probe="port 3"]')?.textContent ?? ""`));
+  say(goesOn, "put back, it carries on where it is", await js(`const w = window.hangar_.whoopstor; return w.link + " " + (document.querySelector('.charger-controls')?.textContent ?? "")`));
   const rested = await until(js, `return Boolean(document.querySelector('[data-probe="cycle rest"]'))`, 60);
   say(rested, "after the charge it rests 5 minutes, the charger stopped", await js(`return document.querySelector('[data-probe="cycle rest"]')?.textContent ?? ""`));
   const downAt = await until(js, `const t = window.hangar_.whoopstor.cycle; return t?.running && t.steps[t.step] === "discharge" && window.hangar_.whoopstor.sim.target === 3`, 60);
@@ -310,14 +379,35 @@ async function whoopstor(tools) {
   const over = await until(js, `return Boolean(window.hangar_.whoopstor.cycle?.over)`, 120);
   const outcome = await js(`const t = window.hangar_.whoopstor.cycle; const sim = window.hangar_.whoopstor.sim; return { done: t.done, problem: t.problem, target: sim.target, values: sim.ports.map((port) => port.value).join(","), running: sim.running }`);
   say(over && outcome.done && outcome.target === 1 && outcome.values === "1,1,1,1,1,1" && !outcome.running, "the test ends with the charger stopped, back on 4.35 V and its own currents", JSON.stringify(outcome));
-  const cycles = Object.values(library.batteries.tests).filter((test) => test.kind === "cycle");
+  const cycles = Object.values(library.batteries.tests).filter((test) => test.kind === "cycle" && !test.id.startsWith("wcycle"));
   const three = cycles.find((test) => library.batteries.packs[test.pack]?.name === "003");
   const downStep = three?.steps.find((step) => step.kind === "discharge");
   say(cycles.length === 2 && three?.steps.length === 2 && three.steps[0].mah > 40 && downStep?.mah > 120 && downStep.mah < 190 && downStep.endVolts < 3.88,
     "each pack keeps what its charge put in and about what the load took out, ending near 3.85 V", three ? three.steps.map((step) => `${step.kind} ${step.mah} mAh to ${step.endVolts} V`).join("; ") : "none kept");
+  say(three?.steps[0].unseenSeconds > 0 && three.steps[0].unseenSeconds < 600 && three.end === "done", "the charge counts the time the USB was out, and says how long", three ? `${three.steps[0].unseenSeconds} s out, ${three.steps[0].mah} mAh` : "");
   say(typeof three?.steps[0].settledVolts === "number" && three.steps[0].settledVolts < three.steps[0].endVolts + 0.005, "and where it settled in the rest after its charge", three ? `${three.steps[0].endVolts} V at the end, ${three.steps[0].settledVolts} V after 5 minutes` : "");
+  const four = cycles.find((test) => test.port === 4);
+  say(library.batteries.packs[four?.pack]?.name === "005", "a pack's number changed during the test goes with its results", `port 4: ${library.batteries.packs[four?.pack]?.name ?? "no pack"}`);
   const recent = await js(`return document.querySelector('[data-probe="cycle ${three?.id}"]')?.textContent ?? ""`);
   say(/Cycle test/.test(recent) && /out/.test(recent), "Recent charges shows it", recent);
+  say(three?.curve?.length > 10 && three.steps.every((step) => typeof step.fromS === "number" && step.toS > step.fromS) && three.curve.some(([, , ma]) => ma < 0) && three.curve.some(([, , ma]) => ma > 0),
+    "the test keeps its curve, rests and all, with the way down below 0 A, and where each step is on it", three ? `${three.curve.length} points over ${three.curve.at(-1)[0]} s; steps at ${three.steps.map((step) => `${step.fromS}–${step.toS} s`).join(", ")}` : "");
+  const plainCharges = Object.values(library.batteries.tests).filter((test) => test.kind === "charge" && test.source === "whoopstor" && test.mah > 20);
+  say(plainCharges.length > 0 && plainCharges.every((test) => test.curve?.length > 2 && test.curve[0][0] === 0), "and every charge keeps its own curve", plainCharges.map((test) => `${test.curve?.length ?? 0} points`).join(", "));
+  await js(`document.querySelector('[data-probe="pack 003"] .battery-name').click()`);
+  const graph = await until(js, `return Boolean(document.querySelector('[data-probe="pack graph 003"] path.curve-volts')) && Boolean(document.querySelector('[data-probe="pack graph 003"] path.curve-amps'))`, 5);
+  const graphWords = await js(`return [...document.querySelectorAll('[data-probe="pack graph 003"] .curve-step')].map((one) => one.textContent).join(" | ")`);
+  say(graph && /Charge/.test(graphWords) && /Down/.test(graphWords), "opening the pack shows its graph, the steps marked", graphWords);
+  const pointed = await js(`const hit = document.querySelector('[data-probe="pack graph 003"] .curve-hit'); const box = hit.getBoundingClientRect();
+    hit.dispatchEvent(new PointerEvent("pointermove", { clientX: box.left + box.width * 0.3, clientY: box.top + 20, bubbles: true }));
+    return document.querySelector('[data-probe="pack graph 003"] .curve-tip')?.textContent ?? ""`);
+  say(/\d\.\d{3} V/.test(pointed) && / A/.test(pointed), "pointing at it gives the readings at that moment", pointed);
+  if (argument("--picture")) {
+    await js(`document.querySelector('[data-probe="pack graph 003"]').scrollIntoView({ block: "center" })`);
+    await pause(400);
+    await js(`const hit = document.querySelector('[data-probe="pack graph 003"] .curve-hit'); const box = hit.getBoundingClientRect(); hit.dispatchEvent(new PointerEvent("pointermove", { clientX: box.left + box.width * 0.62, clientY: box.top + 20, bubbles: true }));`);
+    writeFileSync(resolve(argument("--picture")).replace(/\.png$/, "-graph.png"), (await tools.window().webContents.capturePage()).toPNG());
+  }
   await js(`window.hangar_.whoopstor.sim.speed = 30`);
 
   // Stop, from the page, and the ports Start set go back to the charger's own current.
@@ -327,8 +417,53 @@ async function whoopstor(tools) {
   await js(`document.querySelector('[data-probe="whoopstor stop"]').click()`);
   const stopped = await until(js, `const sim = window.hangar_.whoopstor.sim; return !sim.running && sim.ports.every((port) => port.value === 1)`, 10);
   say(stopped, "Stop stops it, and the ports go back to the charger's own current", await js(`const sim = window.hangar_.whoopstor.sim; return sim.running + " " + sim.ports.map((port) => port.value).join(",")`));
+  // A newer WS3 Unlocked comes out: the page says so beside the firmware, with a link to its
+  // release, and so does Home, where it stays with the charger let go.
+  writeFileSync(join(ws3Feed, "releases.json"), JSON.stringify([ws3Release("v0.2.0-beta.7", "2026-11-12T18:00:00Z"), ...ws3Releases]));
+  await api.checkWs3();
+  const newer = await until(js, `return /0\\.2\\.0-beta\\.7 is out/.test(document.querySelector('[data-probe="ws3 newer"]')?.textContent ?? "")`, 10);
+  if (argument("--picture")) {
+    await js(`document.querySelector('[data-scroll="page"]')?.scrollTo(0, 0)`);
+    await pause(300);
+    writeFileSync(resolve(argument("--picture")).replace(/\.png$/, "-ws3.png"), (await tools.window().webContents.capturePage()).toPNG());
+  }
+  say(newer, "a newer release is shown beside the firmware", await js(`return document.querySelector('[data-probe="ws3 newer"]')?.textContent ?? document.querySelector('.whoopstor .row.wrap.dim.small')?.textContent ?? ""`));
+  // The charger stopping by itself part way through a step, its input run down: the test ends, and
+  // keeps why.
+  await js(`window.hangar_.whoopstor.sim.speed = 30; document.querySelector('[data-probe="whoopstor cycle"]').click()`);
+  await until(js, `return Boolean(document.querySelector(".alert-buttons"))`, 5);
+  await js(`[...document.querySelectorAll(".alert-buttons button")].find((button) => button.textContent === "One cycle").click()`);
+  await until(js, `const w = window.hangar_.whoopstor; return w.cycle?.running && w.sessions.some((one) => one && !one.end)`, 20);
+  const beforeLow = Object.values(library.batteries.tests).filter((test) => test.kind === "cycle").length;
+  await js(`const sim = window.hangar_.whoopstor.sim; sim.stopReason = 5; sim.stop();`);
+  await until(js, `return Boolean(window.hangar_.whoopstor.cycle?.over)`, 20);
+  const lowKept = Object.values(library.batteries.tests).filter((test) => test.kind === "cycle").slice(beforeLow);
+  say(lowKept.length > 0 && lowKept.every((test) => test.end === "stopped" && /stopped by itself: the input fell below MIN IN VOLTS/.test(test.problem ?? "")),
+    "a charger that stops by itself part way ends the test, and the test keeps why", lowKept.map((test) => test.problem).join(", "));
+  // Stop the test pressed while the USB is out: the test ends there, and keeps what it had.
+  await js(`window.hangar_.whoopstor.sim.speed = 30; document.querySelector('[data-probe="whoopstor cycle"]').click()`);
+  await until(js, `return Boolean(document.querySelector(".alert-buttons"))`, 5);
+  await js(`[...document.querySelectorAll(".alert-buttons button")].find((button) => button.textContent === "One cycle").click()`);
+  await until(js, `const w = window.hangar_.whoopstor; return w.cycle?.running && w.sessions.some((one) => one && !one.end)`, 20);
+  const before = Object.values(library.batteries.tests).filter((test) => test.kind === "cycle").length;
+  await js(`window.hangar_.whoopstor.pretendUnplug()`);
+  await until(js, `return Boolean(document.querySelector('[data-probe="cycle away"] [data-probe="cycle stop"]'))`, 5);
+  await js(`document.querySelector('[data-probe="cycle away"] [data-probe="cycle stop"]').click()`);
+  const ended = await until(js, `const w = window.hangar_.whoopstor; return Boolean(w.cycle?.over) && w.link === "off"`, 10);
+  const stoppedAway = Object.values(library.batteries.tests).filter((test) => test.kind === "cycle").slice(before);
+  say(ended && stoppedAway.length > 0 && stoppedAway.every((test) => test.end === "stopped" && test.problem === "The cycle test was stopped.") && /left button/.test(await js(`return window.hangar_.app.notice ?? ""`)),
+    "Stop the test while the USB is out ends it, keeps what it had, and says how to stop the charger", `${stoppedAway.length} kept: ${stoppedAway.map((test) => test.problem).join(", ")}; ${await js(`return window.hangar_.app.notice ?? ""`)}`);
   await js(`document.querySelector('.whoopstor .quiet')?.click()`);
   say(await until(js, `return window.hangar_.whoopstor.link === "off"`, 5), "the page lets the charger go");
+  await js(`await window.showForSnapshot("home")`);
+  const note = await until(js, `return /0\\.2\\.0-beta\\.7 is out; your WhoopStor has 0\\.2\\.0-beta\\.6/.test(document.querySelector('[data-probe="home ws3"]')?.textContent ?? "")`, 5);
+  if (argument("--picture")) {
+    await pause(300);
+    writeFileSync(resolve(argument("--picture")).replace(/\.png$/, "-ws3-home.png"), (await tools.window().webContents.capturePage()).toPNG());
+  }
+  say(note, "and on Home's Batteries card, the charger unplugged", await js(`return document.querySelector('[data-probe="home ws3"]')?.textContent ?? document.querySelector('[data-probe="home batteries"]')?.textContent ?? ""`));
+  setConfig({ ws3: null });
+  rmSync(ws3Feed, { recursive: true, force: true });
   say(errors.length === 0, "nothing went wrong in the window", errors.join(" | "));
 }
 
@@ -1040,8 +1175,8 @@ async function outside(tools) {
   const { js, errors } = await page(tools);
   const mac = process.platform === "darwin";
   await js(`window.hangar_.app.editor?.close(); await window.hangar_.app.trackView?.close({ sure: true }); await window.hangar_.app.tool?.close(); await window.showForSnapshot("home")`);
-  const tiles = await js(`return ["betaflight", "elrsFlasher", "elrsConfigurator", "edgetxCompanion"].map((name) => { const tile = document.querySelector('[data-probe="tile ' + name + '"]'); return tile ? !tile.disabled : null; })`);
-  say(tiles.every((there) => there === true), "the first screen has Betaflight, the ExpressLRS flasher, the ExpressLRS Configurator and EdgeTX Companion to open", JSON.stringify(tiles));
+  const tiles = await js(`return ["betaflight", "blackbox", "elrsFlasher", "elrsConfigurator", "edgetxCompanion"].map((name) => { const tile = document.querySelector('[data-probe="tile ' + name + '"]'); return tile ? !tile.disabled : null; })`);
+  say(tiles.every((there) => there === true), "the first screen has Betaflight, its Blackbox Explorer, the ExpressLRS flasher, the ExpressLRS Configurator and EdgeTX Companion to open", JSON.stringify(tiles));
 
   // A tool opens over its place on the page. Where it is put is what is looked at, not what it loads.
   try {
@@ -1100,7 +1235,7 @@ async function outside(tools) {
 
   // The tools themselves, from their own sites. Only when asked for: it needs the network.
   if (process.argv.includes("--live")) {
-    for (const [id, title] of [["betaflight", "Betaflight"], ["elrsFlasher", "ExpressLRS Web Flasher"]]) {
+    for (const [id, title] of [["betaflight", "Betaflight"], ["blackbox", "Blackbox Explorer"], ["elrsFlasher", "ExpressLRS Web Flasher"]]) {
       await js(`await window.showForSnapshot(${JSON.stringify(`tool:${id}`)})`);
       await pause(9000);
       const read = await api.toolReads?.();
@@ -1255,6 +1390,199 @@ window.addEventListener("beforeunload", (event) => {
   }
 });
 </script>`;
+
+/** The Rates page: rates typed in and pasted from a made-up diff all, the same feel in another type,
+ *  and the lines for Betaflight's CLI put on the clipboard. */
+async function rates(tools) {
+  const { js, errors } = await page(tools);
+  const before = errors.length;
+  // What was on the clipboard goes back afterwards. Where the clipboard can't be read, as in a
+  // sandbox, Copy is only seen to say it copied.
+  const clipboardWas = clipboard.readText();
+  const readable = typeof clipboardWas === "string";
+  try {
+    await js(`window.hangar_.app.editor?.close(); await window.hangar_.app.trackView?.close({ sure: true }); await window.hangar_.app.tool?.close(); await window.showForSnapshot("home")`);
+    await js(`document.querySelector('[data-probe="tile rates"]').click()`);
+    await pause(400);
+    const read = () => js(`return {
+      page: document.querySelector(".rates .head-title")?.textContent ?? null,
+      on: document.querySelector('[data-probe="tile rates"]')?.classList.contains("on") ?? false,
+      from: document.querySelector('[data-probe^="rates from "].picked')?.textContent ?? null,
+      to: document.querySelector('[data-probe^="rates to "].picked')?.textContent ?? null,
+      roll: [...document.querySelectorAll('[data-probe^="rates to roll "]')].map((one) => one.textContent),
+      cli: document.querySelector('[data-probe="rates cli"]')?.textContent ?? "",
+      fit: document.querySelector('[data-probe="rates fit"]')?.textContent ?? "",
+      curves: document.querySelectorAll(".rates-plot path").length,
+    }`);
+    let now = await read();
+    say(now.page === "Rates" && now.on && now.from === "Actual" && now.to === "Betaflight" && now.curves >= 2, "Rates opens from the sidebar with Actual as Betaflight sets it, shown in Betaflight's type", JSON.stringify({ from: now.from, to: now.to, curves: now.curves }));
+    say(now.cli.startsWith("set rates_type = BETAFLIGHT\n") && now.cli.trim().endsWith("save") && now.cli.split("\n").length === 11, "the lines for Betaflight's CLI set the type and the nine numbers, then save", now.cli.split("\n")[0]);
+
+    // A max rate typed in: the other type's numbers and lines follow.
+    await js(`const box = document.querySelector('[data-probe="rate roll srate"]'); box.focus(); box.value = "800"; box.dispatchEvent(new Event("input", { bubbles: true }));`);
+    await pause(300);
+    const typed = await read();
+    const focused = await js(`return document.activeElement?.dataset.probe ?? null`);
+    say(typed.cli !== now.cli && /set roll_srate = \d+/.test(typed.cli) && JSON.stringify(typed.roll) !== JSON.stringify(now.roll) && focused === "rate roll srate", "a number typed in changes the rates in the other type, and the box keeps the keyboard", `roll ${typed.roll.join(" / ")}`);
+
+    // Rates pasted from a made-up diff all with two rate profiles: the pilot picks one.
+    const diff = ["# Betaflight / STM32F411 (S411) 4.5.1 Jan  1 2026 / 12:00:00 (abcdef123) MSP API: 1.46", "rateprofile 0", "set roll_rc_rate = 12", "rateprofile 1",
+      "set rates_type = BETAFLIGHT", "set rateprofile_name = MADEUP", "set roll_rc_rate = 110", "set pitch_rc_rate = 110", "set roll_srate = 75", "set pitch_srate = 75", "# restore original rateprofile selection", "rateprofile 1"].join("\n");
+    await js(`document.querySelector('[data-probe="rates paste"]').click()`);
+    await pause(300);
+    await js(`const box = document.querySelector('[data-probe="rates paste box"]'); box.value = ${JSON.stringify(diff)}; document.querySelector('[data-probe="rates read"]').click()`);
+    await pause(200);
+    const offered = await js(`return [...document.querySelectorAll(".rates-profile")].map((one) => one.textContent)`);
+    say(offered.length === 2 && offered[1].includes("MADEUP") && offered[1].includes("On the whoop now"), "a diff all with two rate profiles offers both, with the one the whoop is on said", offered.join(" | "));
+    await js(`document.querySelector('[data-probe="rates profile 1"]').click()`);
+    await pause(400);
+    now = await read();
+    const source = await js(`return document.querySelector(".rates-card .small.dim")?.textContent ?? ""`);
+    const box = await js(`return document.querySelector('[data-probe="rate roll rc"]')?.value ?? null`);
+    say(now.from === "Betaflight" && box === "1.10" && /Rate profile 2 \(MADEUP\), from Betaflight 4\.5\.1/.test(source) && now.cli.startsWith("rateprofile 1\nset rates_type = ACTUAL\n"), "the profile picked becomes your rates, and its lines go back into that profile, as Actual", `${source} · ${now.cli.split("\n").slice(0, 2).join(" · ")}`);
+
+    // Another type, then Copy.
+    await js(`document.querySelector('[data-probe="rates to QUICK"]').click()`);
+    await pause(300);
+    now = await read();
+    say(now.to === "Quick" && now.cli.includes("set quickrates_rc_expo = OFF") && /Within \d+°\/s/.test(now.fit), "Quick's lines say how its RC expo is set, and how near its curve comes", now.fit);
+    await js(`document.querySelector('[data-probe="rates copy"]').click()`);
+    await pause(300);
+    const copied = await js(`return document.querySelector('[data-probe="rates copy"]')?.textContent ?? ""`);
+    if (readable) say(clipboard.readText().trim() === now.cli.trim() && copied === "Copied", "Copy puts the lines on the clipboard, ready to paste into the CLI");
+    else say(copied === "Copied", "Copy says it has copied the lines (this computer's clipboard can't be read here)");
+    say(errors.length === before, "nothing went wrong in the window", errors.slice(before).join(" | "));
+  } finally {
+    if (readable) clipboard.writeText(clipboardWas);
+    await js(`await window.showForSnapshot("home")`);
+  }
+}
+
+/** The OSD font page, with made-up fonts in a folder standing in for Betaflight's site. */
+async function osdfont(tools) {
+  const { library } = tools;
+  // Two made-up fonts: "default" with a white dot in each picture at a place set by its number, and
+  // "bold" with every letter all white.
+  const feed = mkdtempSync(join(tmpdir(), "fpv-hangar-fonts-"));
+  const plain = emptyFont(), bold = emptyFont();
+  for (let index = 0; index < 256; index += 1) setDot(plain, index, index % 12, index % 18, WHITE);
+  for (let index = 0x20; index <= 0x5f; index += 1) for (let dot = 0; dot < 216; dot += 1) setDot(bold, index, dot % 12, Math.floor(dot / 12), WHITE);
+  writeFileSync(join(feed, "default.mcm"), writeFont(plain));
+  writeFileSync(join(feed, "bold.mcm"), writeFont(bold));
+  if (!argument("--osd-font-feed")) process.argv.push("--osd-font-feed", feed);
+  const { js, errors } = await page(tools);
+  const before = errors.length;
+  const saved = join(library.root, "OSD fonts", "Check font.mcm");
+  rmSync(saved, { force: true });
+  try {
+    await js(`window.hangar_.app.editor?.close(); await window.hangar_.app.trackView?.close({ sure: true }); await window.hangar_.app.tool?.close(); await window.showForSnapshot("home")`);
+    await js(`document.querySelector('[data-probe="tile osdFont"]').click()`);
+    await pause(400);
+    const choices = await js(`return [...document.querySelectorAll('[data-probe^="font betaflight "]')].map((one) => one.textContent)`);
+    say(choices.length === 10 && choices.includes("Default") && choices.includes("Impact mini"), "OSD font opens from the sidebar, offering Betaflight's ten fonts to start from", choices.join(", "));
+    await js(`document.querySelector('[data-probe="font betaflight default"]').click()`);
+    await until(js, `return Boolean(document.querySelector('[data-probe="font sheet"]'))`, 10);
+    const read = () => js(`return {
+      status: document.querySelector('[data-probe="font status"]')?.textContent ?? "",
+      purpose: document.querySelector('[data-probe="font purpose"]')?.textContent ?? "",
+      problem: document.querySelector('[data-probe="font problem"]')?.textContent ?? null,
+      undo: document.querySelector('[data-probe="font undo"]')?.disabled ?? null,
+    }`);
+    let now = await read();
+    say(now.status.startsWith("Betaflight's Default font") && now.purpose.startsWith("The character A") && now.problem === null, "Betaflight's Default font is fetched and opened on the letter A", `${now.status} · ${now.purpose}`);
+
+    // A picture picked from the sheet: the full battery, 0x90, is column 16 of row 4.
+    await js(`const sheet = document.querySelector('[data-probe="font sheet"]'), box = sheet.getBoundingClientRect();
+      sheet.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: box.left + (16 * 13 + 7) / sheet.width * box.width, clientY: box.top + (4 * 19 + 10) / sheet.height * box.height }))`);
+    await pause(200);
+    now = await read();
+    say(now.purpose.startsWith("Battery, full") && now.purpose.includes("Battery"), "a picture is picked from all 256, and says what Betaflight uses it for", now.purpose);
+
+    // Painted white at its top left dot, then taken back.
+    const dotColour = (probe, x, y) => js(`const canvas = document.querySelector('[data-probe="${probe}"]'); return [...canvas.getContext("2d").getImageData(${x}, ${y}, 1, 1).data].slice(0, 3).join(",")`);
+    const press = (probe, fx, fy) => js(`const canvas = document.querySelector('[data-probe="${probe}"]'), box = canvas.getBoundingClientRect(), at = { bubbles: true, button: 0, pointerId: 1, clientX: box.left + ${fx} * box.width, clientY: box.top + ${fy} * box.height };
+      canvas.dispatchEvent(new PointerEvent("pointerdown", at)); canvas.dispatchEvent(new PointerEvent("pointerup", at));`);
+    // Its bottom right dot, which is see-through in the made-up font.
+    const corner = [11 * 22 + 5, 17 * 22 + 5];
+    const blank = await dotColour("font glyph", ...corner);
+    await press("font glyph", 0.98, 0.98);
+    await pause(200);
+    const painted = await dotColour("font glyph", ...corner);
+    now = await read();
+    say(blank !== "255,255,255" && painted === "255,255,255" && now.status.includes("changed, not saved") && now.undo === false, "a dot painted white shows at once, and the font says it has changed", `${blank} to ${painted}`);
+    await js(`document.querySelector('[data-probe="font undo"]').click()`);
+    await pause(200);
+    say((await dotColour("font glyph", ...corner)) === blank && (await read()).undo === true, "Undo takes the dot back");
+
+    // Letters and numbers from another of Betaflight's fonts.
+    await js(`const pick = document.querySelector('[data-probe="font take from"]'); pick.value = "bold"; pick.dispatchEvent(new Event("change", { bubbles: true })); document.querySelector('[data-probe="font take text"]').click()`);
+    await pause(500);
+    await js(`const sheet = document.querySelector('[data-probe="font sheet"]'), box = sheet.getBoundingClientRect();
+      sheet.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: box.left + (1 * 13 + 7) / sheet.width * box.width, clientY: box.top + (2 * 19 + 10) / sheet.height * box.height }))`);
+    await pause(200);
+    now = await read();
+    const middle = await dotColour("font glyph", 6 * 22 + 5, 9 * 22 + 5);
+    say(now.purpose.startsWith("The character A") && middle === "255,255,255", "letters and numbers are taken from Betaflight's Bold font in place of its own", `${now.purpose}, middle ${middle}`);
+
+    // The logo painted black at its top left.
+    await js(`document.querySelector('[data-probe="font tool Black"]').click()`);
+    await pause(150);
+    await press("font logo", 0.001, 0.005);
+    await pause(200);
+    say((await dotColour("font logo", 0, 0)) === "0,0,0", "the boot logo is painted on, dot by dot");
+
+    // Saved to the library's OSD fonts folder.
+    await js(`document.querySelector('[data-probe="font save open"]').click()`);
+    await pause(250);
+    await js(`const name = document.querySelector('[data-probe="font name"]'); name.value = "Check font"; document.querySelector('[data-probe="font save"]').click()`);
+    await pause(500);
+    const kept = existsSync(saved) ? readFont(readFileSync(saved, "utf8")) : null;
+    now = await read();
+    say(Boolean(kept) && glyphOf(kept, 0x41).every((dot) => dot === WHITE) && logoOf(kept)[0] === BLACK && now.status.includes("saved as Check font"),
+      "Save keeps it in the library's OSD fonts folder as Check font.mcm, as it was changed", kept ? `${now.status}` : "nothing saved");
+    const shown = await js(`return [...document.querySelectorAll(".font-card .button")].some((one) => one.textContent.startsWith("Show in "))`);
+    say(shown, "once saved, it can be shown in the file browser, to choose in Betaflight's Font Manager");
+
+    // Another font saved under the same name is only put in its place once the pilot says so.
+    await js(`document.querySelector('[data-probe="font open"]').click()`);
+    await pause(250);
+    const listed = await js(`return [...document.querySelectorAll('[data-probe^="font mine "]')].map((one) => one.textContent)`);
+    await js(`document.querySelector('#sheets [data-probe="font betaflight default"]').click()`);
+    await until(js, `return (document.querySelector('[data-probe="font status"]')?.textContent ?? "").startsWith("Betaflight's Default")`, 10);
+    await js(`document.querySelector('[data-probe="font save open"]').click()`);
+    await pause(250);
+    await js(`const name = document.querySelector('[data-probe="font name"]'); name.value = "Check font"; document.querySelector('[data-probe="font save"]').click()`);
+    await pause(400);
+    const asked = await js(`return [...document.querySelectorAll("#sheets .alert-title")].at(-1)?.textContent ?? null`);
+    const untouched = glyphOf(readFont(readFileSync(saved, "utf8")), 0x41).every((dot) => dot === WHITE);
+    await js(`[...document.querySelectorAll("#sheets .button")].find((one) => one.textContent === "Replace it")?.click()`);
+    await pause(400);
+    const replaced = glyphOf(readFont(readFileSync(saved, "utf8")), 0x41).every((dot) => dot === WHITE) === false;
+    say(listed.includes("Check font") && asked === "Replace Check font?" && untouched && replaced, "your fonts are listed to open, and a font of the same name is replaced only once you say so", `${asked} · ${listed.join(", ")}`);
+
+    // A made-up picture for the logo: a white block on a red background, twice the logo's size.
+    await js(`const canvas = document.createElement("canvas"); canvas.width = 576; canvas.height = 144;
+      const context = canvas.getContext("2d"); context.fillStyle = "#c8302a"; context.fillRect(0, 0, 576, 144); context.fillStyle = "#fff"; context.fillRect(200, 40, 176, 64);
+      const blob = await new Promise((done) => canvas.toBlob(done, "image/png"));
+      const { useLogoPicture } = await import("./views/osdfont.js");
+      await useLogoPicture(new File([blob], "made-up logo.png", { type: "image/png" }));`);
+    await pause(300);
+    const offered = await js(`return [...document.querySelectorAll("#sheets .alert-title")].at(-1)?.textContent ?? null`);
+    await js(`document.querySelector('[data-probe="font picture use"]').click()`);
+    await pause(300);
+    const logoDots = [await dotColour("font logo", 144, 36), await dotColour("font logo", 0, 0), await dotColour("font logo", 99, 36)];
+    say(offered === "Use a picture for the logo" && logoDots[0] === "255,255,255" && logoDots[1] === "62,69,82" && logoDots[2] === "0,0,0",
+      "a picture becomes the logo: fitted in, light parts white, its plain background see-through and a black outline round the white", logoDots.join(" | "));
+
+    await js(`[...document.querySelectorAll(".font-choices .choice")].find((one) => one.textContent === "Starting up")?.click()`);
+    await pause(200);
+    say(errors.length === before, "nothing went wrong in the window", errors.slice(before).join(" | "));
+  } finally {
+    rmSync(feed, { recursive: true, force: true });
+    rmSync(saved, { force: true });
+    await js(`await window.showForSnapshot("home")`);
+  }
+}
 
 /** Uploading a run's videos: YouTube's through the pilot's own browser, and TikTok's and
  *  Instagram's through a page of the app's own standing in for theirs. */
@@ -2365,7 +2693,7 @@ async function everything(tools) {
 
   const steps = [
     ["The marker editor", editor], ["Making the videos", video], ["A recording in an MP4", mp4], ["Before and after a video", bookends],
-    ["The track in 3D, and building one", trackview], ["Other projects' tools", outside], ["Uploading", uploads], ["Finding music", music], ["A card from the goggles", cards], ["The radio's backups", radio], ["The copy in Google Drive", drive], ["Every page", pages], ["Updating itself", updating],
+    ["The track in 3D, and building one", trackview], ["Other projects' tools", outside], ["Rates", rates], ["The OSD font", osdfont], ["Uploading", uploads], ["Finding music", music], ["A card from the goggles", cards], ["The radio's backups", radio], ["The copy in Google Drive", drive], ["Every page", pages], ["Updating itself", updating],
   ];
   for (const [title, step] of steps) {
     note(`-- ${title}`);
@@ -2438,7 +2766,7 @@ async function form(tools) {
 
 async function pages(tools) {
   const { js, errors } = await page(tools);
-  for (const which of ["home", "creator", "track", "files", "settings", "guide", "leaderboard", "batteries", "welcome", "whatsnew", "setup", "submit", "race", "editor", "wave", "music", "trackview", "upload:youtube", "upload:shorts", "upload:tiktok"]) {
+  for (const which of ["home", "creator", "track", "files", "settings", "guide", "leaderboard", "batteries", "rates", "osdfont", "welcome", "whatsnew", "setup", "submit", "race", "editor", "wave", "music", "trackview", "upload:youtube", "upload:shorts", "upload:tiktok"]) {
     const before = errors.length;
     let problem = "";
     try {

@@ -21,12 +21,14 @@ import { stillsOf, pipesIn } from "./trackvideo.js";
 import { latest, install, checkIsDue } from "./updates.js";
 import { makeTools } from "./tools.js";
 import { makeUploads } from "./uploads.js";
+import { makeOsdFonts } from "./osdfonts.js";
 import { sites, linkFor, uploadsOf, videoLinkIn, fileName } from "../shared/uploads.js";
 import { makeCounts } from "./counts.js";
 import { makeMusic } from "./music.js";
 import { videoIdOf } from "../shared/counts.js";
 import { makePrograms } from "./components.js";
 import { makeRadio } from "./radio.js";
+import { makeFirmwareCheck } from "./firmware.js";
 import { makeDriveCopy } from "./drive.js";
 import { measure, moveFolder } from "./move.js";
 import { driveHolding, isInDrive, libraryName } from "../shared/drive.js";
@@ -135,9 +137,13 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
   /** The radio's SD card, backed up whenever it is plugged in. It is looked for once EdgeTX
    *  Companion, which sets a radio up, has been put in place or opened. */
   const radio = makeRadio({ tell, quiet });
+  /** Whether WS3 Unlocked, the WhoopStor's firmware, has a newer release, looked at once a day. */
+  const firmware = makeFirmwareCheck({ tell, quiet });
   const outside = makeTools({ window, tell, still: quiet && !process.argv.includes("--live") }), kept = makePrograms({ tell, quiet, used: (program) => program.backups && radio.watchForRadios() });
   /** A finished video going up through a site's own upload page. Its link there is kept with its run. */
   const uploads = makeUploads({ window, tell, quiet, staging: join(cache, "Uploading"), still: quiet && !process.argv.includes("--live"), keepLink: (track, run, site, link) => api.keepUpload(track, run, site, link ?? "") });
+  /** OSD fonts for an analog flight controller: Betaflight's, fetched when asked for, and the pilot's own. */
+  const osdFonts = makeOsdFonts({ library, cache, quiet });
   /** How many views, likes and comments the runs' YouTube videos have, with the pilot's own key. */
   const counts = makeCounts({ key: () => library.settings.youtubeKey ?? "", quiet });
   /** The pilot's Spotify and NCS's catalog of music free for videos, for Find music. A copy trying
@@ -322,6 +328,7 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
         programs: kept.programsNow(),
         radio: radio.radioNow(),
         batteries: batteriesNow(),
+        ws3: firmware.ws3Now(),
         /** Started with `--tester-sim <command>`: the battery page talks to that program in place of a tester. */
         testerSim: Boolean(argument("--tester-sim")),
         /** Started with `--whoopstor-sim <speed>`: the battery page has a pretend WhoopStor charger. */
@@ -883,11 +890,11 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
       return { state: api.state() };
     },
 
-    /** Says which pack a charge on the WhoopStor was. */
+    /** Says which pack a charge on the WhoopStor was, or with null that it isn't known after all. */
     assignBatteryTest(id, pack) {
       const kept = library.batteries;
       if (!kept.tests[id]) return { problem: "That charge isn't there any more." };
-      if (!kept.packs[pack]) return { problem: "That pack isn't there any more." };
+      if (pack !== null && !kept.packs[pack]) return { problem: "That pack isn't there any more." };
       library.keepBatteries(withTest(kept, { ...kept.tests[id], pack }));
       return { state: api.state() };
     },
@@ -1142,6 +1149,8 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
     ...outside,
     ...kept,
     ...radio,
+    ...firmware,
+    ...osdFonts,
 
     // Uploading to YouTube, TikTok and Instagram.
 

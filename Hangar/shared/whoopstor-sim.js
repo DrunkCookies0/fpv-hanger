@@ -50,6 +50,7 @@ export class PretendWhoopStor {
 
   start() {
     this.running = true;
+    this.stopReason = null;
   }
 
   /** Stops the run: every port goes idle, a full one too, and checks its pack again at the next start. */
@@ -164,7 +165,8 @@ export class PretendWhoopStor {
       r[8] = (this.running ? 1 : 0) | (this.target << 1) | (this.running ? 8 : 0);
       r[9] = this.setCount;
       r[10] = 0x02;
-      r[11] = this.running ? 0 : 4;
+      // Why it stopped: 4 at its button or a command, or another reason set for the app's checks (stopWords).
+      r[11] = this.running ? 0 : this.stopReason ?? 4;
       r[13] = this.event.seq; r[14] = this.event.code; r[15] = this.event.port;
       r[16] = this.lastCommand.seq; r[17] = this.lastCommand.result;
       r[24] = this.ports.reduce((bits, port, index) => bits | (port.state === "bleed" ? 1 << index : 0), 0);
