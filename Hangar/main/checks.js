@@ -34,6 +34,12 @@
 //            there. With `--live` it also opens Betaflight's app, its Blackbox Explorer and the
 //            ExpressLRS flasher from their own sites, which needs the network, and reads that each
 //            arrived. No device is asked for or touched.
+//   garage   the Whoop Garage, with made-up blackbox logs: one with a pack's number in its name is
+//            read, its whoop and pack offered, a short arm left unticked, and kept; a second, with
+//            two power-ups, is matched to the same whoop by its flight controller's number; a flight
+//            is opened on each of its tabs, sent to Rates, has its pack changed for its power-up,
+//            and is taken out; the whoop is renamed. With `--garage-log <file>` a real log is read
+//            and kept too, for pictures of real flights.
 //   osdfont  the OSD font page, with made-up fonts standing in for Betaflight's (`--osd-font-feed`
 //            is set by the check): one is opened, a picture picked from all 256, painted and the
 //            paint taken back, letters taken from another font, the logo painted, the font saved
@@ -92,6 +98,8 @@ import { numberedRecording, numbersIn, frameTimes } from "./numbered.js";
 import { copyName, libraryName } from "../shared/drive.js";
 import { fileName, sites, words } from "../shared/uploads.js";
 import { readFont, writeFont, emptyFont, setDot, glyphOf, logoOf, WHITE, BLACK } from "../shared/osdfont.js";
+import { sampleDump } from "./samplelog.js";
+import { newPack } from "../shared/batteries.js";
 
 /** With `--report <file>`, everything said is written there too, a line at a time as it happens,
  *  so a check that stops halfway still leaves what it had found. */
@@ -112,7 +120,7 @@ function say(ok, what, detail = "") {
 }
 
 export async function run(which, tools) {
-  const checks = { editor, video, mp4, pages, form, bookends, trackview, trackvideo, outside, rates, osdfont, uploads, music, drive, cards, radio, update, updating, carryover, batteries, whoopstor, everything };
+  const checks = { editor, video, mp4, pages, form, bookends, trackview, trackvideo, outside, rates, osdfont, garage, uploads, music, drive, cards, radio, update, updating, carryover, batteries, whoopstor, everything };
   if (report) writeFileSync(report, "");
   if (!checks[which]) {
     console.error(`There is no check called ${which}. There are: ${Object.keys(checks).join(", ")}.`);
@@ -1584,6 +1592,127 @@ async function osdfont(tools) {
   }
 }
 
+/** The Whoop Garage, with made-up logs in a folder of their own. */
+async function garage(tools) {
+  const { library } = tools;
+  const folder = mkdtempSync(join(tmpdir(), "fpv-hangar-logs-"));
+  // A pack called 014 for the first log's name to point at.
+  const made = newPack({ name: "014", mah: 300, brand: "Made-up" });
+  if (!Object.values(library.batteries.packs).some((pack) => pack.name === "014")) library.keepBatteries({ ...library.batteries, packs: { ...library.batteries.packs, [made.pack.id]: made.pack } });
+  const pack014 = Object.values(library.batteries.packs).find((pack) => pack.name === "014").id;
+  const first = join(folder, "practice-014.bbl"), second = join(folder, "two-packs.bbl");
+  writeFileSync(first, sampleDump({ arms: [{ seconds: 24, powerUp: 0 }, { seconds: 2, powerUp: 0 }] }));
+  writeFileSync(second, sampleDump({ arms: [{ seconds: 20, powerUp: 0 }, { seconds: 18, powerUp: 1 }], seed: 23 }));
+  const { js, errors } = await page(tools);
+  const before = errors.length;
+  try {
+    await js(`window.hangar_.app.editor?.close(); await window.hangar_.app.trackView?.close({ sure: true }); await window.hangar_.app.tool?.close(); await window.showForSnapshot("home")`);
+    await js(`document.querySelector('[data-probe="tile garage"]').click()`);
+    await pause(300);
+    const opened = await js(`return { title: document.querySelector(".garage .head-title")?.textContent ?? null, on: document.querySelector('[data-probe="tile garage"]')?.classList.contains("on") ?? false, open: Boolean(document.querySelector('[data-probe="garage open"]')) }`);
+    say(opened.title === "Whoop Garage" && opened.on && opened.open, "the Whoop Garage opens from the sidebar, with a way to open a log", JSON.stringify(opened));
+
+    // The first log: one power-up, a flight and a hop.
+    await js(`const { openLog } = await import("./views/garage.js"); await openLog(${JSON.stringify(first)})`);
+    await until(js, `return Boolean(document.querySelector('[data-probe="garage powerup 0"]'))`, 20);
+    const read = await js(`return {
+      parts: document.querySelectorAll('[data-probe^="garage powerup "]').length,
+      whoop: document.querySelector('[data-probe="garage whoop 0"]')?.value ?? null,
+      name: document.querySelector('[data-probe="garage name 0"]')?.value ?? null,
+      pack: document.querySelector('[data-probe="garage pack 0"]')?.value ?? null,
+      arms: [...document.querySelectorAll('[data-probe^="garage arm "] input')].map((one) => one.checked),
+      keep: document.querySelector('[data-probe="garage keep"]')?.textContent ?? null,
+    }`);
+    say(read.parts === 1 && read.whoop?.startsWith("new:") && read.name === "Test Whoop" && read.pack === pack014 && JSON.stringify(read.arms) === "[true,false]" && read.keep === "Keep 1 flight",
+      "a log is read into its power-up: a new whoop named for its craft name, the pack its file's name says, and the short arm left unticked", JSON.stringify(read));
+    await js(`const what = document.querySelector('[data-probe="garage what 0"]'); what.value = "Practice"; what.dispatchEvent(new Event("input", { bubbles: true })); document.querySelector('[data-probe="garage keep"]').click()`);
+    await until(js, `return Boolean(document.querySelector('[data-probe^="garage whoop w-"]'))`, 10);
+    let kept = library.garage;
+    const whoopId = Object.keys(kept.whoops).find((id) => kept.whoops[id].uid === "MADEUP000000000000000001");
+    const firstFlights = Object.values(kept.flights).filter((one) => kept.logs[one.log]?.file === "practice-014.bbl");
+    const logFolder = firstFlights[0] && join(library.garageFolder, firstFlights[0].log);
+    say(Boolean(whoopId) && firstFlights.length === 1 && firstFlights[0].pack === pack014 && firstFlights[0].what === "Practice" && existsSync(join(logFolder ?? "", "practice-014.bbl")) && existsSync(join(logFolder ?? "", "analysis.json")),
+      "Keep puts the whoop and its flight in the Garage, and the log in the library's Whoop Garage folder", `${firstFlights.length} flight, ${whoopId}`);
+
+    // The second log: two power-ups, from the same whoop.
+    await js(`const { openLog } = await import("./views/garage.js"); await openLog(${JSON.stringify(second)})`);
+    await until(js, `return document.querySelectorAll('[data-probe^="garage powerup "]').length === 2`, 20);
+    const both = await js(`return [0, 1].map((n) => document.querySelector('[data-probe="garage whoop ' + n + '"]')?.value ?? null)`);
+    say(both.every((one) => one === whoopId), "a log from a whoop in the Garage is known by its flight controller's number, power-up by power-up", JSON.stringify(both));
+    await js(`const pick = document.querySelector('[data-probe="garage pack 1"]'); pick.value = ${JSON.stringify(pack014)}; pick.dispatchEvent(new Event("change", { bubbles: true }))`);
+    await pause(200);
+    await js(`document.querySelector('[data-probe="garage keep"]').click()`);
+    await until(js, `return document.querySelectorAll('[data-probe^="garage flight "]').length >= 3`, 10);
+    kept = library.garage;
+    const secondFlights = Object.values(kept.flights).filter((one) => kept.logs[one.log]?.file === "two-packs.bbl").sort((a, b) => a.index - b.index);
+    say(secondFlights.length === 2 && secondFlights[0].pack === null && secondFlights[1].pack === pack014 && secondFlights.every((one) => one.whoop === whoopId),
+      "each power-up's flights are kept with that power-up's pack", secondFlights.map((one) => `${one.index}:${one.pack ?? "-"}`).join(" "));
+
+    // A flight's page, on each tab.
+    const flightId = secondFlights[1].id;
+    await js(`document.querySelector('[data-probe="garage flight ${flightId}"]').click()`);
+    await until(js, `return Boolean(document.querySelector(".garage-tiles"))`, 10);
+    const tabsSeen = {};
+    for (const tab of ["overview", "tune", "rates", "battery"]) {
+      await js(`document.querySelector('[data-probe="garage tab ${tab}"]').click()`);
+      await pause(250);
+      tabsSeen[tab] = await js(`return { tiles: document.querySelectorAll(".garage-tile").length, charts: document.querySelectorAll(".garage-plot path").length, sayings: document.querySelectorAll(".garage-sayings li").length, text: document.querySelector(".garage")?.textContent ?? "" }`);
+    }
+    say(tabsSeen.overview.tiles >= 6 && tabsSeen.overview.charts >= 2 && tabsSeen.overview.sayings >= 1, "a flight's Overview has its figures, what it says, and the throttle and the pack over the flight", JSON.stringify({ tiles: tabsSeen.overview.tiles, charts: tabsSeen.overview.charts }));
+    say(tabsSeen.tune.charts >= 4 && /NOISE, ROLL AND PITCH/.test(tabsSeen.tune.text) && /STEP RESPONSE/.test(tabsSeen.tune.text) && /45,80,30/.test(tabsSeen.tune.text), "its Tune tab has the noise, the step response and the tune in the log", `${tabsSeen.tune.charts} lines`);
+    say(/670/.test(tabsSeen.rates.text) && /TOP USED/.test(tabsSeen.rates.text) && tabsSeen.rates.charts >= 3, "its Rates tab has each axis's rates and how much of them was used");
+    say(/PACK 014/.test(tabsSeen.battery.text) && /SAG AT FULL MOTOR/.test(tabsSeen.battery.text) && /4\.20 V/.test(tabsSeen.battery.text), "its Battery tab has the pack's sag, with the pack the flight was on");
+
+    // Its rates, sent to the Rates page.
+    await js(`document.querySelector('[data-probe="garage tab rates"]').click()`);
+    await pause(150);
+    await js(`document.querySelector('[data-probe="garage open rates"]').click()`);
+    await pause(400);
+    const rates = await js(`return { page: document.querySelector(".rates .head-title")?.textContent ?? null, from: document.querySelector('[data-probe^="rates from "].picked')?.textContent ?? null, center: document.querySelector('[data-probe="rate roll rc"]')?.value ?? null, max: document.querySelector('[data-probe="rate roll srate"]')?.value ?? null }`);
+    say(rates.page === "Rates" && rates.from === "Actual" && rates.center === "70" && rates.max === "670", "Open in Rates puts the flight's rates on the Rates page", JSON.stringify(rates));
+
+    // Its pack changed: for the whole power-up. Then taken out.
+    const otherId = secondFlights[0].id;
+    await js(`const { openFlight } = await import("./views/garage.js"); await openFlight(${JSON.stringify(otherId)}, "overview")`);
+    await until(js, `return Boolean(document.querySelector('[data-probe="garage flight pack"]'))`, 10);
+    await js(`const pick = document.querySelector('[data-probe="garage flight pack"]'); pick.value = ${JSON.stringify(pack014)}; pick.dispatchEvent(new Event("change", { bubbles: true }))`);
+    await pause(300);
+    say(library.garage.flights[otherId]?.pack === pack014, "a flight's pack can be changed on its page");
+    await js(`document.querySelector('[data-probe="garage forget"]').click()`);
+    await pause(300);
+    await js(`[...document.querySelectorAll("#sheets .button")].find((one) => one.textContent === "Take it out")?.click()`);
+    await pause(400);
+    say(!library.garage.flights[otherId] && Boolean(library.garage.logs[secondFlights[1].log]), "a flight taken out goes, and its log stays while it has another flight kept");
+
+    // The whoop renamed, from its page.
+    await js(`await window.showForSnapshot("garage")`);
+    await js(`document.querySelector('[data-probe="garage whoop ${whoopId}"]').click()`);
+    await pause(300);
+    await js(`document.querySelector('[data-probe="garage rename"]').click()`);
+    await pause(250);
+    await js(`const field = document.querySelector("#sheets input.field"); field.value = "Made-up Whoop"; [...document.querySelectorAll("#sheets .button")].find((one) => one.textContent === "Rename").click()`);
+    await pause(400);
+    const renamed = await js(`return document.querySelector(".garage .head-title")?.textContent ?? null`);
+    say(library.garage.whoops[whoopId]?.name === "Made-up Whoop" && renamed === "Made-up Whoop", "a whoop is renamed from its page", renamed ?? "");
+
+    // A real log, when one is given, read and kept as it is.
+    const real = argument("--garage-log");
+    if (real) {
+      await js(`const { openLog } = await import("./views/garage.js"); await openLog(${JSON.stringify(real)})`);
+      await until(js, `return Boolean(document.querySelector('[data-probe="garage powerup 0"]'))`, 30);
+      await js(`document.querySelector('[data-probe="garage keep"]').click()`);
+      await pause(800);
+      say(Object.values(library.garage.logs).some((log) => log.file === basename(real)), "a real log is read and kept", basename(real));
+    }
+    const notFlight = await js(`const { openLog } = await import("./views/garage.js"); await openLog(${JSON.stringify(join(folder, "nothing.bbl"))}); return document.querySelector('[data-probe="garage problem"]')?.textContent ?? null`);
+    say(Boolean(notFlight), "a file that isn't there says so", notFlight ?? "");
+    say(errors.length === before, "nothing went wrong in the window", errors.slice(before).join(" | "));
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+    await js(`await window.showForSnapshot("home")`);
+  }
+}
+
 /** Uploading a run's videos: YouTube's through the pilot's own browser, and TikTok's and
  *  Instagram's through a page of the app's own standing in for theirs. */
 async function uploads(tools) {
@@ -2693,7 +2822,7 @@ async function everything(tools) {
 
   const steps = [
     ["The marker editor", editor], ["Making the videos", video], ["A recording in an MP4", mp4], ["Before and after a video", bookends],
-    ["The track in 3D, and building one", trackview], ["Other projects' tools", outside], ["Rates", rates], ["The OSD font", osdfont], ["Uploading", uploads], ["Finding music", music], ["A card from the goggles", cards], ["The radio's backups", radio], ["The copy in Google Drive", drive], ["Every page", pages], ["Updating itself", updating],
+    ["The track in 3D, and building one", trackview], ["Other projects' tools", outside], ["Rates", rates], ["The OSD font", osdfont], ["The Whoop Garage", garage], ["Uploading", uploads], ["Finding music", music], ["A card from the goggles", cards], ["The radio's backups", radio], ["The copy in Google Drive", drive], ["Every page", pages], ["Updating itself", updating],
   ];
   for (const [title, step] of steps) {
     note(`-- ${title}`);
@@ -2766,7 +2895,7 @@ async function form(tools) {
 
 async function pages(tools) {
   const { js, errors } = await page(tools);
-  for (const which of ["home", "creator", "track", "files", "settings", "guide", "leaderboard", "batteries", "rates", "osdfont", "welcome", "whatsnew", "setup", "submit", "race", "editor", "wave", "music", "trackview", "upload:youtube", "upload:shorts", "upload:tiktok"]) {
+  for (const which of ["home", "creator", "track", "files", "settings", "guide", "leaderboard", "batteries", "rates", "osdfont", "garage", "welcome", "whatsnew", "setup", "submit", "race", "editor", "wave", "music", "trackview", "upload:youtube", "upload:shorts", "upload:tiktok"]) {
     const before = errors.length;
     let problem = "";
     try {

@@ -124,6 +124,8 @@ const drawings = {
   trace: line("M2.500 13h3l2.500-7 3.500 12 3-9 2 5 1.500-2h3.500"),
   // A rate curve: slow round the middle of the stick, fast at its ends.
   curve: line("M3.500 3.500v17h17") + line("M6.500 18c6 0 8-1.500 10-5s2.500-6 3-9"),
+  // A whoop from above: four props round its frame.
+  quad: '<circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><rect x="10" y="10" width="4" height="4" rx="1"/>' + line("M8.200 8.200l1.800 1.800M15.800 8.200L14 10M8.200 15.800L10 14M15.800 15.800L14 14"),
   // A letter on a picture's square: a font for the OSD.
   glyph: '<rect x="3.500" y="3.500" width="17" height="17" rx="2.500"/>' + line("M8.500 16.500l3.500-9 3.500 9M9.800 13.500h4.400"),
 };

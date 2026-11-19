@@ -231,6 +231,16 @@ function openPaste() {
   box.focus();
 }
 
+/** Rates as a flight's log had them, put on the page in place of what was there: from the Whoop
+ *  Garage. `source` says where they came from. */
+export function ratesFrom({ type, axes }, source) {
+  kept.from = { type, quickExpo: false, axes: structuredClone(axes), profile: null };
+  kept.to = otherType(type);
+  kept.typing = {};
+  kept.copied = false;
+  kept.source = source;
+}
+
 export function ratesPage() {
   if (kept.to === kept.from.type) kept.to = otherType(kept.from.type);
   return h("div.scroll", { "data-scroll": "page" }, h("div.plain-page.rates",

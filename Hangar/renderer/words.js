@@ -46,6 +46,10 @@ export const tools = {
     title: "Video Creator", icon: "filmStack", soon: comingSoon.anyFootage,
     summary: "Clip a flight, time its laps and add music, without a race series or an entry form.",
   },
+  garage: {
+    title: "Whoop Garage", icon: "quad", soon: null,
+    summary: "Your whoops and every flight from their blackbox logs, each with its pack: the throttle and the pack's sag, the noise and the tune, and how much of the rates you use.",
+  },
   upload: {
     title: "Upload", icon: "upload", soon: null,
     summary: "Send any video to YouTube, Shorts, TikTok or Instagram, through each site's own upload page, with the words for it written for you.",
@@ -137,6 +141,7 @@ export const suites = [
  *  two suites share a heading, as each has only one tool to open so far. */
 export const sideGroups = [
   { title: "RaceGOW", tools: ["videoCreator", "leaderboards"] },
+  { title: "Whoops", tools: ["garage"] },
   { title: "Firmware & setup", tools: ["betaflight", "blackbox", "rates", "osdFont", "elrsFlasher", "elrsConfigurator"] },
   { title: "Radio", tools: ["edgetxCompanion", "radioBackups"] },
   { title: "Footage & batteries", tools: ["upload", "batteryTester"] },
@@ -185,6 +190,15 @@ export const readMeFor = (mac) => ({
         ["point", "The radio's card is only read. A file that hasn't changed since the last backup is linked to its copy there, so a backup takes little room, and a backup that finds nothing changed isn't kept."],
         ["point", "To put one back, plug the radio in with USB Storage (SD) chosen, delete the RADIO and MODELS folders on its card, and copy the backup's in their place. Or open the backup in EdgeTX Companion with File, Read Models and Settings from SD Path, then write it with Radio, Write Models and Settings to Radio."],
         ["point", "Updating Companion keeps its settings. A newer version family takes them from the one before when it first opens. Writing new firmware leaves the card as it is, and Companion backs up the radio's firmware first, into the same folder."],
+      ],
+    },
+    {
+      title: "The Whoop Garage",
+      items: [
+        ["paragraph", "Betaflight's blackbox keeps a log of every flight on the flight controller. After a heat or a practice, plug the whoop in, open Betaflight, and in its Blackbox tab press Save flash to file. Open that file in the Whoop Garage, or drop it on the page."],
+        ["point", "A log holds every arm since the flash was last erased, across each pack you flew. The Garage splits it into power-ups, one pack each, and asks which whoop and which pack each was. A whoop already in the Garage is known by its flight controller. A pack whose number is in the file's name is picked for you."],
+        ["point", "Each flight shows how long it flew, the throttle, the pack's sag, the motors' noise and how the whoop follows the sticks, how much of the rates you use, and anything alarming. What it says is worst first: orange to look at now, yellow worth knowing, green fine."],
+        ["point", "Kept, the log goes in your library's Whoop Garage folder, so a library in Google Drive has it on both computers. Erase the flash in Betaflight once it is kept, so the next log holds only new flights."],
       ],
     },
     {

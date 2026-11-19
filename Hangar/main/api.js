@@ -21,6 +21,7 @@ import { stillsOf, pipesIn } from "./trackvideo.js";
 import { latest, install, checkIsDue } from "./updates.js";
 import { makeTools } from "./tools.js";
 import { makeUploads } from "./uploads.js";
+import { makeGarage } from "./garage.js";
 import { makeOsdFonts } from "./osdfonts.js";
 import { sites, linkFor, uploadsOf, videoLinkIn, fileName } from "../shared/uploads.js";
 import { makeCounts } from "./counts.js";
@@ -144,6 +145,8 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
   const uploads = makeUploads({ window, tell, quiet, staging: join(cache, "Uploading"), still: quiet && !process.argv.includes("--live"), keepLink: (track, run, site, link) => api.keepUpload(track, run, site, link ?? "") });
   /** OSD fonts for an analog flight controller: Betaflight's, fetched when asked for, and the pilot's own. */
   const osdFonts = makeOsdFonts({ library, cache, quiet });
+  /** The Whoop Garage: blackbox logs read, and kept with the whoop and pack each flight was on. */
+  const garage = makeGarage({ library, window, tell });
   /** How many views, likes and comments the runs' YouTube videos have, with the pilot's own key. */
   const counts = makeCounts({ key: () => library.settings.youtubeKey ?? "", quiet });
   /** The pilot's Spotify and NCS's catalog of music free for videos, for Find music. A copy trying
@@ -328,6 +331,7 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
         programs: kept.programsNow(),
         radio: radio.radioNow(),
         batteries: batteriesNow(),
+        garage: library.garage,
         ws3: firmware.ws3Now(),
         /** Started with `--tester-sim <command>`: the battery page talks to that program in place of a tester. */
         testerSim: Boolean(argument("--tester-sim")),
@@ -1149,6 +1153,7 @@ export function makeApi({ library, ffmpeg, videos, cache, window, tell, fixed = 
     ...outside,
     ...kept,
     ...radio,
+    ...garage,
     ...firmware,
     ...osdFonts,
 

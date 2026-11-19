@@ -18,6 +18,7 @@ export function actionFor(tool) {
   if (tool === "betaflight" || tool === "blackbox" || tool === "elrsFlasher") return () => openTool(tool);
   if (tool === "elrsConfigurator" || tool === "edgetxCompanion") return () => showProgram(tool);
   if (tool === "rates") return () => open({ name: "rates" });
+  if (tool === "garage") return () => open({ name: "garage" });
   if (tool === "osdFont") return () => open({ name: "osdfont" });
   if (tool === "radioBackups") return showRadioBackups;
   if (tool === "upload") return uploadAnyVideo;
@@ -36,6 +37,7 @@ export function showing() {
   if (name === "leaderboard") return "leaderboards";
   if (name === "batteries") return "batteryTester";
   if (name === "osdfont") return "osdFont";
+  if (name === "garage" || name === "garageread" || name === "garageflight" || name === "garagewhoop") return "garage";
   return name;
 }
 

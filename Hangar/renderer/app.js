@@ -10,6 +10,7 @@ import { leaderboard, settings, guidePage } from "./views/pages.js";
 import { batteries } from "./views/batteries.js";
 import { ratesPage } from "./views/rates.js";
 import { osdFontPage } from "./views/osdfont.js";
+import { garagePage, readPage, flightPage, whoopPage } from "./views/garage.js";
 import { tester } from "./tester.js";
 import { whoopstor, connectWhenThere } from "./whoopstor.js";
 import { drawSide, drawSideLive, showFind } from "./views/side.js";
@@ -32,6 +33,10 @@ function pageView() {
     case "batteries": return batteries();
     case "rates": return ratesPage();
     case "osdfont": return osdFontPage();
+    case "garage": return garagePage();
+    case "garageread": return readPage();
+    case "garageflight": return flightPage();
+    case "garagewhoop": return whoopPage();
     default: return home();
   }
 }
@@ -134,7 +139,7 @@ const started = (async () => {
  * sheets and comes back once everything on it has arrived.
  *
  *   home, creator, track, track:<path>, files (a track with its first run's files showing),
- *   settings, guide, leaderboard, batteries, rates, osdfont, osdfont:<Betaflight's font>, welcome, whatsnew, setup, setup:<pilot name> (the second
+ *   settings, guide, leaderboard, batteries, rates, garage, garageread:<log>, garageflight:<flight>#<tab>, osdfont, osdfont:<Betaflight's font>, welcome, whatsnew, setup, setup:<pilot name> (the second
  *   question, looked up), race (the sheet for renaming or moving a race), editor, wave (the
  *   song's sound wave), music (Find music, with every source read), trackview,
  *   tool:<which>, program:<which>, upload:<site> (a site's upload page, for the first run's video),
@@ -168,7 +173,17 @@ window.showForSnapshot = async (which) => {
     const data = app.tracks.get(app.page.track);
     if (data?.summary.runs[0]) app.expanded.add(`${app.page.track}\n${data.summary.runs[0].name}`);
   } else if (name === "settings" || name === "guide" || name === "leaderboard" || name === "batteries" || name === "rates") open({ name });
-  else if (name === "osdfont") {
+  else if (name === "garage" || name === "garageread" || name === "garageflight") {
+    // The Whoop Garage; "garageread:<log file>" with that log read and asking which whoop and pack,
+    // "garageflight:<flight>#<tab>" one kept flight on one of its tabs.
+    const garage = await import("./views/garage.js");
+    if (name === "garage") open({ name });
+    else if (name === "garageread") await garage.openLog(detail);
+    else {
+      const [flight, tab] = detail.split("#");
+      await garage.openFlight(flight, tab);
+    }
+  } else if (name === "osdfont") {
     // The OSD font page, with one of Betaflight's fonts open when one is named ("osdfont:default").
     open({ name });
     if (detail) {

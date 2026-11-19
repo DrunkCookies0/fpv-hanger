@@ -2,6 +2,14 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.33.0 (19 November 2026)
+
+- **The Whoop Garage**, a new section in the sidebar: your whoops, and every flight from their blackbox logs with the whoop and the pack it was flown on. After a heat or a practice, save the blackbox in Betaflight (Blackbox tab, Save flash to file) and open the file here, or drop it on the page.
+- A log is split into **power-ups**, one pack each, and each arm in them. Say which whoop and which pack each power-up was: a whoop already in the Garage is known by its flight controller, and a pack whose number is in the file's name (track4-014.bbl) is picked for you. Short arms, a hop on the bench or a crash at take-off, are left out unless you tick them.
+- **Each flight** has four tabs. **Overview**: how long it flew, the throttle, the lowest voltage, the motor buzz, the overshoot, how much of the yaw rate you used, what it says worst first, and the throttle and the pack over the whole flight. **Tune**: each motor's buzz, the D term and gyro noise, the noise before and after the filters by frequency, which lines move with the motors and which stay put, the step response on each axis, each motor's work, and the PIDs, filters and sliders in the log. **Rates**: each axis's rates as Betaflight shows them, how much of each you used and how often at full stick, with **Open in Rates**. **Battery**: the voltage before arming, as it took off, at its lowest and at the end, the sag at full motor and on punch-outs, the pack's grade and charging resistance from Batteries, and its other flights.
+- Change a flight's pack on its page, take a flight out, or rename a whoop on its own page. **Show the log in Finder** opens it in Betaflight's Blackbox Explorer.
+- Kept logs go in a Whoop Garage folder in your library, so a library in Google Drive has them on both computers. The Hangar reads them itself, and nothing of yours is sent anywhere.
+
 ## v0.32.0 (13 November 2026)
 
 - **OSD font**, under Firmware & setup, for an analog whoop's OSD (the MAX7456 or AT7456E chip on most whoop boards). Every letter, number and icon it draws, and the logo it shows as it starts, comes from a font of 256 little pictures, 12 dots by 18, each dot white, black or see-through. Start from one of Betaflight's own ten fonts, fetched from Betaflight's site the first time, from one you saved, or from a .mcm file.

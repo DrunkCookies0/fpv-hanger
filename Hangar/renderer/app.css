@@ -1047,3 +1047,65 @@ textarea.field { resize: vertical; line-height: 1.38; }
 .font-picture .font-logo { cursor: default; }
 .font-row { display: flex; align-items: center; gap: 10px; }
 .font-split { flex: 1; accent-color: var(--accent); }
+
+/* The Whoop Garage: whoops, the flights from their blackbox logs, and one flight's charts. */
+
+.garage .warn { color: var(--warn); }
+.garage-drop.dropping .plain-page { outline: 2px dashed rgba(255, 214, 10, 0.55); outline-offset: -12px; border-radius: 18px; }
+.garage-card { gap: 12px; }
+.garage-start { gap: 14px; max-width: 760px; }
+.garage-whoops { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.garage-whoop { align-items: stretch; text-align: left; gap: 10px; border: 0; color: #fff; cursor: default; }
+.garage-whoop:hover { box-shadow: inset 0 0 0 1px rgba(255, 214, 10, 0.45); }
+.garage-whoop-head { display: flex; align-items: center; gap: 10px; }
+.garage-whoop-name { font: 800 17px/1.2 var(--face); }
+.garage-whoop-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 4px 0; }
+.garage-whoop-facts > span { display: flex; flex-direction: column; gap: 3px; }
+.garage-whoop-facts strong { font: 800 15px/1.2 var(--face); font-variant-numeric: tabular-nums; }
+.garage-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; margin-right: 8px; vertical-align: 1px; }
+.garage-says { color: rgba(255, 255, 255, 0.82); white-space: normal; }
+.garage-table-wrap { overflow-x: auto; }
+.garage-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.garage-table.small { font-size: 12px; max-width: 520px; }
+.garage-table th { font: 700 11px/1.2 var(--face); letter-spacing: 1px; color: var(--dim); text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--stroke); white-space: nowrap; }
+.garage-table td { padding: 9px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); white-space: nowrap; }
+.garage-table td.garage-says { white-space: normal; min-width: 260px; }
+.garage-table .right { text-align: right; }
+.garage-table .num, .garage-table td.right { font-variant-numeric: tabular-nums; }
+.garage-table tbody tr[tabindex] { cursor: pointer; }
+.garage-table tbody tr[tabindex]:hover td { background: rgba(255, 255, 255, 0.03); }
+.garage-table tr.here td { background: rgba(255, 214, 10, 0.07); }
+.garage-part-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; }
+.garage-part-title { font: 800 16px/1.2 var(--face); }
+.garage-answers { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.garage-answer { display: flex; flex-direction: column; gap: 6px; width: 200px; }
+.garage-answer.wide { flex: 1 1 240px; width: auto; }
+.garage-answer.inline { flex-direction: row; align-items: center; width: auto; }
+.garage-answer .field, .garage-answer select { width: 100%; }
+.garage-answer.inline select { width: 120px; }
+.garage-arms { display: flex; flex-direction: column; }
+.garage-arm { display: grid; grid-template-columns: 22px 150px 170px 110px minmax(0, 1fr); align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid var(--stroke); }
+.garage-arm.off { opacity: 0.55; }
+.garage-arm input { accent-color: var(--accent); margin: 0; }
+.garage-arm-name { display: flex; flex-direction: column; gap: 2px; font-weight: 700; }
+.garage-spark svg { display: block; }
+.garage-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.garage-tile { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; background: var(--card); border-radius: 12px; box-shadow: inset 0 0 0 1px var(--stroke); min-width: 0; }
+.garage-tile-value { font: 800 22px/1.15 var(--face); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.garage-sayings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 13px; line-height: 1.4; }
+.garage-sayings li { display: flex; align-items: baseline; }
+.garage-plot { width: 100%; }
+.garage-plot svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.garage-plot path { fill: none; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.garage-plot line { stroke-width: 1; vector-effect: non-scaling-stroke; }
+.garage-plot text { font: 600 11px var(--face); fill: var(--faint); }
+.garage-key { display: flex; flex-wrap: wrap; gap: 14px; }
+.garage-key-item { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--dim); }
+.garage-key-line { display: inline-block; width: 16px; height: 2px; border-radius: 1px; }
+.garage-motors { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+.garage-motor { display: flex; flex-direction: column; gap: 6px; }
+.garage-bar { height: 8px; border-radius: 4px; background: var(--raised); overflow: hidden; }
+.garage-bar-fill { height: 100%; background: var(--accent); border-radius: 4px; }
+.garage-facts { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 8px 16px; margin: 0; font-size: 13px; }
+.garage-facts dt { color: var(--dim); }
+.garage-facts dd { margin: 0; font-variant-numeric: tabular-nums; }

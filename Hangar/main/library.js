@@ -25,6 +25,7 @@ import { merge, same } from "../shared/merge.js";
 import { isInDrive } from "../shared/drive.js";
 import { land, landNow } from "./landing.js";
 import { withDefaults as batteryDefaults } from "../shared/batteries.js";
+import { garageDefaults } from "../shared/garage.js";
 
 export const videoExtensions = new Set(["ts", "mts", "m2ts", "mp4", "m4v", "mov", "mkv", "avi", "mxf"]);
 export const audioExtensions = new Set(["mp3", "m4a", "aac", "wav", "aif", "aiff", "caf", "flac", "ogg", "opus"]);
@@ -784,6 +785,17 @@ export class Library {
     this.extras.batteries = batteryDefaults(batteries);
     this.saveExtras();
   }
+
+  /** The Whoop Garage's whoops, logs and flights (see shared/garage.js). Kept in hangar.json; each
+   *  log's file and what was worked out from it are in a folder of their own in `garageFolder`. */
+  get garage() { return garageDefaults(this.extras.garage); }
+
+  keepGarage(garage) {
+    this.extras.garage = garageDefaults(garage);
+    this.saveExtras();
+  }
+
+  get garageFolder() { return join(this.root, "Whoop Garage"); }
 
   /** The pilot's marks in each song that has any. */
   get songMarks() {
