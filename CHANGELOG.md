@@ -2,6 +2,12 @@
 
 Versions are `0.MINOR.PATCH` while the app is young. The middle number goes up when something is added or the way you use the app changes. The last number goes up for fixes only. The number lives in the `VERSION` file.
 
+## v0.34.0 (19 November 2026)
+
+- **Each whoop's page in the Whoop Garage has two new tabs, Build and Health,** beside its flights.
+- **Build**: what the whoop is built from. The board, Betaflight, the motor protocol, the receiver and the loop are filled in from its newest log, and you type the frame, motors, props, camera, lead and weight. Note each change you make (new props, a motor swapped, the pack moved) with its day, and see how long it has flown since.
+- **Health** compares the whoop with its own earlier flights. It charts how much of the work each motor does and how much each one buzzes, flight by flight, with a line at each change you noted, and says what to check when one moves. One motor working harder points at its prop or the motor, the back or one side at where the pack sits, and one diagonal at the props or a motor that isn't straight. After a change, it compares the flights since with the ones before.
+
 ## v0.33.0 (19 November 2026)
 
 - **The Whoop Garage**, a new section in the sidebar: your whoops, and every flight from their blackbox logs with the whoop and the pack it was flown on. After a heat or a practice, save the blackbox in Betaflight (Blackbox tab, Save flash to file) and open the file here, or drop it on the page.

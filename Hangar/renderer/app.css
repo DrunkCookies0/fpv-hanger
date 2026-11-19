@@ -1109,3 +1109,17 @@ textarea.field { resize: vertical; line-height: 1.38; }
 .garage-facts { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 8px 16px; margin: 0; font-size: 13px; }
 .garage-facts dt { color: var(--dim); }
 .garage-facts dd { margin: 0; font-variant-numeric: tabular-nums; }
+.garage-two { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .garage-two { grid-template-columns: minmax(0, 1fr); } }
+.garage-parts { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px 14px; }
+.garage-parts .garage-answer { width: auto; }
+.garage-parts .question { display: flex; align-items: center; gap: 8px; min-height: 18px; }
+.garage-chip { font: 800 9px/1 var(--face); letter-spacing: 1px; color: var(--accent); background: rgba(255, 214, 10, 0.12); padding: 4px 6px; border-radius: 999px; }
+.garage-changes { display: flex; flex-direction: column; }
+.garage-change { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid var(--stroke); font-size: 13px; }
+.garage-change-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.garage-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.garage-checks > li { display: flex; flex-direction: column; gap: 6px; }
+.garage-checks p { margin: 0 0 0 16px; line-height: 1.45; }
+.garage-checks ol { margin: 2px 0 0 16px; }
+.garage-check-title { font-weight: 700; line-height: 1.4; display: flex; align-items: baseline; }

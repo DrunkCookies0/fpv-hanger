@@ -1695,13 +1695,41 @@ async function garage(tools) {
     const renamed = await js(`return document.querySelector(".garage .head-title")?.textContent ?? null`);
     say(library.garage.whoops[whoopId]?.name === "Made-up Whoop" && renamed === "Made-up Whoop", "a whoop is renamed from its page", renamed ?? "");
 
-    // A real log, when one is given, read and kept as it is.
-    const real = argument("--garage-log");
-    if (real) {
+    // Its build: what its log says filled in, a part typed, and a change noted and taken back.
+    await js(`document.querySelector('[data-probe="garage whoop tab build"]').click()`);
+    await until(js, `return document.querySelector('[data-probe="garage part board"]')?.value === "MADEUPF411"`, 10);
+    const build = await js(`return { board: document.querySelector('[data-probe="garage part board"]')?.value ?? null, protocol: document.querySelector('[data-probe="garage part motorProtocol"]')?.value ?? null, fromLog: document.querySelectorAll(".garage-chip").length }`);
+    say(build.board === "MADEUPF411" && build.protocol === "DShot300, bidirectional, 12 poles" && build.fromLog >= 4, "a whoop's build has what its log says filled in", JSON.stringify(build));
+    await js(`const field = document.querySelector('[data-probe="garage part frame"]'); field.value = "65 mm made-up frame"; field.dispatchEvent(new Event("input", { bubbles: true })); field.dispatchEvent(new Event("change", { bubbles: true }))`);
+    await pause(300);
+    say(library.garage.whoops[whoopId]?.parts?.frame === "65 mm made-up frame", "a part typed is kept", library.garage.whoops[whoopId]?.parts?.frame ?? "");
+    await js(`const field = document.querySelector('[data-probe="garage change text"]'); field.value = "New props, all four"; field.dispatchEvent(new Event("input", { bubbles: true })); document.querySelector('[data-probe="garage note change"]').click()`);
+    await until(js, `return Boolean(document.querySelector('[data-probe^="garage change c"]'))`, 10);
+    const changes = library.garage.whoops[whoopId]?.changes ?? [];
+    const changeRow = await js(`return document.querySelector('[data-probe^="garage change c"]')?.textContent ?? null`);
+    say(changes.length === 1 && changes[0].text === "New props, all four" && /in the air since/.test(changeRow ?? ""), "a change to the whoop is noted, with the time flown since", changeRow ?? "");
+
+    // Its health: what to check, and each motor's share flight by flight.
+    await js(`document.querySelector('[data-probe="garage whoop tab health"]').click()`);
+    await until(js, `return document.querySelectorAll(".garage-checks li").length > 0`, 10);
+    const health = await js(`return { checks: [...document.querySelectorAll(".garage-check-title")].map((one) => one.textContent), lines: document.querySelectorAll(".garage-plot path").length, rows: document.querySelectorAll('[aria-label="Each motor"] tbody tr').length }`);
+    say(health.checks.some((text) => /Fly two packs since “New props, all four”/.test(text)) && health.lines >= 4 && health.rows === 4, "a whoop's health says what it needs, with each motor flight by flight", health.checks.join(" | "));
+    await js(`document.querySelector('[data-probe="garage whoop tab build"]').click()`);
+    await pause(250);
+    await js(`[...document.querySelectorAll('[data-probe^="garage change c"] .button')].find((one) => one.textContent === "Remove").click()`);
+    await pause(300);
+    say((library.garage.whoops[whoopId]?.changes ?? []).length === 0, "a change noted can be taken back");
+
+    // A real log, when one is given, read and kept as it is; or every log in a folder, oldest first.
+    const given = argument("--garage-log");
+    const reals = !given ? [] : statSync(given).isDirectory()
+      ? readdirSync(given).filter((name) => /\.(bbl|bfl)$/i.test(name)).map((name) => join(given, name)).sort((a, b) => statSync(a).mtimeMs - statSync(b).mtimeMs)
+      : [given];
+    for (const real of reals) {
       await js(`const { openLog } = await import("./views/garage.js"); await openLog(${JSON.stringify(real)})`);
       await until(js, `return Boolean(document.querySelector('[data-probe="garage powerup 0"]'))`, 30);
       await js(`document.querySelector('[data-probe="garage keep"]').click()`);
-      await pause(800);
+      await until(js, `return !document.querySelector('[data-probe="garage keep"]')`, 10);
       say(Object.values(library.garage.logs).some((log) => log.file === basename(real)), "a real log is read and kept", basename(real));
     }
     const notFlight = await js(`const { openLog } = await import("./views/garage.js"); await openLog(${JSON.stringify(join(folder, "nothing.bbl"))}); return document.querySelector('[data-probe="garage problem"]')?.textContent ?? null`);

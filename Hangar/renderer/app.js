@@ -139,7 +139,7 @@ const started = (async () => {
  * sheets and comes back once everything on it has arrived.
  *
  *   home, creator, track, track:<path>, files (a track with its first run's files showing),
- *   settings, guide, leaderboard, batteries, rates, garage, garageread:<log>, garageflight:<flight>#<tab>, osdfont, osdfont:<Betaflight's font>, welcome, whatsnew, setup, setup:<pilot name> (the second
+ *   settings, guide, leaderboard, batteries, rates, garage, garageread:<log>, garageflight:<flight>#<tab>, garagewhoop:<whoop>#<tab>, osdfont, osdfont:<Betaflight's font>, welcome, whatsnew, setup, setup:<pilot name> (the second
  *   question, looked up), race (the sheet for renaming or moving a race), editor, wave (the
  *   song's sound wave), music (Find music, with every source read), trackview,
  *   tool:<which>, program:<which>, upload:<site> (a site's upload page, for the first run's video),
@@ -173,13 +173,18 @@ window.showForSnapshot = async (which) => {
     const data = app.tracks.get(app.page.track);
     if (data?.summary.runs[0]) app.expanded.add(`${app.page.track}\n${data.summary.runs[0].name}`);
   } else if (name === "settings" || name === "guide" || name === "leaderboard" || name === "batteries" || name === "rates") open({ name });
-  else if (name === "garage" || name === "garageread" || name === "garageflight") {
+  else if (name === "garage" || name === "garageread" || name === "garageflight" || name === "garagewhoop") {
     // The Whoop Garage; "garageread:<log file>" with that log read and asking which whoop and pack,
-    // "garageflight:<flight>#<tab>" one kept flight on one of its tabs.
+    // "garageflight:<flight>#<tab>" one kept flight on one of its tabs, "garagewhoop:<whoop>#<tab>"
+    // one whoop on one of its tabs.
     const garage = await import("./views/garage.js");
     if (name === "garage") open({ name });
     else if (name === "garageread") await garage.openLog(detail);
-    else {
+    else if (name === "garagewhoop") {
+      const [whoop, tab] = detail.split("#");
+      garage.openWhoop(whoop, tab);
+      await new Promise((done) => setTimeout(done, 400));
+    } else {
       const [flight, tab] = detail.split("#");
       await garage.openFlight(flight, tab);
     }

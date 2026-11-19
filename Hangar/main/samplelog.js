@@ -72,6 +72,7 @@ function header(vbat, { craft, uid }) {
     "H Field S predictor:0,0,0,0,0", "H Field S encoding:1,1,7,9,9", "H minthrottle:1070", "H motorOutput:48,2047", `H vbatref:${vbat}`,
     "H looptime:500", "H rates_type:3", "H rc_rates:7,7,7", "H rc_expo:0,0,0", "H rates:67,67,67", "H rate_limits:1998,1998,1998",
     "H rollPID:45,80,30", "H pitchPID:47,84,34", "H yawPID:45,80,0", "H acc_1G:2048", "H motor_poles:12", "H debug_mode:0",
+    "H pid_process_denom:2", "H motor_pwm_protocol:6", "H dshot_bidir:1", "H motor_kv:1960", "H serialrx_provider:9", "H features:268698632",
     "H simplified_dterm_filter_multiplier:100", "",
   ].join("\n");
 }

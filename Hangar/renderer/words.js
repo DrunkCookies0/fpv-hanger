@@ -199,6 +199,8 @@ export const readMeFor = (mac) => ({
         ["point", "A log holds every arm since the flash was last erased, across each pack you flew. The Garage splits it into power-ups, one pack each, and asks which whoop and which pack each was. A whoop already in the Garage is known by its flight controller. A pack whose number is in the file's name is picked for you."],
         ["point", "Each flight shows how long it flew, the throttle, the pack's sag, the motors' noise and how the whoop follows the sticks, how much of the rates you use, and anything alarming. What it says is worst first: orange to look at now, yellow worth knowing, green fine."],
         ["point", "Kept, the log goes in your library's Whoop Garage folder, so a library in Google Drive has it on both computers. Erase the flash in Betaflight once it is kept, so the next log holds only new flights."],
+        ["point", "Each whoop has its own page. Build lists what it's built from: the board, Betaflight, the motor protocol and the receiver come from its log, and you type the rest. Note each change you make, like new props or a motor swapped, with the day you made it."],
+        ["point", "Health compares the whoop with itself, once it has about five flights of ten seconds or more. It follows how much of the work each motor does and how much each one buzzes, flight by flight, and says when one moves: one motor working harder is usually its prop, the back pair the pack sitting further back, one diagonal the props or a crooked motor. After a change you noted, it compares the flights since with the ones before."],
       ],
     },
     {

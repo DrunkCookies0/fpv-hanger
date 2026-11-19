@@ -9,7 +9,8 @@ import { Worker } from "node:worker_threads";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { keepLog, matchWhoop, newWhoopName, packGuess, forgetFlight, changeFlight, renameWhoop } from "../shared/garage.js";
+import { keepLog, matchWhoop, newWhoopName, packGuess, forgetFlight, changeFlight, renameWhoop, flightsNewestFirst } from "../shared/garage.js";
+import { healthRow, setPart, noteChange, forgetChange, changeTime } from "../shared/whoop.js";
 import { summaryOf, shortFlight } from "../shared/flight.js";
 
 /** A line of throttle across an arm, for the small picture beside it: about 60 points. */
@@ -24,13 +25,17 @@ function sparkOf(flight) {
 
 /**
  * The pages ask for `chooseBlackbox`, `readBlackbox`, `keepBlackbox`, `garageFlight`,
- * `changeGarageFlight`, `forgetGarageFlight`, `renameGarageWhoop` and `showGarageLog`.
+ * `changeGarageFlight`, `forgetGarageFlight`, `renameGarageWhoop`, `showGarageLog`, and for one
+ * whoop `garageWhoop`, `setGarageWhoopPart`, `noteGarageWhoopChange` and `forgetGarageWhoopChange`.
  */
 export function makeGarage({ library, window, tell }) {
   /** Logs read and not yet kept, by their id: the file, and everything worked out from it. */
   const readings = new Map();
   /** The last log's analysis read back from the library, by its id. */
   let opened = null;
+  /** What health needs of each kept log's flights, by the log's id: read once, as a log's analysis
+   *  doesn't change once it is kept (keeping it again gives it a new keptAt). */
+  const healthRows = new Map();
 
   const folderOf = (logId) => join(library.garageFolder, logId);
 
@@ -182,6 +187,55 @@ export function makeGarage({ library, window, tell }) {
       library.keepGarage(garage);
       if (logGone && existsSync(folderOf(logGone))) await library.trash(folderOf(logGone)).catch(() => {});
       if (opened?.id === logGone) opened = null;
+      tell("changed");
+      return { garage: library.garage };
+    },
+
+    /**
+     * What a whoop's page needs beyond the Garage's index: each of its flights as health reads it,
+     * and the header facts of its newest flight, for the parts its log fills in.
+     */
+    garageWhoop(id) {
+      const garage = library.garage;
+      if (!garage.whoops[id]) return { problem: "That whoop isn't in the Garage any more." };
+      const flights = flightsNewestFirst(garage, { whoop: id });
+      const rows = [];
+      let facts = null;
+      for (const flight of flights) {
+        const log = garage.logs[flight.log];
+        const key = `${flight.log} ${log?.keptAt ?? ""}`;
+        if (!healthRows.has(key)) {
+          const analysis = analysisOf(flight.log);
+          healthRows.set(key, new Map((analysis?.logs ?? []).map((one) => [one.index, { flight: one.flight ? healthRow({ id: "", index: one.index }, one.flight) : null, facts: one.facts ?? null }])));
+        }
+        const found = healthRows.get(key).get(flight.index);
+        if (!found) continue;
+        facts ??= found.facts;
+        if (found.flight) rows.push({ ...found.flight, id: flight.id, at: flight.savedAt ?? flight.keptAt, what: flight.what, pack: flight.pack });
+      }
+      return { rows, facts };
+    },
+
+    /** One of a whoop's parts typed; an empty one goes back to what its log says. */
+    setGarageWhoopPart(id, key, value) {
+      library.keepGarage(setPart(library.garage, id, key, value));
+      tell("changed");
+      return { garage: library.garage };
+    },
+
+    /** A change to a whoop noted, made on `day` ("YYYY-MM-DD"). */
+    noteGarageWhoopChange(id, { day, text } = {}) {
+      const when = changeTime(day);
+      if (when.problem) return { problem: when.problem };
+      const { garage, problem } = noteChange(library.garage, id, { at: when.at, text });
+      if (problem) return { problem };
+      library.keepGarage(garage);
+      tell("changed");
+      return { garage: library.garage };
+    },
+
+    forgetGarageWhoopChange(id, changeId) {
+      library.keepGarage(forgetChange(library.garage, id, changeId));
       tell("changed");
       return { garage: library.garage };
     },

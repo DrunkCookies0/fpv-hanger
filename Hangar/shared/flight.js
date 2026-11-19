@@ -583,6 +583,7 @@ export function headerFacts(h) {
     firmware: pick("Firmware revision"), firmwareDate: pick("Firmware date"), board: pick("Board information"), craft: pick("Craft name") || null,
     uid: pick("DeviceUID"), looptimeUs: Number(pick("looptime")) || null, pidDenom: pick("pid_process_denom"),
     blackboxRate: pick("P interval"), debugMode: pick("debug_mode"), motorProtocol: pick("motor_pwm_protocol"), dshotBidir: pick("dshot_bidir"), motorPoles: pick("motor_poles"),
+    motorKv: pick("motor_kv"), receiver: pick("serialrx_provider"), features: pick("features"),
     pids: { roll: pick("rollPID"), pitch: pick("pitchPID"), yaw: pick("yawPID") },
     dMax: pick("d_max") ?? pick("d_min"), dMaxGain: pick("d_max_gain") ?? pick("d_min_gain"), ff: pick("ff_weight"),
     antiGravity: pick("anti_gravity_gain"), tpa: pick("tpa_rate") !== null ? `${pick("tpa_rate")}% from ${pick("tpa_breakpoint")}` : null,

@@ -12,6 +12,7 @@ import { openFromSide, statusOf, statusColour } from "./live.js";
 import { ratesFrom } from "./rates.js";
 import { factsOf } from "../../shared/batteries.js";
 import { whoopCards, flightsNewestFirst } from "../../shared/garage.js";
+import { partsOf, changesWithTime, healthOf, corners } from "../../shared/whoop.js";
 import { sayingsOf, median } from "../../shared/flight.js";
 import { types as rateTypeWords, shown, rateAt, settingNames } from "../../shared/rates.js";
 
@@ -27,6 +28,13 @@ const kept = {
   problem: null,
   flight: null,
   tab: "overview",
+  /** The whoop open, what was read for it, and its tab; parts typed and not yet kept, by whoop
+   *  and part; and a change being noted. */
+  whoop: null,
+  whoopTab: "flights",
+  whoopProblem: null,
+  drafts: {},
+  change: { day: "", text: "" },
 };
 
 // ---- Small things shared by the pages
@@ -64,7 +72,7 @@ function spark(values, width = 160, height = 30) {
  * A chart, drawn as SVG: lines of points in their own units across `x` and up `y`, with ticks
  * along the bottom and up the side. A line with `right` is against the right-hand scale.
  */
-function chart({ width = 720, height = 240, x, y, right = null, lines, xTicks = [], yTicks = [], rightTicks = [], guides = [] }) {
+function chart({ width = 720, height = 240, x, y, right = null, lines, xTicks = [], yTicks = [], rightTicks = [], guides = [], marks = [] }) {
   const left = 46, rightPad = right ? 46 : 14, top = 12, bottom = 28;
   const across = width - left - rightPad, down = height - top - bottom;
   const px = (v) => left + ((v - x[0]) / (x[1] - x[0])) * across;
@@ -74,6 +82,9 @@ function chart({ width = 720, height = 240, x, y, right = null, lines, xTicks = 
   for (const tick of rightTicks) svg += `<text x="${width - rightPad + 8}" y="${py(tick.at, right) + 4}" text-anchor="start">${tick.label}</text>`;
   for (const tick of xTicks) svg += `<line x1="${px(tick.at)}" x2="${px(tick.at)}" y1="${top}" y2="${top + down}" style="stroke: var(--stroke)"/><text x="${px(tick.at)}" y="${height - 9}" text-anchor="middle">${tick.label}</text>`;
   for (const guide of guides) svg += `<line x1="${left}" x2="${width - rightPad}" y1="${py(guide.at)}" y2="${py(guide.at)}" style="stroke: ${guide.colour}; stroke-dasharray: 4 4; opacity: 0.7"/>`;
+  // A moment marked across the chart, with its name at the top: a change made to the whoop.
+  const escape = (text) => String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  for (const mark of marks) svg += `<line x1="${px(mark.at)}" x2="${px(mark.at)}" y1="${top}" y2="${top + down}" style="stroke: var(--dim); stroke-dasharray: 3 4"/><text x="${px(mark.at) + 5}" y="${top + 11}" text-anchor="start" style="fill: var(--dim)">${escape(mark.label)}</text>`;
   for (const line of lines) {
     const scale = line.right ? right : y;
     const points = line.points.filter(([px0, py0]) => Number.isFinite(px0) && Number.isFinite(py0) && px0 >= x[0] && px0 <= x[1]);
@@ -517,6 +528,146 @@ export function flightPage() {
 
 // ---- One whoop
 
+const whoopTabs = [["flights", "Flights"], ["build", "Build"], ["health", "Health"]];
+/** Each motor's colour in the whoop's charts. */
+const motorColours = ["var(--drop)", "var(--mark)", "var(--accent)", "var(--good)"];
+const shortDate = (moment) => (moment ? new Date(moment).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "–");
+const today = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+};
+/** Changes the pilot is likely to make, offered as they type one. */
+const changeIdeas = ["New props, all four", ...[1, 2, 3, 4].map((n) => `Prop ${n} replaced`), ...[1, 2, 3, 4].map((n) => `Motor ${n} replaced`), "New frame", "New canopy", "Camera moved", "Pack moved in its strap", "Tune changed", "Betaflight updated"];
+
+/** What a whoop's page has read for it: its flights as health reads them and its newest log's
+ *  facts. Read again when its flights change. */
+async function loadWhoop(id, key) {
+  kept.whoop = { id, key, data: null, problem: null };
+  const data = await ask("garageWhoop", id);
+  if (kept.whoop?.id !== id || kept.whoop.key !== key) return;
+  kept.whoop = { id, key, data: data?.problem ? null : data, problem: data?.problem ?? null };
+  render();
+}
+
+/** Shows an answer from the main process: the Garage as it is now, or what went wrong. */
+function took(answer) {
+  if (answer?.garage) app.state.garage = answer.garage;
+  kept.whoopProblem = answer?.problem ?? null;
+  render();
+  return !answer?.problem;
+}
+
+function buildTab(whoop, data, flights) {
+  const parts = partsOf(whoop, data?.facts);
+  const changes = changesWithTime(whoop, flights).reverse();
+  const savePart = async (key, value) => {
+    delete kept.drafts[`${whoop.id} ${key}`];
+    took(await ask("setGarageWhoopPart", whoop.id, key, value));
+  };
+  const note = async () => {
+    if (await took(await ask("noteGarageWhoopChange", whoop.id, { day: kept.change.day || today(), text: kept.change.text }))) kept.change = { day: "", text: "" };
+    render();
+  };
+  return h("div.garage-two",
+    h("section.card.garage-card", { "aria-label": "What it's built from" },
+      h("div.garage-part-head", label("WHAT IT'S BUILT FROM"), h("span.small.dim", "Type over any of these. Those marked from the log come from its newest blackbox log.")),
+      h("div.garage-parts", parts.map((part) => {
+        const draft = kept.drafts[`${whoop.id} ${part.key}`];
+        return h("label.garage-answer.wide",
+          h("span.question", part.label, part.fromLog && h("span.garage-chip", "FROM THE LOG")),
+          h("input.field", {
+            type: "text", value: draft ?? part.value, placeholder: part.logValue ?? part.hint ?? "", spellcheck: false, key: `part ${part.key}`, probe: `garage part ${part.key}`,
+            oninput: (event) => { kept.drafts[`${whoop.id} ${part.key}`] = event.target.value; },
+            onchange: (event) => savePart(part.key, event.target.value),
+          }));
+      }))),
+    h("section.card.garage-card", { "aria-label": "What's been changed" },
+      label("WHAT'S BEEN CHANGED"),
+      h("p.small.dim", "Note new props, a motor swapped or the pack moved. Health compares the flights before and after each one."),
+      h("div.garage-answers",
+        h("label.garage-answer", h("span.question", "Day"), h("input.field", {
+          type: "date", value: kept.change.day || today(), max: today(), key: "change day", probe: "garage change day",
+          onchange: (event) => { kept.change.day = event.target.value; },
+        })),
+        h("label.garage-answer.wide", h("span.question", "What changed"), h("input.field", {
+          type: "text", value: kept.change.text, placeholder: "New props, all four", list: "garage-change-ideas", spellcheck: false, key: "change text", probe: "garage change text",
+          oninput: (event) => { kept.change.text = event.target.value; },
+          onkeydown: (event) => { if (event.key === "Enter") note(); },
+        })),
+        primary("Note it", note, { probe: "garage note change" })),
+      h("datalist", { id: "garage-change-ideas" }, changeIdeas.map((idea) => h("option", { value: idea }))),
+      kept.whoopProblem && h("p.small.warn", { probe: "garage whoop problem" }, kept.whoopProblem),
+      changes.length === 0 ? h("p.small.dim", "Nothing noted yet.")
+        : h("div.garage-changes", changes.map((change) => h("div.garage-change", { probe: `garage change ${change.id}` },
+          h("span.num.dim", shortDate(change.at)),
+          h("span.garage-change-text", change.text, h("span.small.dim", `${change.flights} flight${change.flights === 1 ? "" : "s"} and ${mmss(change.flyingSeconds)} in the air since`)),
+          plain("Remove", async () => took(await ask("forgetGarageWhoopChange", whoop.id, change.id)), { class: "quiet" }))))));
+}
+
+/** The flights health counts, as a chart of one figure per motor, with a line at each change. */
+function motorChart(health, changes, pick, { y, yTicks, guide = null }) {
+  const flights = health.flights.slice(-40);
+  const count = flights.length;
+  const every = Math.max(1, Math.ceil(count / 7));
+  const marks = changes.map((change) => {
+    const first = flights.findIndex((row) => row.at >= change.at);
+    return { at: first === -1 ? count + 0.5 : first + 0.5, label: change.text.length > 26 ? `${change.text.slice(0, 25)}…` : change.text };
+  }).filter((mark) => mark.at > 0.5 && mark.at < count + 0.5);
+  return chart({
+    width: 720, height: 220, x: [0.5, count + 0.5], y,
+    lines: [0, 1, 2, 3].map((k) => ({ colour: motorColours[k], points: flights.map((row, i) => [i + 1, pick(row)?.[k]]) })),
+    // A day's date under its first flight; flights on the same day after it go unnamed.
+    xTicks: flights.map((row, i) => ({ at: i + 1, label: i === 0 || shortDate(row.at) !== shortDate(flights[i - 1].at) ? shortDate(row.at) : "" })).filter((tick, i) => tick.label || i % every === 0),
+    yTicks, guides: guide === null ? [] : [{ at: guide, colour: "var(--faint)" }], marks,
+  });
+}
+
+function healthTab(whoop, data) {
+  if (!data) return h("p.dim", kept.whoop?.problem ?? "Reading…");
+  const changes = [...(whoop.changes ?? [])].sort((a, b) => a.at.localeCompare(b.at));
+  const health = healthOf(data.rows, changes);
+  const { compare } = health;
+  const count = health.flights.slice(-40).length;
+  const shares = health.flights.flatMap((row) => row.share);
+  const low = Math.min(22, Math.floor(Math.min(...shares) - 0.5)), high = Math.max(28, Math.ceil(Math.max(...shares) + 0.5));
+  const buzzes = health.flights.flatMap((row) => row.buzz ?? []).filter(Number.isFinite);
+  const buzzTop = Math.max(5, Math.ceil(Math.max(0, ...buzzes)));
+  const comparing = !compare ? null
+    : compare.kind === "lately" ? `The last ${compare.now.length} flights against the ${compare.then.length} before them${compare.change ? `, since “${compare.change.text}”` : ""}.`
+      : `The ${compare.now.length} flight${compare.now.length === 1 ? "" : "s"} since “${compare.change.text}” against the ${compare.then.length} before it.`;
+  const cell = (values, k, unit = "%") => (values?.[k] != null ? `${values[k].toFixed(1)}${unit}` : "–");
+  return [
+    h("section.card.garage-card", { "aria-label": "What to check", probe: "garage health checks" },
+      label("WHAT TO CHECK"),
+      comparing && h("p.small.dim", comparing),
+      h("ul.garage-checks", health.checks.map((check) => h("li",
+        h("div.garage-check-title", dot(check.level), check.title),
+        check.why && h("p.small.dim", check.why),
+        check.steps.length > 0 && h("ol.font-steps.small", check.steps.map((step) => h("li", step))))))),
+    count >= 2 && h("section.card.garage-card", { "aria-label": "How hard each motor works" },
+      label("HOW HARD EACH MOTOR WORKS"),
+      h("p.small.dim", "Each motor's share of the work, flight by flight, the oldest on the left: even is 25% each. One that climbs is making up for something; a dashed line is a change you noted."),
+      motorChart(health, changes, (row) => row.share, { y: [low, high], yTicks: ticksEvery(low, high, high - low > 12 ? 4 : 2, (v) => `${v}%`), guide: 25 }),
+      keyOf([0, 1, 2, 3].map((k) => [motorColours[k], `Motor ${k + 1}, ${corners[k]}`]))),
+    count >= 2 && buzzes.length > 0 && h("section.card.garage-card", { "aria-label": "How much each motor buzzes" },
+      label("HOW MUCH EACH MOTOR BUZZES"),
+      h("p.small.dim", "How much each motor jitters above 100 Hz, as a share of its range. Under 4% is smooth; one rising on its own is its prop or a bearing."),
+      motorChart(health, changes, (row) => row.buzz, { y: [0, buzzTop], yTicks: ticksEvery(0, buzzTop, niceStep(buzzTop, 5), (v) => `${v}%`), guide: 4 }),
+      keyOf([0, 1, 2, 3].map((k) => [motorColours[k], `Motor ${k + 1}`]))),
+    health.nowShare && h("section.card.garage-card", { "aria-label": "Each motor" },
+      label("EACH MOTOR"),
+      h("div.garage-table-wrap", h("table.garage-table.small",
+        h("thead", h("tr", h("th", "MOTOR"), h("th", "WHERE"), compare && h("th.right", "WORK BEFORE"), h("th.right", compare ? "NOW" : "WORK"), compare && h("th.right", "BUZZ BEFORE"), h("th.right", compare ? "NOW" : "BUZZ"))),
+        h("tbody", [0, 1, 2, 3].map((k) => h("tr",
+          h("td", h("span.garage-key-line", { style: { background: motorColours[k], marginRight: "8px", verticalAlign: "middle" } }), `Motor ${k + 1}`),
+          h("td.dim", corners[k]),
+          compare && h("td.right", cell(health.thenShare, k)),
+          h("td.right", cell(health.nowShare, k)),
+          compare && h("td.right", cell(health.thenBuzz, k)),
+          h("td.right", cell(health.nowBuzz, k)))))))),
+  ];
+}
+
 export function whoopPage() {
   const id = app.page.whoop;
   const whoop = garageNow().whoops[id];
@@ -525,8 +676,12 @@ export function whoopPage() {
     return garagePage();
   }
   const flights = flightsNewestFirst(garageNow(), { whoop: id });
+  const key = flights.map((one) => `${one.id}@${one.keptAt}`).join(",");
+  if (kept.whoop?.id !== id || kept.whoop.key !== key) loadWhoop(id, key);
+  const data = kept.whoop?.id === id && kept.whoop.key === key ? kept.whoop.data : null;
   const seconds = flights.reduce((sum, one) => sum + (one.summary?.flyingSeconds ?? 0), 0);
   const packs = new Set(flights.map((one) => one.pack).filter(Boolean));
+  const tab = whoopTabs.some(([one]) => one === kept.whoopTab) ? kept.whoopTab : "flights";
   const rename = async () => {
     const answer = await question({ title: "Rename this whoop", field: { value: whoop.name }, buttons: [{ title: "Cancel", value: false, kind: "secondary", cancel: true }, { title: "Rename", value: true, default: true }] });
     if (!answer?.value) return;
@@ -540,11 +695,26 @@ export function whoopPage() {
     h("header.page-head",
       h("div.grow", label([whoop.board, whoop.firmware?.replace(/\s*\(.*$/, "")].filter(Boolean).join(" · ").toUpperCase() || "WHOOP"), h("h1.head-title", whoop.name)),
       secondary("Rename…", rename, { probe: "garage rename" })),
-    h("div.garage-tiles",
-      tile("FLIGHTS", String(flights.length)),
-      tile("IN THE AIR", mmss(seconds)),
-      tile("PACKS FLOWN", String(packs.size)),
-      tile("FLIGHT CONTROLLER", whoop.uid ? `…${whoop.uid.slice(-6)}` : "–", "its own number, how its logs are known")),
-    h("section.card.garage-card", { "aria-label": "Flights" }, label("FLIGHTS"), flightRows(flights, { showWhoop: false })),
+    h("div.rates-types", { role: "tablist" }, whoopTabs.map(([one, title]) => h(`button.choice${tab === one ? ".picked" : ""}`, {
+      type: "button", role: "tab", "aria-selected": String(tab === one), probe: `garage whoop tab ${one}`,
+      onclick: () => { kept.whoopTab = one; kept.whoopProblem = null; render(); },
+    }, title))),
+    tab === "build" ? buildTab(whoop, data, flights)
+      : tab === "health" ? healthTab(whoop, data)
+        : [
+          h("div.garage-tiles",
+            tile("FLIGHTS", String(flights.length)),
+            tile("IN THE AIR", mmss(seconds)),
+            tile("PACKS FLOWN", String(packs.size)),
+            tile("FLIGHT CONTROLLER", whoop.uid ? `…${whoop.uid.slice(-6)}` : "–", "its own number, how its logs are known")),
+          h("section.card.garage-card", { "aria-label": "Flights" }, label("FLIGHTS"), flightRows(flights, { showWhoop: false })),
+        ],
   ));
+}
+
+/** Opens a whoop's page, on one of its tabs when it is named. */
+export function openWhoop(id, tab = null) {
+  if (tab && whoopTabs.some(([one]) => one === tab)) kept.whoopTab = tab;
+  open({ name: "garagewhoop", whoop: id });
+  render();
 }
